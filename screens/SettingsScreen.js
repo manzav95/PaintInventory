@@ -87,7 +87,7 @@ export default function SettingsScreen({
               isDesktop && styles.webCard,
             ]}
           >
-            <Card.Content>
+            {/* <Card.Content>
               <Title style={styles.sectionTitle}>Appearance</Title>
               <View style={styles.settingRow}>
                 <View style={styles.settingInfo}>
@@ -106,7 +106,7 @@ export default function SettingsScreen({
                   color={theme.colors.primary}
                 />
               </View>
-            </Card.Content>
+            </Card.Content> */}
           </Card>
 
           <Card
