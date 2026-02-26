@@ -75,7 +75,7 @@ const getApiUrl = () => {
     if (hostname.includes('netlify.app') || 
         hostname.includes('github.io') || 
         hostname.includes('yourdomain.com')) {
-      return 'https://your-backend-url.railway.app';  // ← Your backend URL
+      return 'https://paintinventory.onrender.com';  // ← Your backend URL
     }
     
     // Localhost development
@@ -90,13 +90,13 @@ const getApiUrl = () => {
   }
   
   // Mobile apps - use production backend
-  return 'https://your-backend-url.railway.app';  // ← Your backend URL
+  return 'https://paintinventory.onrender.com';  // ← Your backend URL
 };
 ```
 
 ---
 
-## Step 3: Host the Frontend on Netlify
+## Step 3: Hotst the Frontend on Netlify
 
 ### Build the Web App
 
