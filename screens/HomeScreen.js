@@ -1,6 +1,24 @@
-import React, { useMemo } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl, Platform, useWindowDimensions } from 'react-native';
-import { Card, Button, Text, Title, Paragraph, TextInput, Switch, useTheme, IconButton, ActivityIndicator } from 'react-native-paper';
+import React, { useMemo } from "react";
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  Platform,
+  useWindowDimensions,
+} from "react-native";
+import {
+  Card,
+  Button,
+  Text,
+  Title,
+  Paragraph,
+  TextInput,
+  Switch,
+  useTheme,
+  IconButton,
+  ActivityIndicator,
+} from "react-native-paper";
 
 export default function HomeScreen({
   onScanQR,
@@ -22,18 +40,23 @@ export default function HomeScreen({
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 1024; // Same breakpoint as QRScanScreen
-  
-  const lowStockItems = useMemo(
-    () => inventory.filter(item => (item.quantity || 0) < 30),
-    [inventory]
-  );
-  
-  // Button text based on screen size
-  const qrButtonText = isDesktop ? 'Manual Entry' : 'QR Scan or Text Input';
 
+  const lowStockItems = useMemo(
+    () => inventory.filter((item) => (item.quantity || 0) < 30),
+    [inventory],
+  );
+
+  // Button text based on screen size
+  const qrButtonText = isDesktop ? "Manual Entry" : "QR Scan or Text Input";
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }, isWeb && styles.webContainer]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: theme.colors.background },
+        isWeb && styles.webContainer,
+      ]}
+    >
       {!isWeb && (
         <View style={styles.headerBar}>
           <Title style={styles.title}>Paint Inventory</Title>
@@ -46,7 +69,11 @@ export default function HomeScreen({
               iconColor={theme.colors.primary}
             />
             {isRefreshing && (
-              <ActivityIndicator size="small" color={theme.colors.primary} style={styles.refreshIndicator} />
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.primary}
+                style={styles.refreshIndicator}
+              />
             )}
             <IconButton
               icon="cog"
@@ -78,7 +105,10 @@ export default function HomeScreen({
         </View>
       )}
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, isWeb && styles.webScrollContent]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isWeb && styles.webScrollContent,
+        ]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           !isWeb ? (
@@ -90,63 +120,69 @@ export default function HomeScreen({
           ) : undefined
         }
       >
-
         <View style={styles.content}>
-        {lowStockItems.length > 0 ? (
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Low Stock ({'< 30'} gallons)</Text>
-              {lowStockItems.map((item) => (
-                <View key={item.id} style={styles.lowStockItem}>
-                  <Text style={styles.lowStockName}>{item.name || 'Unnamed'}</Text>
-                  <Text style={styles.lowStockQty}>{item.quantity || 0} gal</Text>
-                </View>
-              ))}
-            </Card.Content>
-          </Card>
-        ) : (
-          <Card style={styles.card}>
-            <Card.Content>
-              <Text style={styles.statLabel}>All paints in stock</Text>
-              <Text style={styles.statValue}>✓</Text>
-            </Card.Content>
-          </Card>
-        )}
+          {lowStockItems.length > 0 ? (
+            <Card style={styles.card}>
+              <Card.Content>
+                <Text style={styles.statLabel}>
+                  Low Stock ({"< 30"} gallons)
+                </Text>
+                {lowStockItems.map((item) => (
+                  <View key={item.id} style={styles.lowStockItem}>
+                    <Text style={styles.lowStockName}>
+                      {item.name || "Unnamed"}
+                    </Text>
+                    <Text style={styles.lowStockQty}>
+                      {item.quantity || 0} gal
+                    </Text>
+                  </View>
+                ))}
+              </Card.Content>
+            </Card>
+          ) : (
+            <Card style={styles.card}>
+              <Card.Content>
+                <Text style={styles.statLabel}>All paints in stock</Text>
+                <Text style={styles.statValue}>✓</Text>
+              </Card.Content>
+            </Card>
+          )}
 
-        {isAdmin && (
+          {isAdmin && (
+            <Button
+              mode="contained"
+              onPress={onAddManual}
+              style={styles.button}
+              icon="plus-circle"
+            >
+              Add Item Manually
+            </Button>
+          )}
+
           <Button
             mode="contained"
-            onPress={onAddManual}
+            onPress={onScanQR}
             style={styles.button}
-            icon="plus-circle"
+            icon={isDesktop ? "keyboard" : "qrcode-scan"}
           >
-            Add Item Manually
+            {qrButtonText}
           </Button>
-        )}
 
-        <Button
-          mode="contained"
-          onPress={onScanQR}
-          style={styles.button}
-          icon={isDesktop ? "keyboard" : "qrcode-scan"}
-        >
-          {qrButtonText}
-        </Button>
+          <Button
+            mode="outlined"
+            onPress={onViewInventory}
+            style={styles.button}
+            icon="format-list-bulleted"
+          >
+            View Inventory
+          </Button>
 
-        <Button
-          mode="outlined"
-          onPress={onViewInventory}
-          style={styles.button}
-          icon="format-list-bulleted"
-        >
-          View Inventory
-        </Button>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            Logged in as <Text style={styles.mono}>{isAdmin ? 'Admin' : userName}</Text>
-          </Text>
-        </View>
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              Logged in as{" "}
+              <Text style={styles.mono}>{isAdmin ? "Admin" : userName}</Text>
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -164,35 +200,34 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
   },
   headerBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 60,
     paddingBottom: 10,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   headerButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   header: {
     marginTop: 30,
     marginBottom: 30,
-    alignItems: 'center',
+    alignItems: "center",
   },
   refreshIndicator: {
     marginLeft: 8,
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 10,
   },
   subtitle: {
     fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
+    color: "#666",
+    textAlign: "center",
   },
   content: {
     flex: 1,
@@ -203,86 +238,86 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
+    color: "#666",
+    textAlign: "center",
     marginBottom: 10,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   statValue: {
     fontSize: 48,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: "bold",
+    textAlign: "center",
     marginTop: 10,
-    color: '#6f95ab',
+    color: "#6f95ab",
   },
   lowStockItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: "#eee",
   },
   lowStockName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ff6b6b',
+    fontWeight: "600",
+    color: "#ff6b6b",
     flex: 1,
   },
   lowStockQty: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#ff6b6b',
+    fontWeight: "600",
+    color: "#ff6b6b",
   },
   button: {
     marginBottom: 15,
     paddingVertical: 8,
   },
   warning: {
-    color: '#ff6b6b',
-    textAlign: 'center',
+    color: "#ff6b6b",
+    textAlign: "center",
     marginBottom: 15,
     fontSize: 12,
   },
   footer: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: 10,
   },
   footerText: {
-    color: '#666',
+    color: "#666",
     marginBottom: 6,
   },
   toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 10,
     marginBottom: 6,
   },
   toggleLabel: {
-    color: '#666',
-    fontWeight: '600',
+    color: "#666",
+    fontWeight: "600",
   },
   mono: {
-    fontFamily: 'monospace',
+    fontFamily: "monospace",
   },
   webContainer: {
     paddingTop: 20,
   },
   webHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 16,
     paddingHorizontal: 0,
   },
   webTitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   webHeaderButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   webScrollContent: {
     padding: 0,
@@ -290,4 +325,3 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
 });
-
