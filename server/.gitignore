@@ -1,0 +1,5 @@
+node_modules/
+inventory.db
+inventory.db-journal
+*.log
+

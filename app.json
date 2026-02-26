@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Paint Inventory Tracker",
+    "slug": "nfc-inventory-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NFCReaderUsageDescription": "This app uses NFC to read and write inventory tags.",
+        "NSCameraUsageDescription": "This app uses the camera to scan QR codes for inventory tracking.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.manzav95.nfcinventorytracker"
+    },
+    "android": {
+  "permissions": [
+    "android.permission.NFC",
+    "android.permission.CAMERA"
+  ],
+  "package": "com.manzav95.nfcinventorytracker"
+},
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "Paint Inventory Tracker",
+      "shortName": "Paint Tracker",
+      "lang": "en",
+      "scope": "/",
+      "themeColor": "#6f95ab",
+      "backgroundColor": "#ffffff",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fbf21a0b-882d-47b7-8af5-515fb028aa17"
+      }
+    }
+  }
+}

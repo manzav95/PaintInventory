@@ -1,0 +1,8 @@
+{
+  "ignore_dirs": [
+    "server",
+    ".expo",
+    ".git"
+  ]
+}
+
