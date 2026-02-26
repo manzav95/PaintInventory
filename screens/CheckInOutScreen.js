@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    maxWidth: 400,
+    minWidth: 400,
     elevation: 4,
   },
   title: {
