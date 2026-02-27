@@ -24,3 +24,13 @@ server/exports/
 .env
 .env.local
 
+# Local how-to / guide docs (keep repo clean)
+QUICK_START.md
+INSTALL_ON_IPHONE.md
+FIX_BUILD_ERRORS.md
+FIX_ASYNCSTORAGE.md
+DEBUG_BUILD_ERROR.md
+QUICK_FIX_BUILD.md
+HOSTING_GUIDE.md
+BACKEND_DEPLOYMENT.md
+
