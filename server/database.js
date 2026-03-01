@@ -44,8 +44,30 @@ class Database {
         "lastScanned" TEXT,
         "lastScannedBy" TEXT,
         "createdAt" TEXT NOT NULL,
-        "updatedAt" TEXT NOT NULL
+        "updatedAt" TEXT NOT NULL,
+        "minQuantity" INTEGER DEFAULT NULL
       )
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'minQuantity') THEN
+          ALTER TABLE items ADD COLUMN "minQuantity" INTEGER DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'price') THEN
+          ALTER TABLE items ADD COLUMN price REAL DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'type') THEN
+          ALTER TABLE items ADD COLUMN "type" TEXT DEFAULT NULL;
+        END IF;
+      END $$
     `);
     console.log("Items table ready");
 
@@ -57,6 +79,10 @@ class Database {
     `);
     await client.query(`
       INSERT INTO settings (key, value) VALUES ('next_id', '1')
+      ON CONFLICT (key) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO settings (key, value) VALUES ('min_quantity', '30')
       ON CONFLICT (key) DO NOTHING
     `);
     console.log("Settings table ready");
@@ -88,9 +114,13 @@ class Database {
 
   async addItem(item) {
     const now = new Date().toISOString();
+    const price = item.price != null && !isNaN(Number(item.price)) ? Number(item.price) : null;
+    const type = item.type && ["paint", "primer", "clear", "stain", "dye"].includes(String(item.type).toLowerCase())
+      ? String(item.type).toLowerCase()
+      : null;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         item.id,
         item.name,
@@ -101,9 +131,12 @@ class Database {
         item.lastScannedBy || "",
         item.createdAt || now,
         now,
+        item.minQuantity != null ? item.minQuantity : null,
+        price,
+        type,
       ],
     );
-    return { success: true, item: { ...item, updatedAt: now } };
+    return { success: true, item: { ...item, updatedAt: now, price, type } };
   }
 
   async updateItem(itemId, updates) {
@@ -117,6 +150,9 @@ class Database {
       "lastScannedBy",
       "createdAt",
       "updatedAt",
+      "minQuantity",
+      "price",
+      "type",
     ];
     const fields = [];
     const values = [];
@@ -128,11 +164,22 @@ class Database {
           key === "lastScanned" ||
           key === "lastScannedBy" ||
           key === "createdAt" ||
-          key === "updatedAt"
+          key === "updatedAt" ||
+          key === "minQuantity" ||
+          key === "type"
             ? `"${key}"`
             : key;
         fields.push(`${col} = $${paramIndex}`);
-        values.push(updates[key]);
+        if (key === "price") {
+          const v = updates[key];
+          values.push(v == null || v === "" ? null : (isNaN(Number(v)) ? null : Number(v)));
+        } else if (key === "type") {
+          const v = updates[key];
+          const allowed = ["paint", "primer", "clear", "stain", "dye"];
+          values.push(v && allowed.includes(String(v).toLowerCase()) ? String(v).toLowerCase() : null);
+        } else {
+          values.push(updates[key]);
+        }
         paramIndex++;
       }
     });
@@ -159,7 +206,7 @@ class Database {
     const result = await this.pool.query("DELETE FROM items WHERE id = $1", [
       itemId,
     ]);
-    return result.rowCount > 0;
+    return { success: result.rowCount > 0 };
   }
 
   async updateItemId(oldId, newId) {
@@ -187,6 +234,23 @@ class Database {
       `INSERT INTO settings (key, value) VALUES ('next_id', $1)
        ON CONFLICT (key) DO UPDATE SET value = $1`,
       [String(number)],
+    );
+    return { success: true };
+  }
+
+  async getSetting(key) {
+    const result = await this.pool.query(
+      "SELECT value FROM settings WHERE key = $1",
+      [key],
+    );
+    return result.rows[0]?.value ?? null;
+  }
+
+  async setSetting(key, value) {
+    await this.pool.query(
+      `INSERT INTO settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = $2`,
+      [key, String(value)],
     );
     return { success: true };
   }

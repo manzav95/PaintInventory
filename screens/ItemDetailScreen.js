@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   Alert,
   Platform,
   useWindowDimensions,
+  Pressable,
 } from "react-native";
 import {
   TextInput,
@@ -14,7 +15,22 @@ import {
   Card,
   IconButton,
   useTheme,
+  Menu,
 } from "react-native-paper";
+
+const TYPE_OPTIONS = [
+  { label: "Paint", value: "paint" },
+  { label: "Primer", value: "primer" },
+  { label: "Clear", value: "clear" },
+  { label: "Stain", value: "stain" },
+  { label: "Dye", value: "dye" },
+];
+
+const CONTAINER_OPTIONS = [
+  { label: "White Container", value: "White Container" },
+  { label: "Stock Container", value: "Stock Container" },
+  { label: "Custom Container", value: "Custom Container" },
+];
 
 export default function ItemDetailScreen({
   item,
@@ -31,27 +47,29 @@ export default function ItemDetailScreen({
   const isDesktop = isWeb && width > 768;
   const [name, setName] = useState(item?.name || "");
   const [quantity, setQuantity] = useState(item?.quantity?.toString() || "0");
-  const [description, setDescription] = useState(item?.description || "");
+  const [type, setType] = useState(item?.type || "");
   const [location, setLocation] = useState(item?.location || "");
   const [idInput, setIdInput] = useState(item?.id?.toString() || "");
+  const [minQuantityInput, setMinQuantityInput] = useState(
+    item?.minQuantity != null ? String(item.minQuantity) : "",
+  );
+  const [priceInput, setPriceInput] = useState(
+    item?.price != null && item?.price !== "" ? String(item.price) : "",
+  );
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const [locationMenuOpen, setLocationMenuOpen] = useState(false);
 
-  const validateIdFormat = (id) => {
-    if (!id.trim()) {
-      return false; // ID is required for existing items
-    }
-    const formattedId = id.trim().toUpperCase();
-    return /^H66[A-Z]{3}\d{5}$/.test(formattedId);
-  };
-
-  const handleIdBlur = () => {
-    if (idInput.trim() && !validateIdFormat(idInput)) {
-      Alert.alert(
-        "Invalid Paint Code Format",
-        "Paint ID must be in Sherwin Williams format:\n\nH66 + 3 letters + 5 numbers\n\nExample: H66ABC12345",
-        [{ text: "OK" }],
-      );
-    }
-  };
+  useEffect(() => {
+    setMinQuantityInput(
+      item?.minQuantity != null ? String(item.minQuantity) : "",
+    );
+  }, [item?.id, item?.minQuantity]);
+  useEffect(() => {
+    setPriceInput(item?.price != null && item?.price !== "" ? String(item.price) : "");
+  }, [item?.id, item?.price]);
+  useEffect(() => {
+    setType(item?.type || "");
+  }, [item?.id, item?.type]);
 
   const handleSave = async () => {
     if (!isAdmin) {
@@ -65,34 +83,45 @@ export default function ItemDetailScreen({
     // Handle ID change separately first (if changed)
     if (
       isAdmin &&
-      idInput &&
-      idInput.toUpperCase() !== (item?.id?.toString() || "")
+      idInput.trim() &&
+      idInput.trim() !== (item?.id?.toString() || "").trim()
     ) {
-      const formattedId = idInput.toUpperCase();
-      // Validate format
-      if (!/^H66[A-Z]{3}\d{5}$/.test(formattedId)) {
-        Alert.alert(
-          "Invalid Format",
-          "Paint ID must be in Sherwin Williams format: H66(3 letters)(5 numbers), e.g., H66ABC12345",
-        );
-        return;
-      }
+      const newId = idInput.trim();
       // Change the ID first
-      const idResult = await onChangeId?.(item?.id, formattedId);
+      const idResult = await onChangeId?.(item?.id, newId);
       if (!idResult || !idResult.success) {
         Alert.alert("Error", idResult?.error || "Failed to change item ID.");
         return;
       }
     }
 
-    // Save the item fields
+    const minQ =
+      minQuantityInput.trim() === ""
+        ? null
+        : parseInt(minQuantityInput, 10);
+    if (
+      minQuantityInput.trim() !== "" &&
+      (isNaN(minQ) || minQ < 0)
+    ) {
+      Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
+      return;
+    }
+    if (priceInput.trim() !== "" && (isNaN(parseFloat(priceInput)) || parseFloat(priceInput) < 0)) {
+      Alert.alert("Invalid", "Unit price must be 0 or greater.");
+      return;
+    }
+
+    const priceVal = priceInput.trim() === "" ? null : parseFloat(priceInput);
+    const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const updatedItem = {
       ...item,
-      id: idInput.toUpperCase() || item?.id,
+      id: idInput.trim() || item?.id,
       name,
       quantity: parseInt(quantity) || 0,
-      description,
       location,
+      ...(minQ !== undefined && { minQuantity: minQ }),
+      ...(priceVal != null && !isNaN(priceVal) && priceVal >= 0 ? { price: priceVal } : { price: null }),
+      type: typeVal,
     };
 
     onSave(updatedItem);
@@ -129,28 +158,12 @@ export default function ItemDetailScreen({
             <Text style={styles.label}>Paint ID</Text>
             {isAdmin ? (
               <TextInput
-                label="Paint ID (Sherwin Williams format: H66ABC12345)"
+                label="Paint ID"
                 value={idInput}
-                onChangeText={(t) => {
-                  // Allow H66, 3 letters, 5 numbers
-                  const upper = t.toUpperCase();
-                  let filtered = upper.replace(/[^H0-9A-Z]/g, "");
-                  // Ensure it starts with H66
-                  if (filtered.length > 0 && filtered[0] !== "H") {
-                    filtered = "H66" + filtered.replace(/^H66/, "");
-                  }
-                  if (filtered.length > 3 && !filtered.startsWith("H66")) {
-                    filtered = "H66" + filtered.substring(3);
-                  }
-                  // Limit to 13 characters: H66 + 3 letters + 5 numbers
-                  if (filtered.length > 13) filtered = filtered.slice(0, 13);
-                  setIdInput(filtered);
-                }}
-                onBlur={handleIdBlur}
+                onChangeText={setIdInput}
                 mode="outlined"
-                autoCapitalize="characters"
                 style={styles.input}
-                placeholder="H66ABC12345"
+                placeholder="Any format"
               />
             ) : (
               <Text style={styles.itemId}>{item?.id?.toString() || "N/A"}</Text>
@@ -170,27 +183,131 @@ export default function ItemDetailScreen({
               editable={isAdmin}
             />
 
-            <TextInput
-              label="Description"
-              value={description}
-              onChangeText={setDescription}
-              mode="outlined"
-              multiline
-              numberOfLines={3}
-              style={styles.input}
-              disabled={!isAdmin}
-              editable={isAdmin}
-            />
+            <Text style={styles.label}>Type</Text>
+            {isWeb && isDesktop ? (
+              <View style={styles.input}>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                  disabled={!isAdmin}
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    fontSize: 16,
+                    borderRadius: 4,
+                    border: `1px solid ${theme.colors.outline}`,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.onSurface,
+                  }}
+                >
+                  <option value="">Select type</option>
+                  {TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+            ) : (
+              <>
+                {isAdmin ? (
+                  <Menu
+                    visible={typeMenuOpen}
+                    onDismiss={() => setTypeMenuOpen(false)}
+                    anchor={
+                      <Pressable
+                        onPress={() => isAdmin && setTypeMenuOpen(true)}
+                        style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                      >
+                        <Text style={{ color: type ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
+                          {type ? TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type : "Select type"}
+                        </Text>
+                      </Pressable>
+                    }
+                  >
+                    {TYPE_OPTIONS.map((o) => (
+                      <Menu.Item
+                        key={o.value}
+                        onPress={() => {
+                          setType(o.value);
+                          setTypeMenuOpen(false);
+                        }}
+                        title={o.label}
+                      />
+                    ))}
+                  </Menu>
+                ) : (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={styles.itemId}>
+                      {type ? (TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type) : "—"}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
 
-            <TextInput
-              label="Location"
-              value={location}
-              onChangeText={setLocation}
-              mode="outlined"
-              style={styles.input}
-              disabled={!isAdmin}
-              editable={isAdmin}
-            />
+            <Text style={styles.label}>Container</Text>
+            {isWeb && isDesktop ? (
+              <View style={styles.input}>
+                <select
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  disabled={!isAdmin}
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    fontSize: 16,
+                    borderRadius: 4,
+                    border: `1px solid ${theme.colors.outline}`,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.onSurface,
+                  }}
+                >
+                  <option value="">Select container</option>
+                  {CONTAINER_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+            ) : (
+              <>
+                {isAdmin ? (
+                  <Menu
+                    visible={locationMenuOpen}
+                    onDismiss={() => setLocationMenuOpen(false)}
+                    anchor={
+                      <Pressable
+                        onPress={() => setLocationMenuOpen(true)}
+                        style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                      >
+                        <Text style={{ color: location ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
+                          {location ? (CONTAINER_OPTIONS.find((o) => o.value === location)?.label ?? location) : "Select container"}
+                        </Text>
+                      </Pressable>
+                    }
+                  >
+                    {CONTAINER_OPTIONS.map((o) => (
+                      <Menu.Item
+                        key={o.value}
+                        onPress={() => {
+                          setLocation(o.value);
+                          setLocationMenuOpen(false);
+                        }}
+                        title={o.label}
+                      />
+                    ))}
+                  </Menu>
+                ) : (
+                  <View style={{ marginBottom: 16 }}>
+                    <Text style={styles.itemId}>
+                      {location ? (CONTAINER_OPTIONS.find((o) => o.value === location)?.label ?? location) : "—"}
+                    </Text>
+                  </View>
+                )}
+              </>
+            )}
 
             <Text style={styles.label}>Quantity (Gallons)</Text>
             <View style={styles.quantityContainer}>
@@ -217,6 +334,45 @@ export default function ItemDetailScreen({
                 disabled={!isAdmin}
               />
             </View>
+
+            <Text style={styles.label}>Minimum quantity (low stock)</Text>
+            {isAdmin ? (
+              <TextInput
+                label="Min quantity"
+                value={minQuantityInput}
+                onChangeText={setMinQuantityInput}
+                mode="outlined"
+                keyboardType="number-pad"
+                style={styles.input}
+                placeholder="Blank = use app default"
+              />
+            ) : (
+              <Text style={styles.itemId}>
+                {item?.minQuantity != null
+                  ? String(item.minQuantity)
+                  : "Use app default"}
+              </Text>
+            )}
+
+            <Text style={styles.label}>Unit price</Text>
+            {isAdmin ? (
+              <TextInput
+                label="Price"
+                value={priceInput}
+                onChangeText={setPriceInput}
+                mode="outlined"
+                keyboardType="decimal-pad"
+                style={styles.input}
+                placeholder="Optional"
+                left={<TextInput.Affix text="$" />}
+              />
+            ) : (
+              <Text style={styles.itemId}>
+                {item?.price != null && item?.price !== ""
+                  ? `$${Number(item.price).toFixed(2)}`
+                  : "—"}
+              </Text>
+            )}
 
             {item?.lastScanned && (
               <Text style={styles.lastScanned}>
@@ -282,7 +438,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   headerTitle: {
     fontSize: 20,
@@ -293,6 +450,7 @@ const styles = StyleSheet.create({
   },
   card: {
     margin: 16,
+    marginTop: 8,
     elevation: 4,
   },
   label: {
@@ -307,6 +465,13 @@ const styles = StyleSheet.create({
     color: "#6f95ab",
   },
   input: {
+    marginBottom: 16,
+  },
+  typeTrigger: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     marginBottom: 16,
   },
   quantityContainer: {

@@ -61,10 +61,11 @@ app.get('/api/items/:id', async (req, res) => {
 // Add item
 app.post('/api/items', async (req, res) => {
   try {
+    const auditUserName = (req.body && req.body.userName && String(req.body.userName).trim()) || 'unknown';
     const result = await db.addItem(req.body);
     if (result.success) {
       // Log audit with new quantity (initial quantity for new items)
-      await db.addAuditLog('add', req.body.id, req.body.userName || 'unknown', {
+      await db.addAuditLog('add', req.body.id, auditUserName, {
         itemId: req.body.id,
         name: req.body.name,
         quantity: req.body.quantity || 0,
@@ -83,11 +84,11 @@ app.post('/api/items', async (req, res) => {
 // Update item
 app.put('/api/items/:id', async (req, res) => {
   try {
-    // Decode the ID from URL (in case it's URL encoded)
     const id = decodeURIComponent(req.params.id);
     const updates = req.body;
+    const auditUserName = (updates && updates.userName && String(updates.userName).trim()) || 'unknown';
     delete updates.id; // Don't allow ID change via this endpoint
-    
+
     console.log('Updating item:', id, 'with updates:', Object.keys(updates));
     
     // Get current item to detect quantity changes
@@ -160,7 +161,7 @@ app.put('/api/items/:id', async (req, res) => {
       });
       
       // Log audit with appropriate action type
-      await db.addAuditLog(auditActionType, id, updates.userName || 'unknown', auditDetails);
+      await db.addAuditLog(auditActionType, id, auditUserName, auditDetails);
       res.json(result);
     } else {
       console.log('Update failed - item not found:', id);
@@ -172,32 +173,33 @@ app.put('/api/items/:id', async (req, res) => {
   }
 });
 
-// Delete item
+// Delete item (userName from body or query - some clients don't send DELETE body)
 app.delete('/api/items/:id', async (req, res) => {
   try {
     const id = decodeURIComponent(req.params.id);
-    const { userName } = req.body;
-    
-    // Get item before deleting for audit
+    const userName = req.body?.userName || req.query?.userName || 'unknown';
+
     const item = await db.getItem(id);
-    const oldQuantity = item?.quantity || 0;
-    
-    const result = await db.deleteItem(id);
-    if (result.success) {
-      // Log audit with old quantity (before deletion, total was oldQuantity, after deletion it's 0)
-      await db.addAuditLog('delete', id, userName || 'unknown', {
-        itemId: id,
-        name: item?.name,
-        oldQuantity: oldQuantity,
-        newQuantity: 0, // After deletion, quantity is 0
-      });
-      res.json(result);
-    } else {
-      res.status(404).json({ error: 'Item not found' });
+    if (!item) {
+      return res.status(404).json({ success: false, error: 'Item not found' });
     }
+
+    const oldQuantity = item.quantity || 0;
+    const result = await db.deleteItem(id);
+
+    if (result && result.success) {
+      await db.addAuditLog('delete', id, userName, {
+        itemId: id,
+        name: item.name,
+        oldQuantity,
+        newQuantity: 0,
+      });
+      return res.json({ success: true });
+    }
+    res.status(404).json({ success: false, error: 'Item not found' });
   } catch (error) {
     console.error('Error deleting item:', error);
-    res.status(500).json({ error: 'Failed to delete item' });
+    res.status(500).json({ success: false, error: 'Failed to delete item' });
   }
 });
 
@@ -226,39 +228,77 @@ app.post('/api/items/:id/change-id', async (req, res) => {
   }
 });
 
-// Get next ID number
+// Get next ID number and formatted (custom or default)
 app.get('/api/settings/next-id', async (req, res) => {
   try {
     const nextId = await db.getNextIdNumber();
-    res.json({ nextId });
+    const nextIdFormatted = await db.getSetting('next_id_value');
+    res.json({ nextId, nextIdFormatted: nextIdFormatted || null });
   } catch (error) {
     console.error('Error fetching next ID:', error);
     res.status(500).json({ error: 'Failed to fetch next ID' });
   }
 });
 
-// Set next ID number (admin only)
+// Set next ID number or custom string (admin only)
 app.post('/api/settings/next-id', async (req, res) => {
   try {
     const { nextId, userName } = req.body;
-    const result = await db.setNextIdNumber(nextId);
-    if (result.success) {
-      // Log audit
-      await db.addAuditLog('set_next_id', null, userName || 'unknown', { nextId });
-      res.json(result);
+    const isNumber = typeof nextId === 'number' || (typeof nextId === 'string' && /^\d+$/.test(nextId.trim()));
+    if (isNumber) {
+      const num = typeof nextId === 'number' ? nextId : parseInt(nextId, 10);
+      if (isNaN(num) || num < 1) {
+        return res.status(400).json({ success: false, error: 'Next ID must be a positive number or any non-empty string.' });
+      }
+      await db.setNextIdNumber(num);
     } else {
-      res.status(400).json(result);
+      const str = (nextId ?? '').toString().trim();
+      if (!str) {
+        return res.status(400).json({ success: false, error: 'Next ID cannot be empty.' });
+      }
+      await db.setSetting('next_id_value', str);
     }
+    await db.addAuditLog('set_next_id', null, userName || 'unknown', { nextId: isNumber ? (typeof nextId === 'number' ? nextId : parseInt(nextId, 10)) : nextId });
+    res.json({ success: true });
   } catch (error) {
     console.error('Error setting next ID:', error);
     res.status(500).json({ error: 'Failed to set next ID' });
   }
 });
 
-// Get audit logs
+// Get minimum quantity (low stock threshold)
+app.get('/api/settings/min-quantity', async (req, res) => {
+  try {
+    const value = await db.getSetting('min_quantity');
+    const minQuantity = value != null ? parseInt(value, 10) : 30;
+    res.json({ minQuantity: isNaN(minQuantity) ? 30 : minQuantity });
+  } catch (error) {
+    console.error('Error fetching min quantity:', error);
+    res.status(500).json({ error: 'Failed to fetch min quantity' });
+  }
+});
+
+// Set minimum quantity (admin only)
+app.post('/api/settings/min-quantity', async (req, res) => {
+  try {
+    const { minQuantity, userName } = req.body;
+    const num = typeof minQuantity === 'number' ? minQuantity : parseInt(String(minQuantity), 10);
+    if (isNaN(num) || num < 0) {
+      return res.status(400).json({ success: false, error: 'Minimum quantity must be 0 or greater.' });
+    }
+    await db.setSetting('min_quantity', num);
+    await db.addAuditLog('set_min_quantity', null, userName || 'unknown', { minQuantity: num });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error setting min quantity:', error);
+    res.status(500).json({ error: 'Failed to set min quantity' });
+  }
+});
+
+// Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit || '100', 10);
+    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
     const logs = await db.getAuditLogs(limit);
     res.json(logs);
   } catch (error) {
@@ -275,7 +315,8 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/api/health',
       items: '/api/items',
-      settings: '/api/settings/next-id',
+      'settings: next-id': '/api/settings/next-id',
+      'settings: min-quantity': '/api/settings/min-quantity',
       audit: '/api/audit'
     }
   });

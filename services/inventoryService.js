@@ -65,37 +65,32 @@ class InventoryService {
   }
 
   async getNextIdFormatted() {
-    const counter = await this.getNextIdNumber();
-    return IDGenerator.counterToId(counter);
+    try {
+      const result = await _fetch('/api/settings/next-id');
+      if (result.nextIdFormatted && result.nextIdFormatted.trim()) {
+        return result.nextIdFormatted.trim();
+      }
+      const counter = result.nextId ?? (await this.getNextIdNumber());
+      return IDGenerator.counterToId(counter);
+    } catch (error) {
+      const counter = await this.getNextIdNumber();
+      return IDGenerator.counterToId(counter);
+    }
   }
 
   async setNextIdNumber(nextIdNumber, userName) {
-    // Accept either a counter number or a formatted ID string
-    let counter;
-    if (typeof nextIdNumber === 'string' && IDGenerator.isValidFormat(nextIdNumber)) {
-      counter = IDGenerator.idToCounter(nextIdNumber);
-      if (!counter) {
-        return { success: false, error: 'Invalid Sherwin Williams format. Must be H66(3 letters)(5 numbers), e.g., H66AAA00001' };
-      }
-    } else {
-      counter = typeof nextIdNumber === 'number' ? nextIdNumber : parseInt(String(nextIdNumber), 10);
-      if (isNaN(counter) || counter < 1) {
-        return { success: false, error: 'Next ID must be a valid number or Sherwin Williams format (H66AAA00001).' };
-      }
+    // Accept number or any non-empty string (no format restriction)
+    const isNum = typeof nextIdNumber === 'number' || (typeof nextIdNumber === 'string' && /^\d+$/.test(String(nextIdNumber).trim()));
+    const payload = isNum
+      ? { nextId: typeof nextIdNumber === 'number' ? nextIdNumber : parseInt(String(nextIdNumber), 10), userName }
+      : { nextId: String(nextIdNumber).trim(), userName };
+    if (payload.nextId === '' || (isNum && (isNaN(payload.nextId) || payload.nextId < 1))) {
+      return { success: false, error: 'Next ID must be a positive number or any non-empty string.' };
     }
-
     try {
-      // Check for collision
-      const items = await this.getAllItems();
-      const formatted = IDGenerator.counterToId(counter);
-      const collision = items.some(item => (item.id?.toString() || '') === formatted);
-      if (collision) {
-        return { success: false, error: `ID ${formatted} is already used by an existing paint.` };
-      }
-
       const result = await _fetch('/api/settings/next-id', {
         method: 'POST',
-        body: JSON.stringify({ nextId: counter, userName }),
+        body: JSON.stringify(payload),
       });
       return result;
     } catch (error) {
@@ -103,15 +98,43 @@ class InventoryService {
     }
   }
 
+  async getMinQuantity() {
+    try {
+      const result = await _fetch('/api/settings/min-quantity');
+      const n = result.minQuantity != null ? parseInt(result.minQuantity, 10) : 30;
+      return isNaN(n) ? 30 : n;
+    } catch (error) {
+      return 30;
+    }
+  }
+
+  async setMinQuantity(value, userName) {
+    try {
+      const num = typeof value === 'number' ? value : parseInt(String(value), 10);
+      if (isNaN(num) || num < 0) {
+        return { success: false, error: 'Minimum quantity must be 0 or greater.' };
+      }
+      await _fetch('/api/settings/min-quantity', {
+        method: 'POST',
+        body: JSON.stringify({ minQuantity: num, userName }),
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   async generateNextId() {
     try {
-      const current = await this.getNextIdNumber();
+      const result = await _fetch('/api/settings/next-id');
+      const custom = result.nextIdFormatted && String(result.nextIdFormatted).trim();
+      if (custom) {
+        // Use custom string once; clear it so next time we use counter (backend could clear, but we don't require that)
+        return custom;
+      }
+      const current = result.nextId ?? (await this.getNextIdNumber());
       const formatted = IDGenerator.counterToId(current);
-
-      // Increment counter for next time
-      const next = current + 1;
-      await this.setNextIdNumber(next, 'system');
-
+      await this.setNextIdNumber(current + 1, 'system');
       return formatted;
     } catch (error) {
       console.error('Error generating next ID:', error);
@@ -128,22 +151,13 @@ class InventoryService {
     try {
       let itemId = item.id;
       
-      // If custom ID provided, validate format and check for collisions
-      if (itemId) {
-        const formattedId = itemId.trim().toUpperCase();
-        if (!IDGenerator.isValidFormat(formattedId)) {
-          return { success: false, error: 'Invalid ID format. Must be H66(3 letters)(5 numbers), e.g., H66ABC12345' };
-        }
-        
-        // Check for collision
-        const existing = await this.getItem(formattedId);
+      if (itemId != null && String(itemId).trim()) {
+        itemId = String(itemId).trim();
+        const existing = await this.getItem(itemId);
         if (existing) {
-          return { success: false, error: `ID ${formattedId} is already in use by another paint.` };
+          return { success: false, error: `ID ${itemId} is already in use by another paint.` };
         }
-        
-        itemId = formattedId;
       } else {
-        // Generate default ID if not provided
         itemId = await this.generateNextId();
       }
       
@@ -157,6 +171,7 @@ class InventoryService {
         lastScannedBy: item.lastScannedBy || null,
         createdAt: item.createdAt || new Date().toISOString(),
         userName: item.userName || null,
+        minQuantity: item.minQuantity != null ? item.minQuantity : undefined,
       };
 
       const result = await _fetch('/api/items', {
@@ -194,15 +209,15 @@ class InventoryService {
   async deleteItem(itemId, userName) {
     try {
       const encodedId = encodeURIComponent(itemId);
-      const result = await _fetch(`/api/items/${encodedId}`, {
+      const qs = userName ? `?userName=${encodeURIComponent(userName)}` : '';
+      const result = await _fetch(`/api/items/${encodedId}${qs}`, {
         method: 'DELETE',
-        body: JSON.stringify({ userName }),
+        headers: { 'Content-Type': 'application/json' },
       });
-
-      return result;
+      return result && result.success ? result : { success: false, error: result?.error || 'Delete failed' };
     } catch (error) {
       console.error('Error deleting item:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error.message || 'Failed to delete item' };
     }
   }
 
@@ -247,19 +262,14 @@ class InventoryService {
   async updateItemId(oldId, newIdRaw, userName) {
     try {
       const oldIdStr = (oldId ?? '').toString();
-      const cleaned = (newIdRaw ?? '').toString().trim().toUpperCase();
-
-      // Validate Sherwin Williams format
-      if (!IDGenerator.isValidFormat(cleaned)) {
-        return { success: false, error: 'New ID must be in Sherwin Williams format: H66(3 letters)(5 numbers), e.g., H66ABC12345' };
+      const newId = (newIdRaw ?? '').toString().trim();
+      if (!newId) {
+        return { success: false, error: 'New ID cannot be empty.' };
       }
-
-      const newId = cleaned;
       if (newId === oldIdStr) {
         return { success: true, itemId: newId };
       }
 
-      // Check for collision
       const existing = await this.getItem(newId);
       if (existing) {
         return { success: false, error: `ID ${newId} is already in use.` };

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -29,33 +29,25 @@ export default function SettingsScreen({
   nextIdNumber,
   nextIdFormatted,
   onSetNextIdNumber,
+  minQuantity = 30,
+  onSetMinQuantity,
   onExportExcel,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 768;
-  const [nextIdInput, setNextIdInput] = useState(
-    nextIdFormatted || "H66AAA00001",
+  const [nextIdInput, setNextIdInput] = useState(nextIdFormatted || "");
+  const [minQuantityInput, setMinQuantityInput] = useState(
+    String(minQuantity ?? 30),
   );
 
-  const validateIdFormat = (id) => {
-    if (!id.trim()) {
-      return false;
-    }
-    const formattedId = id.trim().toUpperCase();
-    return /^H66[A-Z]{3}\d{5}$/.test(formattedId);
-  };
-
-  const handleIdBlur = () => {
-    if (nextIdInput.trim() && !validateIdFormat(nextIdInput)) {
-      Alert.alert(
-        "Invalid Paint Code Format",
-        "Paint ID must be in Sherwin Williams format:\n\nH66 + 3 letters + 5 numbers\n\nExample: H66ABC12345",
-        [{ text: "OK" }],
-      );
-    }
-  };
+  useEffect(() => {
+    setNextIdInput(nextIdFormatted || "");
+  }, [nextIdFormatted]);
+  useEffect(() => {
+    setMinQuantityInput(String(minQuantity ?? 30));
+  }, [minQuantity]);
 
   return (
     <View
@@ -160,6 +152,53 @@ export default function SettingsScreen({
                         { color: theme.colors.onSurface },
                       ]}
                     >
+                      Minimum quantity (low stock)
+                    </Text>
+                    <Text
+                      style={[
+                        styles.settingDescription,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Items below this count are shown as low stock. Current: {minQuantity}
+                    </Text>
+                  </View>
+                </View>
+                <TextInput
+                  label="Minimum quantity"
+                  value={minQuantityInput}
+                  onChangeText={setMinQuantityInput}
+                  keyboardType="number-pad"
+                  mode="outlined"
+                  style={styles.adminInput}
+                />
+                <Button
+                  mode="contained"
+                  onPress={() => {
+                    const num = parseInt(minQuantityInput, 10);
+                    if (isNaN(num) || num < 0) {
+                      Alert.alert(
+                        "Invalid",
+                        "Minimum quantity must be 0 or greater.",
+                      );
+                      return;
+                    }
+                    onSetMinQuantity?.(num);
+                  }}
+                  style={styles.adminButton}
+                  icon="content-save"
+                >
+                  Save minimum level
+                </Button>
+                <Divider style={styles.divider} />
+                <View style={styles.settingRow}>
+                  <View style={styles.settingInfo}>
+                    <Text
+                      style={[
+                        styles.settingLabel,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
                       Next Paint ID
                     </Text>
                     <Text
@@ -168,48 +207,28 @@ export default function SettingsScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Current: {nextIdFormatted || "H66AAA00001"}
+                      Current: {nextIdFormatted || "(auto)"}
                     </Text>
                   </View>
                 </View>
                 <Divider style={styles.divider} />
                 <TextInput
-                  label="Set next paint ID (Sherwin Williams format: H66ABC12345)"
+                  label="Set next paint ID (any format)"
                   value={nextIdInput}
-                  onChangeText={(t) => {
-                    // Allow H66, 3 letters, 5 numbers
-                    const upper = t.toUpperCase();
-                    let filtered = upper.replace(/[^H0-9A-Z]/g, "");
-                    // Ensure it starts with H66
-                    if (filtered.length > 0 && filtered[0] !== "H") {
-                      filtered = "H66" + filtered.replace(/^H66/, "");
-                    }
-                    if (filtered.length > 3 && !filtered.startsWith("H66")) {
-                      filtered = "H66" + filtered.substring(3);
-                    }
-                    // Limit to 13 characters: H66 + 3 letters + 5 numbers
-                    if (filtered.length > 13) filtered = filtered.slice(0, 13);
-                    setNextIdInput(filtered);
-                  }}
-                  onBlur={handleIdBlur}
+                  onChangeText={setNextIdInput}
                   mode="outlined"
-                  autoCapitalize="characters"
-                  placeholder="H66ABC12345"
+                  placeholder="e.g. H66ABC12345 or CUSTOM-001"
                   style={styles.adminInput}
                 />
                 <Button
                   mode="contained"
                   onPress={() => {
-                    const formatted = nextIdInput.toUpperCase();
-                    // Validate format
-                    if (!/^H66[A-Z]{3}\d{5}$/.test(formatted)) {
-                      Alert.alert(
-                        "Invalid Format",
-                        "Paint ID must be in Sherwin Williams format: H66(3 letters)(5 numbers), e.g., H66ABC12345",
-                      );
+                    const trimmed = nextIdInput.trim();
+                    if (!trimmed) {
+                      Alert.alert("Invalid", "Next paint ID cannot be empty.");
                       return;
                     }
-                    onSetNextIdNumber(formatted);
+                    onSetNextIdNumber(trimmed);
                   }}
                   style={styles.adminButton}
                   icon="content-save"
@@ -250,7 +269,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
@@ -268,6 +288,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingTop: 8,
     paddingBottom: 32,
   },
   card: {

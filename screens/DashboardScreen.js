@@ -1,5 +1,11 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { View, StyleSheet, ScrollView, RefreshControl } from "react-native";
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  RefreshControl,
+  Platform,
+} from "react-native";
 import {
   Card,
   Text,
@@ -14,12 +20,18 @@ import AuditService from "../services/auditService";
 
 export default function DashboardScreen({
   inventory,
+  minQuantity = 30,
   onRefresh,
   isRefreshing = false,
+  showTransactionTable = true,
+  isAdmin = false,
 }) {
   const theme = useTheme();
+  const isWeb = Platform.OS === "web";
   const [auditLogs, setAuditLogs] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
+  const [staleDays, setStaleDays] = useState(30);
 
   useEffect(() => {
     loadAuditLogs();
@@ -27,44 +39,162 @@ export default function DashboardScreen({
 
   const loadAuditLogs = async () => {
     try {
-      const logs = await AuditService.list(500); // Get more logs for dashboard
+      const logs = await AuditService.list(1000);
       setAuditLogs(logs);
     } catch (error) {
       console.error("Error loading audit logs:", error);
     }
   };
 
-  // Calculate most used color
-  const mostUsedColor = useMemo(() => {
-    const colorUsage = {};
+  // Current week (Sun–Sat) and current month date ranges + labels
+  const periodRange = useMemo(() => {
+    const now = new Date();
+    if (mostUsedByWeek) {
+      const sunday = new Date(now);
+      sunday.setDate(now.getDate() - now.getDay());
+      sunday.setHours(0, 0, 0, 0);
+      const saturday = new Date(sunday);
+      saturday.setDate(sunday.getDate() + 6);
+      saturday.setHours(23, 59, 59, 999);
+      const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+      return {
+        start: sunday.getTime(),
+        end: saturday.getTime(),
+        label: `${fmt(sunday)}–${fmt(saturday)}`,
+      };
+    }
+    const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+    return {
+      start: first.getTime(),
+      end: last.getTime(),
+      label: monthLabel,
+    };
+  }, [mostUsedByWeek]);
+
+  // This week (Sun–Sat) range for "gallons used this week"
+  const thisWeekRange = useMemo(() => {
+    const now = new Date();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - now.getDay());
+    sunday.setHours(0, 0, 0, 0);
+    const saturday = new Date(sunday);
+    saturday.setDate(sunday.getDate() + 6);
+    saturday.setHours(23, 59, 59, 999);
+    const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+    return {
+      start: sunday.getTime(),
+      end: saturday.getTime(),
+      label: `${fmt(sunday)}–${fmt(saturday)}`,
+    };
+  }, []);
+
+  const gallonsUsedThisWeek = useMemo(() => {
+    const isCheckOut = (log) =>
+      log.action === "check_out" ||
+      (log.action === "update" && log.details?._actionType === "check_out");
+    const getQty = (log) => {
+      if (!log.details) return 0;
+      const q = log.details.quantityChange ?? log.details._quantityChange;
+      return typeof q === "number" ? Math.abs(q) : 0;
+    };
+    let total = 0;
     auditLogs.forEach((log) => {
-      if (
-        log.itemId &&
-        (log.action === "check_in" ||
-          log.action === "check_out" ||
-          log.action === "update")
-      ) {
-        const item = inventory.find((i) => i.id === log.itemId);
-        if (item) {
-          colorUsage[item.name] = (colorUsage[item.name] || 0) + 1;
-        }
-      }
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < thisWeekRange.start || t > thisWeekRange.end) return;
+      total += getQty(log);
+    });
+    return total;
+  }, [auditLogs, thisWeekRange]);
+
+  const notScannedCount = useMemo(() => {
+    const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
+    return inventory.filter((item) => {
+      if (!item.lastScanned) return true;
+      return new Date(item.lastScanned).getTime() < cutoff;
+    }).length;
+  }, [inventory, staleDays]);
+
+  const totalValue = useMemo(() => {
+    return inventory.reduce((sum, item) => {
+      const qty = item.quantity ?? 0;
+      const price = item.price != null && !isNaN(Number(item.price)) ? Number(item.price) : 0;
+      return sum + qty * price;
+    }, 0);
+  }, [inventory]);
+
+  // Most used = color with largest qty checked out in the selected period (week or month)
+  const mostUsedColor = useMemo(() => {
+    const isCheckOut = (log) =>
+      log.action === "check_out" ||
+      (log.action === "update" && log.details?._actionType === "check_out");
+    const getCheckOutQty = (log) => {
+      if (!log.details) return 0;
+      const q = log.details.quantityChange ?? log.details._quantityChange;
+      return typeof q === "number" ? Math.abs(q) : 0;
+    };
+    const { start, end } = periodRange;
+
+    const galByItemId = {};
+    auditLogs.forEach((log) => {
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < start || t > end) return;
+      const qty = getCheckOutQty(log);
+      if (qty <= 0) return;
+      galByItemId[log.itemId] = (galByItemId[log.itemId] || 0) + qty;
     });
 
-    const sorted = Object.entries(colorUsage).sort((a, b) => b[1] - a[1]);
-    return sorted.length > 0
-      ? { name: sorted[0][0], count: sorted[0][1] }
-      : null;
-  }, [auditLogs, inventory]);
+    let bestItemId = null;
+    let bestGal = 0;
+    Object.entries(galByItemId).forEach(([id, gal]) => {
+      if (gal > bestGal) {
+        bestGal = gal;
+        bestItemId = id;
+      }
+    });
+    if (!bestItemId) return null;
+    const item = inventory.find((i) => i.id === bestItemId);
+    return {
+      name: item?.name || bestItemId,
+      totalGal: bestGal,
+      periodLabel: periodRange.label,
+      isWeek: mostUsedByWeek,
+    };
+  }, [auditLogs, inventory, mostUsedByWeek, periodRange]);
+
+  const isStandardUserVisibleAction = (log) => {
+    const a = log.action;
+    const d = log.details;
+    if (a === "check_in" || a === "check_out" || a === "delete") return true;
+    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out")) return true;
+    return false;
+  };
+
+  const logsByRole = useMemo(() => {
+    if (isAdmin) return auditLogs;
+    return auditLogs.filter(isStandardUserVisibleAction);
+  }, [auditLogs, isAdmin]);
+
+  const getDisplayUserName = (log) => {
+    const u = (log.userName || "").trim().toLowerCase();
+    if (u && u !== "unknown") return log.userName;
+    const adminOnly =
+      ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
+      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out"));
+    return adminOnly ? "Admin" : (log.userName || "Unknown");
+  };
 
   // Filter audit logs by search
   const filteredLogs = useMemo(() => {
-    if (!searchQuery.trim()) return auditLogs;
+    if (!searchQuery.trim()) return logsByRole;
     const query = searchQuery.toLowerCase();
-    return auditLogs.filter((log) => {
+    return logsByRole.filter((log) => {
       const item = inventory.find((i) => i.id === log.itemId);
       const itemName = item?.name?.toLowerCase() || "";
-      const userName = log.userName?.toLowerCase() || "";
+      const userName = (log.userName || "").toLowerCase();
       const action = log.action?.toLowerCase() || "";
       const itemId = log.itemId?.toLowerCase() || "";
 
@@ -75,7 +205,7 @@ export default function DashboardScreen({
         itemId.includes(query)
       );
     });
-  }, [auditLogs, searchQuery, inventory]);
+  }, [logsByRole, searchQuery, inventory]);
 
   const getActionColor = (action, details) => {
     // Handle old records with _actionType in details (for backward compatibility)
@@ -219,6 +349,264 @@ export default function DashboardScreen({
     return item?.name || itemId || "Unknown";
   };
 
+  const content = (
+    <View style={[
+      styles.dashboardContainer,
+      isWeb && showTransactionTable && styles.dashboardContainerWeb,
+    ]}>
+      {/* Stats Cards */}
+      <View style={styles.statsRow}>
+          {isAdmin && (
+          <Card style={styles.statCard}>
+            <Card.Content>
+              <Text style={styles.statLabel}>Total items</Text>
+              <Title style={styles.statValue}>{inventory.length}</Title>
+              <Text style={styles.statSubtext}>
+                {inventory.filter((i) => (i.type || "").toLowerCase() === "paint").length} paint
+              </Text>
+            </Card.Content>
+          </Card>
+          )}
+
+          <Card style={styles.statCard}>
+            <Card.Content>
+              <Text style={styles.statLabel}>Total Gallons</Text>
+              <Title style={styles.statValue}>
+                {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
+              </Title>
+            </Card.Content>
+          </Card>
+
+          <Card style={styles.statCard}>
+            <Card.Content>
+              <Text style={styles.statLabel}>Gal checked out this week</Text>
+              <Title style={styles.statValue}>{gallonsUsedThisWeek}</Title>
+              <Text style={styles.statSubtext}>{thisWeekRange.label}</Text>
+            </Card.Content>
+          </Card>
+
+          {isAdmin && (
+          <Card
+            style={styles.statCard}
+            onPress={() => setStaleDays((d) => (d === 30 ? 60 : d === 60 ? 90 : 30))}
+          >
+            <Card.Content>
+              <Text style={styles.statLabel}>
+                Not scanned in <Text style={styles.staleDaysInline}>{staleDays}</Text> days
+              </Text>
+              <Title style={styles.statValue}>{notScannedCount}</Title>
+              <Text style={styles.statSubtextHint}>Tap to change period</Text>
+            </Card.Content>
+          </Card>
+          )}
+
+          {isAdmin && (
+          <Card style={styles.statCard}>
+            <Card.Content>
+              <Text style={styles.statLabel}>Total value</Text>
+              <Title style={styles.statValue}>
+                ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Title>
+            </Card.Content>
+          </Card>
+          )}
+
+          {mostUsedColor && (
+            <Card
+              style={styles.statCard}
+              onPress={() => setMostUsedByWeek((prev) => !prev)}
+            >
+              <Card.Content>
+                <Text style={styles.statLabel}>Most gallons checked out</Text>
+                <Title
+                  style={[styles.statValue, { fontSize: 18 }]}
+                  numberOfLines={1}
+                >
+                  {mostUsedColor.name}
+                </Title>
+                <Text style={styles.statSubtext}>
+                  {mostUsedColor.totalGal} gal — {mostUsedColor.isWeek ? `week of ${mostUsedColor.periodLabel}` : mostUsedColor.periodLabel}
+                </Text>
+                <Text style={styles.statSubtextHint}>
+                  Tap for {mostUsedByWeek ? "month" : "week"}
+                </Text>
+              </Card.Content>
+            </Card>
+          )}
+      </View>
+
+      {showTransactionTable && (
+        <>
+          {/* Transaction History */}
+          <Card style={[styles.historyCard, isWeb && styles.historyCardWeb]}>
+            <Card.Content style={isWeb ? styles.historyCardContentWeb : undefined}>
+              <View style={styles.historyHeader}>
+                <Title style={styles.historyTitle}>Transaction History</Title>
+                <Searchbar
+                  placeholder="Search transactions..."
+                  onChangeText={setSearchQuery}
+                  value={searchQuery}
+                  style={styles.searchbar}
+                  inputStyle={styles.searchbarInput}
+                />
+              </View>
+
+              {filteredLogs.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No transactions found</Text>
+                </View>
+              ) : (
+                <ScrollView
+                  style={[styles.tableScrollOuter, isWeb && styles.tableScrollOuterWeb]}
+                  contentContainerStyle={styles.tableScrollOuterContent}
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled
+                >
+                  <ScrollView
+                    horizontal
+                    style={styles.tableScrollHorizontal}
+                    showsHorizontalScrollIndicator={true}
+                    contentContainerStyle={styles.tableScrollHorizontalContent}
+                  >
+                    <DataTable style={styles.dataTable}>
+                    <DataTable.Header>
+                      <DataTable.Title style={styles.timeCell}>
+                        Time
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.userCell}>
+                        User
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.qtyCell} numeric>
+                        Qty (gal)
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.actionCell}>
+                        Action
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.colorCell}>
+                        Color
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.totalCell} numeric>
+                        Total (gal)
+                      </DataTable.Title>
+                    </DataTable.Header>
+
+                    {filteredLogs.slice(0, 500).map((log, index) => {
+                      const actionText = formatAction(
+                        log.action,
+                        log.details,
+                        log.itemId,
+                      );
+                      const quantity = getQuantity(
+                        log.action,
+                        log.details,
+                        log.itemId,
+                      );
+                      const colorName = getItemName(log.itemId);
+                      const totalQuantity = getTotalQuantity(
+                        log.action,
+                        log.details,
+                        log.itemId,
+                      );
+
+                      return (
+                        <DataTable.Row key={index}>
+                          <DataTable.Cell style={styles.timeCell}>
+                            <Text style={styles.timeText}>
+                              {new Date(log.timestamp).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </Text>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.userCell}>
+                            <Text
+                              style={[
+                                styles.userText,
+                                { color: theme.dark ? "#fff" : "#666" },
+                              ]}
+                            >
+                              {getDisplayUserName(log)}
+                            </Text>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.qtyCell} numeric>
+                            <Text
+                              style={[
+                                styles.quantityText,
+                                { color: theme.dark ? "#fff" : "#000" },
+                              ]}
+                            >
+                              {quantity !== "-" ? `${quantity}` : "-"}
+                            </Text>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.actionCell}>
+                            <Chip
+                              style={{
+                                backgroundColor:
+                                  getActionColor(log.action, log.details) + "20",
+                              }}
+                              textStyle={{
+                                color: getActionColor(log.action, log.details),
+                                fontSize: 11,
+                              }}
+                            >
+                              {actionText}
+                            </Chip>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.colorCell}>
+                            <Text
+                              style={[
+                                styles.itemNameText,
+                                { color: theme.dark ? "#fff" : undefined },
+                              ]}
+                            >
+                              {colorName}
+                            </Text>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.totalCell} numeric>
+                            <Text
+                              style={[
+                                styles.totalText,
+                                { color: theme.dark ? "#fff" : "#000" },
+                              ]}
+                            >
+                              {totalQuantity !== "-" ? `${totalQuantity}` : "-"}
+                            </Text>
+                          </DataTable.Cell>
+                        </DataTable.Row>
+                      );
+                    })}
+                  </DataTable>
+                </ScrollView>
+              </ScrollView>
+            )}
+            </Card.Content>
+          </Card>
+        </>
+      )}
+    </View>
+  );
+
+  if (isWeb) {
+    if (!showTransactionTable) {
+      return (
+        <ScrollView
+          style={[styles.container, styles.containerWeb, { backgroundColor: theme.colors.background }]}
+          contentContainerStyle={styles.scrollContentStatsOnly}
+          showsVerticalScrollIndicator={true}
+        >
+          {content}
+        </ScrollView>
+      );
+    }
+    return (
+      <View style={[styles.container, styles.containerWeb, { backgroundColor: theme.colors.background }]}>
+        {content}
+      </View>
+    );
+  }
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
@@ -231,187 +619,7 @@ export default function DashboardScreen({
         />
       }
     >
-      <View style={styles.dashboardContainer}>
-        {/* Stats Cards */}
-        <View style={styles.statsRow}>
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Total Colors</Text>
-              <Title style={styles.statValue}>{inventory.length}</Title>
-            </Card.Content>
-          </Card>
-
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Low Stock</Text>
-              <Title style={[styles.statValue, { color: "#ff6b6b" }]}>
-                {inventory.filter((item) => (item.quantity || 0) < 30).length}
-              </Title>
-            </Card.Content>
-          </Card>
-
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Total Gallons</Text>
-              <Title style={styles.statValue}>
-                {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
-              </Title>
-            </Card.Content>
-          </Card>
-
-          {mostUsedColor && (
-            <Card style={styles.statCard}>
-              <Card.Content>
-                <Text style={styles.statLabel}>Most Used</Text>
-                <Title
-                  style={[styles.statValue, { fontSize: 18 }]}
-                  numberOfLines={1}
-                >
-                  {mostUsedColor.name}
-                </Title>
-                <Text style={styles.statSubtext}>
-                  {mostUsedColor.count} transactions
-                </Text>
-              </Card.Content>
-            </Card>
-          )}
-        </View>
-
-        {/* Transaction History */}
-        <Card style={styles.historyCard}>
-          <Card.Content>
-            <View style={styles.historyHeader}>
-              <Title style={styles.historyTitle}>Transaction History</Title>
-              <Searchbar
-                placeholder="Search transactions..."
-                onChangeText={setSearchQuery}
-                value={searchQuery}
-                style={styles.searchbar}
-                inputStyle={styles.searchbarInput}
-              />
-            </View>
-
-            {filteredLogs.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>No transactions found</Text>
-              </View>
-            ) : (
-              <ScrollView horizontal style={styles.tableScroll}>
-                <DataTable style={styles.dataTable}>
-                  <DataTable.Header>
-                    <DataTable.Title style={styles.timeCell}>
-                      Time
-                    </DataTable.Title>
-                    <DataTable.Title style={styles.userCell}>
-                      User
-                    </DataTable.Title>
-                    <DataTable.Title style={styles.qtyCell} numeric>
-                      Qty (gal)
-                    </DataTable.Title>
-                    <DataTable.Title style={styles.actionCell}>
-                      Action
-                    </DataTable.Title>
-                    <DataTable.Title style={styles.colorCell}>
-                      Color
-                    </DataTable.Title>
-                    <DataTable.Title style={styles.totalCell} numeric>
-                      Total (gal)
-                    </DataTable.Title>
-                  </DataTable.Header>
-
-                  {filteredLogs.slice(0, 100).map((log, index) => {
-                    const actionText = formatAction(
-                      log.action,
-                      log.details,
-                      log.itemId,
-                    );
-                    const quantity = getQuantity(
-                      log.action,
-                      log.details,
-                      log.itemId,
-                    );
-                    const colorName = getItemName(log.itemId);
-                    const totalQuantity = getTotalQuantity(
-                      log.action,
-                      log.details,
-                      log.itemId,
-                    );
-
-                    return (
-                      <DataTable.Row key={index}>
-                        <DataTable.Cell style={styles.timeCell}>
-                          <Text style={styles.timeText}>
-                            {new Date(log.timestamp).toLocaleString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </Text>
-                        </DataTable.Cell>
-                        <DataTable.Cell style={styles.userCell}>
-                          <Text
-                            style={[
-                              styles.userText,
-                              { color: theme.dark ? "#fff" : "#666" },
-                            ]}
-                          >
-                            {log.userName || "Unknown"}
-                          </Text>
-                        </DataTable.Cell>
-                        <DataTable.Cell style={styles.qtyCell} numeric>
-                          <Text
-                            style={[
-                              styles.quantityText,
-                              { color: theme.dark ? "#fff" : "#000" },
-                            ]}
-                          >
-                            {quantity !== "-" ? `${quantity}` : "-"}
-                          </Text>
-                        </DataTable.Cell>
-                        <DataTable.Cell style={styles.actionCell}>
-                          <Chip
-                            style={{
-                              backgroundColor:
-                                getActionColor(log.action, log.details) + "20",
-                            }}
-                            textStyle={{
-                              color: getActionColor(log.action, log.details),
-                              fontSize: 11,
-                            }}
-                          >
-                            {actionText}
-                          </Chip>
-                        </DataTable.Cell>
-                        <DataTable.Cell style={styles.colorCell}>
-                          <Text
-                            style={[
-                              styles.itemNameText,
-                              { color: theme.dark ? "#fff" : undefined },
-                            ]}
-                          >
-                            {colorName}
-                          </Text>
-                        </DataTable.Cell>
-                        <DataTable.Cell style={styles.totalCell} numeric>
-                          <Text
-                            style={[
-                              styles.totalText,
-                              { color: theme.dark ? "#fff" : "#000" },
-                            ]}
-                          >
-                            {totalQuantity !== "-" ? `${totalQuantity}` : "-"}
-                          </Text>
-                        </DataTable.Cell>
-                      </DataTable.Row>
-                    );
-                  })}
-                </DataTable>
-              </ScrollView>
-            )}
-          </Card.Content>
-        </Card>
-      </View>
+      {content}
     </ScrollView>
   );
 }
@@ -419,14 +627,30 @@ export default function DashboardScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    minHeight: 0,
+    ...(Platform.OS === "web" && { overflow: "hidden" }),
+  },
+  containerWeb: {
+    padding: 20,
+    paddingTop: 8,
   },
   scrollContent: {
     padding: 20,
+    paddingTop: 8,
+    flexGrow: 1,
+  },
+  scrollContentStatsOnly: {
+    padding: 20,
+    paddingTop: 8,
   },
   dashboardContainer: {
     maxWidth: 1400,
     width: "100%",
     alignSelf: "center",
+  },
+  dashboardContainerWeb: {
+    flex: 1,
+    minHeight: 0,
   },
   statsRow: {
     flexDirection: "row",
@@ -456,8 +680,26 @@ const styles = StyleSheet.create({
     color: "#999",
     marginTop: 4,
   },
+  statSubtextHint: {
+    fontSize: 10,
+    color: "#999",
+    marginTop: 2,
+    fontStyle: "italic",
+  },
+  staleDaysInline: {
+    fontSize: 11,
+    color: "#666",
+  },
   historyCard: {
     elevation: 2,
+  },
+  historyCardWeb: {
+    flex: 1,
+    minHeight: 0,
+  },
+  historyCardContentWeb: {
+    flex: 1,
+    minHeight: 0,
   },
   historyHeader: {
     marginBottom: 16,
@@ -482,8 +724,28 @@ const styles = StyleSheet.create({
     color: "#999",
     fontSize: 14,
   },
-  tableScroll: {
-    maxHeight: 600,
+  tableScrollOuter: {
+    maxHeight: 520,
+    overflow: "hidden",
+    ...(Platform.OS === "web" && {
+      overflowY: "auto",
+      overflowX: "hidden",
+      WebkitOverflowScrolling: "touch",
+    }),
+  },
+  tableScrollOuterWeb: {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: undefined,
+  },
+  tableScrollOuterContent: {
+    flexGrow: 1,
+  },
+  tableScrollHorizontal: {
+    flexGrow: 0,
+  },
+  tableScrollHorizontalContent: {
+    flexGrow: 0,
   },
   dataTable: {
     minWidth: 900,

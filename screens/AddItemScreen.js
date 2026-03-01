@@ -6,6 +6,7 @@ import {
   Alert,
   Platform,
   useWindowDimensions,
+  Pressable,
 } from "react-native";
 import {
   TextInput,
@@ -14,7 +15,22 @@ import {
   Card,
   Title,
   useTheme,
+  Menu,
 } from "react-native-paper";
+
+const TYPE_OPTIONS = [
+  { label: "Paint", value: "paint" },
+  { label: "Primer", value: "primer" },
+  { label: "Clear", value: "clear" },
+  { label: "Stain", value: "stain" },
+  { label: "Dye", value: "dye" },
+];
+
+const CONTAINER_OPTIONS = [
+  { label: "White Container", value: "White Container" },
+  { label: "Stock Container", value: "Stock Container" },
+  { label: "Custom Container", value: "Custom Container" },
+];
 
 export default function AddItemScreen({ onSave, onCancel }) {
   const theme = useTheme();
@@ -23,27 +39,13 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const isDesktop = isWeb && width > 768;
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
-  const [description, setDescription] = useState("");
+  const [type, setType] = useState("");
   const [location, setLocation] = useState("");
   const [itemId, setItemId] = useState("");
-
-  const validateIdFormat = (id) => {
-    if (!id.trim()) {
-      return true; // Empty is OK (will auto-generate)
-    }
-    const formattedId = id.trim().toUpperCase();
-    return /^H66[A-Z]{3}\d{5}$/.test(formattedId);
-  };
-
-  const handleIdBlur = () => {
-    if (itemId.trim() && !validateIdFormat(itemId)) {
-      Alert.alert(
-        "Invalid Paint Code Format",
-        "Paint ID must be in Sherwin Williams format:\n\nH66 + 3 letters + 5 numbers\n\nExample: H66ABC12345\n\nLeave blank to auto-generate a default code.",
-        [{ text: "OK" }],
-      );
-    }
-  };
+  const [minQuantity, setMinQuantity] = useState("");
+  const [price, setPrice] = useState("");
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const [locationMenuOpen, setLocationMenuOpen] = useState(false);
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -51,26 +53,23 @@ export default function AddItemScreen({ onSave, onCancel }) {
       return;
     }
 
-    // Validate ID format if provided
-    if (itemId.trim()) {
-      const formattedId = itemId.trim().toUpperCase();
-      if (!/^H66[A-Z]{3}\d{5}$/.test(formattedId)) {
-        Alert.alert(
-          "Invalid Format",
-          "Paint ID must be in Sherwin Williams format: H66(3 letters)(5 numbers), e.g., H66ABC12345\n\nLeave blank to auto-generate a default code.",
-        );
-        return;
-      }
+    const minQ = minQuantity.trim() === "" ? undefined : parseInt(minQuantity, 10);
+    if (minQuantity.trim() !== "" && (isNaN(minQ) || minQ < 0)) {
+      Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
+      return;
     }
 
+    const priceNum = price.trim() === "" ? undefined : parseFloat(price);
+    const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
     const item = {
-      // Include ID if provided, otherwise let service generate default
-      ...(itemId.trim() && { id: itemId.trim().toUpperCase() }),
+      ...(itemId.trim() && { id: itemId.trim() }),
       name: name.trim(),
       quantity: parseInt(quantity) || 0,
-      description: description.trim(),
       location: location.trim(),
       createdAt: new Date().toISOString(),
+      ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
+      ...(priceNum != null && !isNaN(priceNum) && priceNum >= 0 && { price: priceNum }),
+      ...(typeVal && { type: typeVal }),
     };
 
     onSave(item);
@@ -87,28 +86,12 @@ export default function AddItemScreen({ onSave, onCancel }) {
             <Title style={styles.title}>Add New Paint</Title>
 
             <TextInput
-              label="Paint ID (Optional - leave blank for auto-generated)"
+              label="Paint ID (optional - leave blank to auto-generate)"
               value={itemId}
-              onChangeText={(t) => {
-                // Allow H66, 3 letters, 5 numbers
-                const upper = t.toUpperCase();
-                let filtered = upper.replace(/[^H0-9A-Z]/g, "");
-                // Ensure it starts with H66
-                if (filtered.length > 0 && filtered[0] !== "H") {
-                  filtered = "H66" + filtered.replace(/^H66/, "");
-                }
-                if (filtered.length > 3 && !filtered.startsWith("H66")) {
-                  filtered = "H66" + filtered.substring(3);
-                }
-                // Limit to 13 characters: H66 + 3 letters + 5 numbers
-                if (filtered.length > 13) filtered = filtered.slice(0, 13);
-                setItemId(filtered);
-              }}
-              onBlur={handleIdBlur}
+              onChangeText={setItemId}
               mode="outlined"
-              autoCapitalize="characters"
               style={styles.input}
-              placeholder="H66ABC12345 (optional)"
+              placeholder="Any format (optional)"
             />
             <Text
               style={[
@@ -139,21 +122,133 @@ export default function AddItemScreen({ onSave, onCancel }) {
             />
 
             <TextInput
-              label="Description"
-              value={description}
-              onChangeText={setDescription}
+              label="Minimum quantity (low stock threshold)"
+              value={minQuantity}
+              onChangeText={setMinQuantity}
               mode="outlined"
               style={styles.input}
-              multiline
-              numberOfLines={3}
+              keyboardType="number-pad"
+              placeholder="Optional - leave blank to use app default"
             />
 
+            {isWeb && isDesktop ? (
+              <View style={styles.input}>
+                <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Type</Text>
+                <select
+                  value={type}
+                  onChange={(e) => setType(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    fontSize: 16,
+                    borderRadius: 4,
+                    border: `1px solid ${theme.colors.outline}`,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.onSurface,
+                  }}
+                >
+                  <option value="">Select type</option>
+                  {TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Type</Text>
+                <Menu
+                  visible={typeMenuOpen}
+                  onDismiss={() => setTypeMenuOpen(false)}
+                  anchor={
+                    <Pressable
+                      onPress={() => setTypeMenuOpen(true)}
+                      style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                    >
+                      <Text style={{ color: type ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
+                        {type ? TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type : "Select type"}
+                      </Text>
+                    </Pressable>
+                  }
+                >
+                  {TYPE_OPTIONS.map((o) => (
+                    <Menu.Item
+                      key={o.value}
+                      onPress={() => {
+                        setType(o.value);
+                        setTypeMenuOpen(false);
+                      }}
+                      title={o.label}
+                    />
+                  ))}
+                </Menu>
+              </>
+            )}
+
+            <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Container</Text>
+            {isWeb && isDesktop ? (
+              <View style={styles.input}>
+                <select
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    fontSize: 16,
+                    borderRadius: 4,
+                    border: `1px solid ${theme.colors.outline}`,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.onSurface,
+                  }}
+                >
+                  <option value="">Select container</option>
+                  {CONTAINER_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+            ) : (
+              <>
+                <Menu
+                  visible={locationMenuOpen}
+                  onDismiss={() => setLocationMenuOpen(false)}
+                  anchor={
+                    <Pressable
+                      onPress={() => setLocationMenuOpen(true)}
+                      style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                    >
+                      <Text style={{ color: location ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
+                        {location ? CONTAINER_OPTIONS.find((o) => o.value === location)?.label ?? location : "Select container"}
+                      </Text>
+                    </Pressable>
+                  }
+                >
+                  {CONTAINER_OPTIONS.map((o) => (
+                    <Menu.Item
+                      key={o.value}
+                      onPress={() => {
+                        setLocation(o.value);
+                        setLocationMenuOpen(false);
+                      }}
+                      title={o.label}
+                    />
+                  ))}
+                </Menu>
+              </>
+            )}
+
             <TextInput
-              label="Location"
-              value={location}
-              onChangeText={setLocation}
+              label="Unit price (optional)"
+              value={price}
+              onChangeText={setPrice}
               mode="outlined"
               style={styles.input}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 45.00"
+              left={<TextInput.Affix text="$" />}
             />
 
             <View style={styles.buttonContainer}>
@@ -194,6 +289,17 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: 15,
   },
+  typeLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  typeTrigger: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 15,
+  },
   buttonContainer: {
     marginTop: 20,
   },
@@ -212,7 +318,7 @@ const styles = StyleSheet.create({
   },
   webContentContainer: {
     alignItems: "center",
-    paddingTop: 60,
+    paddingTop: 12,
   },
   webWrapper: {
     width: "100%",

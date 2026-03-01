@@ -39,6 +39,7 @@ export default function App() {
   const isWeb = Platform.OS === 'web';
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 768;
+  const isNarrowDesktop = isWeb && width > 768 && width <= 1024;
   
   const [currentScreen, setCurrentScreen] = useState('home');
   const [previousScreen, setPreviousScreen] = useState('home');
@@ -48,6 +49,7 @@ export default function App() {
   const [inventory, setInventory] = useState([]);
   const [nextIdNumber, setNextIdNumber] = useState(1);
   const [nextIdFormatted, setNextIdFormatted] = useState('H66AAA00001');
+  const [minQuantity, setMinQuantity] = useState(30);
   const [userName, setUserName] = useState(null);
   const isAdmin = userName === 'admin123';
   const actorName = isAdmin ? 'Admin' : (userName || 'unknown');
@@ -61,6 +63,40 @@ export default function App() {
     loadUser();
     loadThemePreference();
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      document.title = 'Paint Inventory';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const bg = paperTheme.colors.background;
+      document.body.style.backgroundColor = bg;
+      document.documentElement.style.backgroundColor = bg;
+    }
+  }, [paperTheme.colors.background]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const id = 'hide-desktop-scrollbars-style';
+    if (!document.getElementById(id)) {
+      const style = document.createElement('style');
+      style.id = id;
+      style.textContent = `
+        body.hide-desktop-scrollbars ::-webkit-scrollbar { display: none; }
+        body.hide-desktop-scrollbars * { scrollbar-width: none; -ms-overflow-style: none; }
+      `;
+      document.head.appendChild(style);
+    }
+    if (isDesktop) {
+      document.body.classList.add('hide-desktop-scrollbars');
+    } else {
+      document.body.classList.remove('hide-desktop-scrollbars');
+    }
+    return () => document.body.classList.remove('hide-desktop-scrollbars');
+  }, [isDesktop]);
 
   const loadThemePreference = async () => {
     try {
@@ -158,6 +194,8 @@ export default function App() {
       setNextIdNumber(next);
       const formatted = await InventoryService.getNextIdFormatted();
       setNextIdFormatted(formatted);
+      const minQ = await InventoryService.getMinQuantity();
+      setMinQuantity(minQ);
     } catch (error) {
       console.error('Error loading inventory:', error);
       Alert.alert('Error', `Failed to load inventory: ${error.message}`);
@@ -348,9 +386,11 @@ export default function App() {
       const updates = {
         name: item.name,
         quantity: item.quantity,
-        description: item.description,
         location: item.location,
         userName: actorName,
+        ...(item.hasOwnProperty('minQuantity') && { minQuantity: item.minQuantity }),
+        ...(item.hasOwnProperty('price') && { price: item.price }),
+        ...(item.hasOwnProperty('type') && { type: item.type }),
       };
       result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
     } else {
@@ -379,9 +419,37 @@ export default function App() {
     }
   };
 
+  const performDelete = async (itemId) => {
+    try {
+      const result = await InventoryService.deleteItem(itemId, actorName);
+      if (result && result.success) {
+        setSelectedItem(null);
+        await loadInventory();
+        setCurrentScreen('home');
+        Alert.alert('Success', 'Item deleted successfully.');
+        await AuditService.log({
+          type: 'delete_item',
+          user: actorName,
+          itemId,
+        });
+      } else {
+        Alert.alert('Error', result?.error || 'Failed to delete item.');
+      }
+    } catch (err) {
+      console.error('Delete item error:', err);
+      Alert.alert('Error', err?.message || 'Failed to delete item.');
+    }
+  };
+
   const handleDeleteItem = async (itemId) => {
     if (!isAdmin) {
       Alert.alert('Not Allowed', 'Only admin can delete inventory.');
+      return;
+    }
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to delete this item?')) {
+        await performDelete(itemId);
+      }
       return;
     }
     Alert.alert(
@@ -392,21 +460,7 @@ export default function App() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: async () => {
-            const result = await InventoryService.deleteItem(itemId, actorName);
-            if (result.success) {
-              await loadInventory();
-              setCurrentScreen('home');
-              Alert.alert('Success', 'Item deleted successfully.');
-              await AuditService.log({
-                type: 'delete_item',
-                user: actorName,
-                itemId,
-              });
-            } else {
-              Alert.alert('Error', result.error || 'Failed to delete item.');
-            }
-          },
+          onPress: () => { performDelete(itemId); },
         },
       ]
     );
@@ -423,7 +477,7 @@ export default function App() {
       setNextIdNumber(next);
       const nextFormatted = await InventoryService.getNextIdFormatted();
       setNextIdFormatted(nextFormatted);
-      Alert.alert('Admin', `Next paint ID set to ${nextFormatted}.`);
+      Alert.alert('Saved', `Next paint ID set to ${nextFormatted}.`);
       await AuditService.log({
         type: 'set_next_id',
         user: actorName,
@@ -431,6 +485,17 @@ export default function App() {
       });
     } else {
       Alert.alert('Admin', result.error || 'Failed to set next ID.');
+    }
+  };
+
+  const handleSetMinQuantity = async (value) => {
+    if (!isAdmin) return;
+    const result = await InventoryService.setMinQuantity(value, actorName);
+    if (result.success) {
+      setMinQuantity(value);
+      Alert.alert('Saved', `Minimum quantity (low stock threshold) set to ${value}.`);
+    } else {
+      Alert.alert('Error', result.error || 'Failed to set minimum quantity.');
     }
   };
 
@@ -523,12 +588,13 @@ export default function App() {
         if (isDesktop) {
           return (
             <View style={styles.webContainer}>
-              <View style={styles.webSidebar}>
+              <View style={[styles.webSidebar, isNarrowDesktop && styles.webSidebarNarrow]}>
                 <HomeScreen
                   onScanQR={handleScanQR}
                   onAddManual={handleAddManual}
                   onViewInventory={() => setCurrentScreen('list')}
                   inventory={inventory}
+                  minQuantity={minQuantity}
                   userName={isAdmin ? 'Admin' : userName}
                   isAdmin={isAdmin}
                   onSwitchUser={handleSwitchUser}
@@ -545,11 +611,14 @@ export default function App() {
                   isWeb={true}
                 />
               </View>
-              <View style={styles.webMain}>
+              <View style={[styles.webMain, isNarrowDesktop && styles.webMainNarrow]}>
                 <DashboardScreen
                   inventory={inventory}
+                  minQuantity={minQuantity}
                   onRefresh={handleRefresh}
                   isRefreshing={isRefreshing}
+                  showTransactionTable={!isNarrowDesktop}
+                  isAdmin={isAdmin}
                 />
               </View>
             </View>
@@ -561,6 +630,7 @@ export default function App() {
             onAddManual={handleAddManual}
             onViewInventory={() => setCurrentScreen('list')}
             inventory={inventory}
+            minQuantity={minQuantity}
             nfcEnabled={nfcStatus.isEnabled}
             userName={userName}
             isAdmin={isAdmin}
@@ -629,6 +699,7 @@ export default function App() {
             onRefresh={handleRefresh}
             isRefreshing={isRefreshing}
             inventory={inventory}
+            minQuantity={minQuantity}
             isAdmin={isAdmin}
             onItemSelect={(item) => {
               setPreviousScreen('list');
@@ -650,6 +721,8 @@ export default function App() {
             nextIdNumber={nextIdNumber}
             nextIdFormatted={nextIdFormatted}
             onSetNextIdNumber={handleSetNextIdNumber}
+            minQuantity={minQuantity}
+            onSetMinQuantity={handleSetMinQuantity}
             onExportExcel={handleExportExcel}
           />
         );
@@ -660,7 +733,7 @@ export default function App() {
 
   return (
     <PaperProvider theme={paperTheme}>
-      <View style={[styles.container, { backgroundColor: paperTheme.colors.background }]}>
+      <View style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}>
         <StatusBar style="auto" />
         {renderScreen()}
       </View>
@@ -672,7 +745,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    paddingTop: 25,
+    paddingTop: 8,
+  },
+  containerWeb: {
+    width: '100%',
+    minHeight: '100vh',
   },
   webContainer: {
     flex: 1,
@@ -689,10 +766,18 @@ const styles = StyleSheet.create({
     borderRightColor: '#e0e0e0',
     paddingRight: 16,
   },
+  webSidebarNarrow: {
+    width: undefined,
+    minWidth: 0,
+    flex: 0.6,
+  },
   webMain: {
     flex: 1,
     paddingLeft: 20,
     overflow: 'hidden',
+  },
+  webMainNarrow: {
+    flex: 0.4,
   },
 });
 

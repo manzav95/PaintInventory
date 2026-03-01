@@ -27,7 +27,7 @@ async function _fetch(endpoint, options = {}) {
 }
 
 class AuditService {
-  async list(limit = 200) {
+  async list(limit = 500) {
     try {
       const logs = await _fetch(`/api/audit?limit=${limit}`);
       return Array.isArray(logs) ? logs : [];

@@ -10,8 +10,16 @@ CREATE TABLE IF NOT EXISTS items (
   "lastScanned" TEXT,
   "lastScannedBy" TEXT,
   "createdAt" TEXT NOT NULL,
-  "updatedAt" TEXT NOT NULL
+  "updatedAt" TEXT NOT NULL,
+  "minQuantity" INTEGER DEFAULT NULL
 );
+
+-- Add minQuantity to existing items table if missing
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'items' AND column_name = 'minQuantity') THEN
+    ALTER TABLE items ADD COLUMN "minQuantity" INTEGER DEFAULT NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -19,6 +27,9 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 INSERT INTO settings (key, value) VALUES ('next_id', '1')
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO settings (key, value) VALUES ('min_quantity', '30')
 ON CONFLICT (key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS audit_log (

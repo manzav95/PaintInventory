@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -20,9 +20,11 @@ import {
   Chip,
   Title,
 } from "react-native-paper";
+import AuditService from "../services/auditService";
 
 export default function InventoryListScreen({
   inventory,
+  minQuantity = 30,
   onItemSelect,
   onBack,
   onRefresh,
@@ -31,11 +33,29 @@ export default function InventoryListScreen({
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isDesktop = isWeb && width > 768;
+  const isLargeDesktop = isWeb && width > 1024; // full-height table, no page scroll; smaller gets page scroll
+  const isMobileLandscape = !isDesktop && width > height;
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc', 'desc'
+  const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const logs = await AuditService.list(1000);
+        if (!cancelled) setAuditLogs(logs);
+      } catch (e) {
+        if (!cancelled) console.error("InventoryListScreen audit load:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Calculate analytics
   const analytics = useMemo(() => {
@@ -44,10 +64,9 @@ export default function InventoryListScreen({
       0,
     );
     const lowStockCount = inventory.filter(
-      (item) => (item.quantity || 0) < 30,
-    ).length;
-    const inStockCount = inventory.filter(
-      (item) => (item.quantity || 0) >= 30,
+      (item) =>
+        (item.quantity || 0) <
+        (item.minQuantity ?? minQuantity ?? 30),
     ).length;
     const outOfStockCount = inventory.filter(
       (item) => (item.quantity || 0) === 0,
@@ -63,33 +82,144 @@ export default function InventoryListScreen({
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
 
-    // Recently scanned (last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const recentlyScanned = inventory.filter((item) => {
-      if (!item.lastScanned) return false;
-      return new Date(item.lastScanned) > sevenDaysAgo;
-    }).length;
-
     return {
       totalGallons,
       lowStockCount,
-      inStockCount,
       outOfStockCount,
       topLocations,
-      recentlyScanned,
     };
-  }, [inventory]);
+  }, [inventory, minQuantity]);
 
-  // Filter and sort inventory
+  const thisWeekRange = useMemo(() => {
+    const now = new Date();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - now.getDay());
+    sunday.setHours(0, 0, 0, 0);
+    const saturday = new Date(sunday);
+    saturday.setDate(sunday.getDate() + 6);
+    saturday.setHours(23, 59, 59, 999);
+    const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+    return {
+      start: sunday.getTime(),
+      end: saturday.getTime(),
+      label: `${fmt(sunday)}–${fmt(saturday)}`,
+    };
+  }, []);
+
+  const thisMonthRange = useMemo(() => {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const label = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+    return { start: first.getTime(), end: last.getTime(), label };
+  }, []);
+
+  const periodRange = useMemo(() => {
+    return mostUsedByWeek ? thisWeekRange : thisMonthRange;
+  }, [mostUsedByWeek, thisWeekRange, thisMonthRange]);
+
+  const getCheckOutQty = (log) => {
+    if (!log.details) return 0;
+    const q = log.details.quantityChange ?? log.details._quantityChange;
+    return typeof q === "number" ? Math.abs(q) : 0;
+  };
+  const isCheckOut = (log) =>
+    log.action === "check_out" ||
+    (log.action === "update" && log.details?._actionType === "check_out");
+
+  const gallonsUsedThisWeek = useMemo(() => {
+    let total = 0;
+    auditLogs.forEach((log) => {
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < thisWeekRange.start || t > thisWeekRange.end) return;
+      total += getCheckOutQty(log);
+    });
+    return total;
+  }, [auditLogs, thisWeekRange]);
+
+  const gallonsUsedThisMonth = useMemo(() => {
+    let total = 0;
+    auditLogs.forEach((log) => {
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < thisMonthRange.start || t > thisMonthRange.end) return;
+      total += getCheckOutQty(log);
+    });
+    return total;
+  }, [auditLogs, thisMonthRange]);
+
+  const mostUsedColor = useMemo(() => {
+    const { start, end } = periodRange;
+    const galByItemId = {};
+    auditLogs.forEach((log) => {
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < start || t > end) return;
+      const qty = getCheckOutQty(log);
+      if (qty <= 0) return;
+      galByItemId[log.itemId] = (galByItemId[log.itemId] || 0) + qty;
+    });
+    let bestItemId = null;
+    let bestGal = 0;
+    Object.entries(galByItemId).forEach(([id, gal]) => {
+      if (gal > bestGal) {
+        bestGal = gal;
+        bestItemId = id;
+      }
+    });
+    if (!bestItemId) return null;
+    const item = inventory.find((i) => i.id === bestItemId);
+    return {
+      name: item?.name || bestItemId,
+      totalGal: bestGal,
+      periodLabel: periodRange.label,
+      isWeek: mostUsedByWeek,
+    };
+  }, [auditLogs, inventory, mostUsedByWeek, periodRange]);
+
+  // Latest audit log per item (for "Last Action" column); logs are timestamp DESC
+  const lastLogByItemId = useMemo(() => {
+    const map = {};
+    auditLogs.forEach((log) => {
+      const key = log.itemId != null ? String(log.itemId) : "";
+      if (!key || map[key] != null) return;
+      map[key] = log;
+    });
+    return map;
+  }, [auditLogs]);
+
+  const getActionLabel = (log) => {
+    if (!log) return null;
+    const a = log.action;
+    const d = log.details;
+    if (a === "check_in") return "Checked in";
+    if (a === "check_out") return "Checked out";
+    if (a === "update" && d?._actionType === "check_in") return "Checked in";
+    if (a === "update" && d?._actionType === "check_out") return "Checked out";
+    if (a === "add") return "Added";
+    if (a === "delete") return "Deleted";
+    return "Updated";
+  };
+
+  // Filter and sort inventory (search + optional stock filter)
   const filteredAndSortedInventory = useMemo(() => {
+    const min = minQuantity ?? 30;
     let filtered = inventory.filter((item) => {
       const query = searchQuery.toLowerCase();
-      return (
+      const matchesSearch =
         item.name?.toLowerCase().includes(query) ||
         item.id?.toString().toLowerCase().includes(query) ||
-        item.location?.toLowerCase().includes(query)
-      );
+        item.location?.toLowerCase().includes(query) ||
+        item.type?.toLowerCase().includes(query);
+      if (!matchesSearch) return false;
+      const qty = item.quantity || 0;
+      if (stockFilter === "outOfStock") return qty === 0;
+      if (stockFilter === "inStock")
+        return qty > 0 && qty >= (item.minQuantity ?? min);
+      if (stockFilter === "lowStock")
+        return qty > 0 && qty < (item.minQuantity ?? min);
+      return true;
     });
 
     // Sort
@@ -121,10 +251,11 @@ export default function InventoryListScreen({
     });
 
     return filtered;
-  }, [inventory, searchQuery, sortBy, sortOrder]);
+  }, [inventory, searchQuery, sortBy, sortOrder, stockFilter, minQuantity]);
 
   const renderItem = ({ item }) => {
-    const isLowStock = (item.quantity || 0) < 30;
+    const isLowStock =
+      (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
     const itemId = item.id?.toString() || "N/A";
 
     // Theme-aware low stock card style
@@ -194,19 +325,32 @@ export default function InventoryListScreen({
 
   // Desktop/Web Dashboard View
   if (isDesktop) {
-    return (
-      <ScrollView
-        style={[styles.container, { backgroundColor: theme.colors.background }]}
-        contentContainerStyle={styles.webScrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.colors.primary}
-          />
+    // Large desktop: full-height layout, no page scroll; only table scrolls. Tablet/phone landscape: page scrolls.
+    const useFullHeight = isLargeDesktop;
+    const WebRoot = useFullHeight ? View : ScrollView;
+    const webRootProps = useFullHeight
+      ? {
+          style: [
+            styles.container,
+            styles.webDesktopRoot,
+            { backgroundColor: theme.colors.background },
+          ],
         }
-      >
-        <View style={styles.webContainer}>
+      : {
+          style: [styles.container, { backgroundColor: theme.colors.background }],
+          contentContainerStyle: styles.webScrollContent,
+          refreshControl: (
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.colors.primary}
+            />
+          ),
+        };
+
+    return (
+      <WebRoot {...webRootProps}>
+        <View style={[styles.webContainer, useFullHeight && styles.webContainerFlex]}>
           {/* Header */}
           <View style={styles.webHeader}>
             <View style={styles.webHeaderLeft}>
@@ -238,6 +382,8 @@ export default function InventoryListScreen({
             </View>
           </View>
 
+          {/* Analytics + Table: centered on desktop to balance empty space */}
+          <View style={styles.webContentCentered}>
           {/* Analytics Cards */}
           <View style={styles.analyticsRow}>
             <Card style={styles.analyticsCard}>
@@ -248,83 +394,133 @@ export default function InventoryListScreen({
                 </Title>
               </Card.Content>
             </Card>
+            {analytics.lowStockCount > 0 && (
+              <Card
+                style={[
+                  styles.analyticsCard,
+                  styles.analyticsCardFilter,
+                  stockFilter === "lowStock" && styles.analyticsCardFilterActive,
+                ]}
+                onPress={() =>
+                  setStockFilter((f) => (f === "lowStock" ? null : "lowStock"))
+                }
+              >
+                <Card.Content>
+                  <Text style={styles.analyticsLabel}>Low Stock</Text>
+                  <Title style={[styles.analyticsValue, { color: "#ff9800" }]}>
+                    {analytics.lowStockCount}
+                  </Title>
+                </Card.Content>
+              </Card>
+            )}
+            {analytics.outOfStockCount > 0 && (
+              <Card
+                style={[
+                  styles.analyticsCard,
+                  styles.analyticsCardFilter,
+                  stockFilter === "outOfStock" && styles.analyticsCardFilterActive,
+                ]}
+                onPress={() =>
+                  setStockFilter((f) =>
+                    f === "outOfStock" ? null : "outOfStock"
+                  )
+                }
+              >
+                <Card.Content>
+                  <Text style={styles.analyticsLabel}>Out of Stock</Text>
+                  <Title style={[styles.analyticsValue, { color: "#f44336" }]}>
+                    {analytics.outOfStockCount}
+                  </Title>
+                </Card.Content>
+              </Card>
+            )}
             <Card style={styles.analyticsCard}>
               <Card.Content>
-                <Text style={styles.analyticsLabel}>In Stock</Text>
-                <Title style={[styles.analyticsValue, { color: "#4caf50" }]}>
-                  {analytics.inStockCount}
-                </Title>
-              </Card.Content>
-            </Card>
-            <Card style={styles.analyticsCard}>
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>Low Stock</Text>
-                <Title style={[styles.analyticsValue, { color: "#ff9800" }]}>
-                  {analytics.lowStockCount}
-                </Title>
-              </Card.Content>
-            </Card>
-            <Card style={styles.analyticsCard}>
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>Out of Stock</Text>
-                <Title style={[styles.analyticsValue, { color: "#f44336" }]}>
-                  {analytics.outOfStockCount}
-                </Title>
-              </Card.Content>
-            </Card>
-            <Card style={styles.analyticsCard}>
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>Recently Scanned</Text>
+                <Text style={styles.analyticsLabel}>Gal checked out this week</Text>
                 <Title style={styles.analyticsValue}>
-                  {analytics.recentlyScanned}
+                  {gallonsUsedThisWeek}
                 </Title>
-                <Text style={styles.analyticsSubtext}>Last 7 days</Text>
+                <Text style={styles.analyticsSubtext}>{thisWeekRange.label}</Text>
               </Card.Content>
             </Card>
+            <Card style={styles.analyticsCard}>
+              <Card.Content>
+                <Text style={styles.analyticsLabel}>Gal checked out this month</Text>
+                <Title style={styles.analyticsValue}>
+                  {gallonsUsedThisMonth}
+                </Title>
+                <Text style={styles.analyticsSubtext}>{thisMonthRange.label}</Text>
+              </Card.Content>
+            </Card>
+            {mostUsedColor && (
+              <Card
+                style={styles.analyticsCard}
+                onPress={() => setMostUsedByWeek((prev) => !prev)}
+              >
+                <Card.Content>
+                  <Text style={styles.analyticsLabel}>Most gallons checked out</Text>
+                  <Title
+                    style={[styles.analyticsValue, { fontSize: 18 }]}
+                    numberOfLines={1}
+                  >
+                    {mostUsedColor.name}
+                  </Title>
+                  <Text style={styles.analyticsSubtext}>
+                    {mostUsedColor.totalGal} gal —{" "}
+                    {mostUsedColor.isWeek
+                      ? `week of ${mostUsedColor.periodLabel}`
+                      : mostUsedColor.periodLabel}
+                  </Text>
+                  <Text style={styles.analyticsSubtext}>
+                    Tap for {mostUsedByWeek ? "month" : "week"}
+                  </Text>
+                </Card.Content>
+              </Card>
+            )}
           </View>
 
-          {/* Top Locations */}
-          {analytics.topLocations.length > 0 && (
-            <Card style={styles.locationsCard}>
-              <Card.Content>
-                <Text style={styles.sectionTitle}>Top Locations</Text>
-                <View style={styles.locationsList}>
-                  {analytics.topLocations.map(([location, count]) => (
-                    <Chip key={location} style={styles.locationChip}>
-                      {location}: {count}
-                    </Chip>
-                  ))}
-                </View>
-              </Card.Content>
-            </Card>
-          )}
-
-          {/* Search and Table */}
-          <Card style={styles.tableCard}>
-            <Card.Content>
-              <View style={styles.tableHeader}>
-                <Searchbar
-                  placeholder="Search by name, ID, or location..."
-                  onChangeText={setSearchQuery}
-                  value={searchQuery}
-                  style={styles.webSearchbar}
-                  inputStyle={styles.searchbarInput}
-                />
-                <Text style={styles.resultCount}>
-                  {filteredAndSortedInventory.length} of {inventory.length}{" "}
-                  items
-                </Text>
-              </View>
-
-              {filteredAndSortedInventory.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>
-                    {searchQuery ? "No items found" : "No items in inventory"}
+          {/* Search and Table - on large desktop fills remaining height */}
+          <View style={useFullHeight ? styles.tableCardWrapper : undefined}>
+            <Card style={useFullHeight ? styles.tableCardFlex : styles.tableCard}>
+              <Card.Content style={useFullHeight ? styles.tableCardContentFlex : undefined}>
+                <View style={styles.tableHeader}>
+                  <Searchbar
+                    placeholder="Search by name, ID, location, or type..."
+                    onChangeText={setSearchQuery}
+                    value={searchQuery}
+                    style={styles.webSearchbar}
+                    inputStyle={styles.searchbarInput}
+                  />
+                  <Text style={styles.resultCount}>
+                    {filteredAndSortedInventory.length} of {inventory.length}{" "}
+                    items
                   </Text>
                 </View>
-              ) : (
-                <ScrollView horizontal style={styles.tableScroll}>
-                  <DataTable style={styles.dataTable}>
+
+                {filteredAndSortedInventory.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>
+                      {searchQuery
+                        ? "No items found"
+                        : "No items in inventory"}
+                    </Text>
+                  </View>
+                ) : (
+                  <ScrollView
+                    style={[
+                      styles.tableScrollOuter,
+                      !useFullHeight && styles.tableScrollOuterMaxHeight,
+                    ]}
+                    contentContainerStyle={styles.tableScrollOuterContent}
+                    showsVerticalScrollIndicator={true}
+                    nestedScrollEnabled
+                  >
+                    <ScrollView
+                      horizontal
+                      style={styles.tableScrollHorizontal}
+                      showsHorizontalScrollIndicator={true}
+                    >
+                    <DataTable style={styles.dataTable}>
                     <DataTable.Header>
                       <DataTable.Title
                         style={styles.tableCell}
@@ -356,6 +552,9 @@ export default function InventoryListScreen({
                         ID
                       </DataTable.Title>
                       <DataTable.Title style={styles.tableCell}>
+                        Material Type
+                      </DataTable.Title>
+                      <DataTable.Title style={styles.tableCell}>
                         Location
                       </DataTable.Title>
                       <DataTable.Title
@@ -369,15 +568,13 @@ export default function InventoryListScreen({
                         }
                         onPress={() => handleSort("lastScanned")}
                       >
-                        Last Scanned By {getSortIcon("lastScanned")}
-                      </DataTable.Title>
-                      <DataTable.Title style={styles.tableCell}>
-                        Status
+                        Last Action {getSortIcon("lastScanned")}
                       </DataTable.Title>
                     </DataTable.Header>
 
                     {filteredAndSortedInventory.map((item) => {
-                      const isLowStock = (item.quantity || 0) < 30;
+                      const isLowStock =
+      (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
                       const isOutOfStock = (item.quantity || 0) === 0;
                       return (
                         <DataTable.Row
@@ -442,6 +639,43 @@ export default function InventoryListScreen({
                             </Text>
                           </DataTable.Cell>
                           <DataTable.Cell style={styles.tableCell}>
+                            {(() => {
+                              const t = item.type
+                                ? String(item.type).toLowerCase()
+                                : "";
+                              const label = item.type
+                                ? String(item.type).charAt(0).toUpperCase() +
+                                  String(item.type).slice(1).toLowerCase()
+                                : "";
+                              const materialTypeColor =
+                                t === "paint"
+                                  ? "#1565c0"
+                                  : t === "clear"
+                                    ? "#e65100"
+                                    : t === "stain"
+                                      ? "#2e7d32"
+                                      : t === "primer"
+                                        ? theme.dark
+                                          ? "#f5f5dc"
+                                          : "#5d4037"
+                                        : t === "dye"
+                                          ? "#7e57c2"
+                                          : theme.dark
+                                            ? "#fff"
+                                            : "#666";
+                              return (
+                                <Text
+                                  style={[
+                                    styles.materialTypeText,
+                                    { color: materialTypeColor },
+                                  ]}
+                                >
+                                  {label}
+                                </Text>
+                              );
+                            })()}
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.tableCell}>
                             <Text
                               style={[
                                 styles.locationText,
@@ -452,78 +686,85 @@ export default function InventoryListScreen({
                             </Text>
                           </DataTable.Cell>
                           <DataTable.Cell style={styles.lastScannedCell}>
-                            {item.lastScanned ? (
-                              <View>
-                                <Text
-                                  style={[
-                                    styles.lastScannedByText,
-                                    { color: theme.dark ? "#fff" : "#333" },
-                                  ]}
-                                >
-                                  {item.lastScannedBy || "Unknown"}
-                                </Text>
+                            {(() => {
+                              const log =
+                                lastLogByItemId[item.id != null ? String(item.id) : ""];
+                              if (log) {
+                                const ts = log.timestamp
+                                  ? new Date(log.timestamp).toLocaleString(
+                                      "en-US",
+                                      {
+                                        month: "short",
+                                        day: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      },
+                                    )
+                                  : "—";
+                                const user = log.userName || "Unknown";
+                                const actionLabel = getActionLabel(log);
+                                return (
+                                  <View>
+                                    <Text
+                                      style={[
+                                        styles.timeText,
+                                        {
+                                          color: theme.dark ? "#fff" : "#666",
+                                        },
+                                      ]}
+                                    >
+                                      {ts}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.lastScannedByText,
+                                        {
+                                          color: theme.dark ? "#fff" : "#333",
+                                        },
+                                      ]}
+                                    >
+                                      {user}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.timeText,
+                                        {
+                                          color: theme.dark
+                                            ? "#aaa"
+                                            : "#666",
+                                        },
+                                      ]}
+                                    >
+                                      {actionLabel}
+                                    </Text>
+                                  </View>
+                                );
+                              }
+                              return (
                                 <Text
                                   style={[
                                     styles.timeText,
                                     { color: theme.dark ? "#fff" : "#666" },
                                   ]}
                                 >
-                                  {new Date(item.lastScanned).toLocaleString(
-                                    "en-US",
-                                    {
-                                      month: "short",
-                                      day: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    },
-                                  )}
+                                  Never
                                 </Text>
-                              </View>
-                            ) : (
-                              <Text
-                                style={[
-                                  styles.timeText,
-                                  { color: theme.dark ? "#fff" : "#666" },
-                                ]}
-                              >
-                                Never
-                              </Text>
-                            )}
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            {isOutOfStock ? (
-                              <Chip
-                                style={{ backgroundColor: "#f4433620" }}
-                                textStyle={{ color: "#f44336", fontSize: 11 }}
-                              >
-                                Out
-                              </Chip>
-                            ) : isLowStock ? (
-                              <Chip
-                                style={{ backgroundColor: "#ff980020" }}
-                                textStyle={{ color: "#ff9800", fontSize: 11 }}
-                              >
-                                Low
-                              </Chip>
-                            ) : (
-                              <Chip
-                                style={{ backgroundColor: "#4caf5020" }}
-                                textStyle={{ color: "#4caf50", fontSize: 11 }}
-                              >
-                                OK
-                              </Chip>
-                            )}
+                              );
+                            })()}
                           </DataTable.Cell>
                         </DataTable.Row>
                       );
                     })}
                   </DataTable>
-                </ScrollView>
-              )}
-            </Card.Content>
-          </Card>
+                    </ScrollView>
+                  </ScrollView>
+                )}
+              </Card.Content>
+            </Card>
+          </View>
+          </View>
         </View>
-      </ScrollView>
+      </WebRoot>
     );
   }
 
@@ -556,11 +797,161 @@ export default function InventoryListScreen({
       </View>
 
       <Searchbar
-        placeholder="Search items..."
+        placeholder="Search by name, ID, location, or type..."
         onChangeText={setSearchQuery}
         value={searchQuery}
         style={styles.searchbar}
       />
+
+      {/* Mobile stats: only in landscape; hide when value is 0; filter cards are tappable */}
+      {isMobileLandscape && (
+      <View
+        style={[
+          styles.analyticsRowMobile,
+          styles.analyticsRowMobileLandscape,
+        ]}
+      >
+        {analytics.totalGallons > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+            ]}
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Total Gallons</Text>
+              <Title style={styles.analyticsValueMobile}>
+                {analytics.totalGallons.toLocaleString()}
+              </Title>
+            </Card.Content>
+          </Card>
+        )}
+        {analytics.lowStockCount > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+              styles.analyticsCardFilter,
+              stockFilter === "lowStock" && styles.analyticsCardFilterActive,
+            ]}
+            onPress={() =>
+              setStockFilter((f) => (f === "lowStock" ? null : "lowStock"))
+            }
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Low Stock</Text>
+              <Title style={[styles.analyticsValueMobile, { color: "#ff9800" }]}>
+                {analytics.lowStockCount}
+              </Title>
+            </Card.Content>
+          </Card>
+        )}
+        {analytics.outOfStockCount > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+              styles.analyticsCardFilter,
+              stockFilter === "outOfStock" && styles.analyticsCardFilterActive,
+            ]}
+            onPress={() =>
+              setStockFilter((f) =>
+                f === "outOfStock" ? null : "outOfStock"
+              )
+            }
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Out of Stock</Text>
+              <Title style={[styles.analyticsValueMobile, { color: "#f44336" }]}>
+                {analytics.outOfStockCount}
+              </Title>
+            </Card.Content>
+          </Card>
+        )}
+        {gallonsUsedThisWeek > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+            ]}
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Gal this week</Text>
+              <Title style={styles.analyticsValueMobile}>
+                {gallonsUsedThisWeek}
+              </Title>
+            </Card.Content>
+          </Card>
+        )}
+        {gallonsUsedThisMonth > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+            ]}
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Gal this month</Text>
+              <Title style={styles.analyticsValueMobile}>
+                {gallonsUsedThisMonth}
+              </Title>
+            </Card.Content>
+          </Card>
+        )}
+        {mostUsedColor && mostUsedColor.totalGal > 0 && (
+          <Card
+            style={[
+              styles.analyticsCardMobile,
+              isMobileLandscape && styles.analyticsCardMobileLandscape,
+            ]}
+            onPress={() => setMostUsedByWeek((prev) => !prev)}
+          >
+            <Card.Content
+              style={[
+                styles.analyticsCardMobileContent,
+                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+              ]}
+            >
+              <Text style={styles.analyticsLabelMobile}>Most checked out</Text>
+              <Title
+                style={[styles.analyticsValueMobile, { fontSize: 14 }]}
+                numberOfLines={1}
+              >
+                {mostUsedColor.name}
+              </Title>
+              <Text style={styles.analyticsSubtextMobile}>
+                {mostUsedColor.totalGal} gal
+              </Text>
+            </Card.Content>
+          </Card>
+        )}
+      </View>
+      )}
 
       {filteredAndSortedInventory.length === 0 ? (
         <View style={styles.emptyContainer}>
@@ -580,7 +971,10 @@ export default function InventoryListScreen({
           keyExtractor={(item) =>
             item.id?.toString() || Math.random().toString()
           }
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[
+            styles.list,
+            isMobileLandscape && styles.listLandscape,
+          ]}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -603,7 +997,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   headerTitle: {
     fontSize: 20,
@@ -689,18 +1084,33 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   // Web/Dashboard Styles
+  webDesktopRoot: {
+    flex: 1,
+    minHeight: 0,
+  },
   webContainer: {
     maxWidth: 1600,
     width: "100%",
     alignSelf: "center",
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    paddingTop: 8,
+  },
+  webContainerFlex: {
+    flex: 1,
+    minHeight: 0,
+  },
+  webContentCentered: {
+    alignSelf: "center",
+    width: "100%",
+    maxWidth: 1200,
   },
   webScrollContent: {},
   webHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 24,
+    marginBottom: 12,
   },
   webHeaderLeft: {
     flexDirection: "row",
@@ -725,6 +1135,62 @@ const styles = StyleSheet.create({
     minWidth: 180,
     elevation: 2,
   },
+  analyticsCardFilter: {
+    backgroundColor: "rgba(0,0,0,0.03)",
+  },
+  analyticsCardFilterActive: {
+    backgroundColor: "rgba(102, 126, 234, 0.12)",
+  },
+  analyticsRowMobile: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  analyticsRowMobileLandscape: {
+    gap: 4,
+    paddingHorizontal: 10,
+  },
+  analyticsCardMobile: {
+    minWidth: 72,
+    flex: 1,
+    elevation: 2,
+    maxWidth: 120,
+  },
+  analyticsCardMobileLandscape: {
+    minWidth: 64,
+    maxWidth: 96,
+  },
+  analyticsCardMobileContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  analyticsCardMobileContentLandscape: {
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+  },
+  listLandscape: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  analyticsLabelMobile: {
+    fontSize: 10,
+    color: "#666",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    marginBottom: 2,
+  },
+  analyticsValueMobile: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#6f95ab",
+  },
+  analyticsSubtextMobile: {
+    fontSize: 10,
+    color: "#999",
+    marginTop: 2,
+  },
   analyticsLabel: {
     fontSize: 12,
     color: "#666",
@@ -742,23 +1208,20 @@ const styles = StyleSheet.create({
     color: "#999",
     marginTop: 4,
   },
-  locationsCard: {
-    marginBottom: 24,
+  tableCardWrapper: {
+    flex: 1,
+    minHeight: 0,
+    marginTop: 8,
+  },
+  tableCardFlex: {
+    flex: 1,
+    minHeight: 0,
     elevation: 2,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 12,
-  },
-  locationsList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  locationChip: {
-    marginRight: 8,
-    marginBottom: 8,
+  tableCardContentFlex: {
+    flex: 1,
+    minHeight: 0,
+    paddingBottom: 0,
   },
   tableCard: {
     elevation: 2,
@@ -781,21 +1244,40 @@ const styles = StyleSheet.create({
     color: "#666",
     whiteSpace: "nowrap",
   },
-  tableScroll: {
-    maxHeight: 600,
+  tableScrollOuter: {
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    ...(Platform.OS === "web" && {
+      overflowY: "auto",
+      overflowX: "hidden",
+    }),
+  },
+  tableScrollOuterMaxHeight: {
+    maxHeight: 560,
+  },
+  tableScrollOuterContent: {
+    flexGrow: 0,
+  },
+  tableScrollHorizontal: {
+    flexGrow: 0,
   },
   dataTable: {
-    minWidth: 1000,
+    minWidth: 1100,
   },
   tableCell: {
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    minWidth: 120,
+    paddingHorizontal: 14,
+    minWidth: 100,
   },
   lastScannedCell: {
     paddingVertical: 12,
-    paddingHorizontal: 16,
-    minWidth: 180, // Wider to accommodate name and time
+    paddingHorizontal: 14,
+    minWidth: 200,
+  },
+  materialTypeText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   itemNameText: {
     fontSize: 14,
