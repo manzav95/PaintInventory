@@ -23,12 +23,31 @@ export default function CheckInOutScreen({
 
   const handleSubmit = () => {
     const qty = parseFloat(quantity);
+    const currentQty = typeof item.quantity === "number" ? item.quantity : 0;
+
     if (isNaN(qty) || qty <= 0) {
       Alert.alert(
         "Invalid Quantity",
         "Please enter a valid quantity greater than 0.",
       );
       return;
+    }
+
+    if (action === "out") {
+      if (currentQty <= 0) {
+        Alert.alert(
+          "Cannot Check Out",
+          "This item currently has 0 gallons available to check out.",
+        );
+        return;
+      }
+      if (qty > currentQty) {
+        Alert.alert(
+          "Cannot Check Out",
+          `You are trying to remove ${qty} gallons but only ${currentQty} gallons are available.`,
+        );
+        return;
+      }
     }
 
     if (action === "in") {

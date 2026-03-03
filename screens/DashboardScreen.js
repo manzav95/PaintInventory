@@ -31,6 +31,7 @@ export default function DashboardScreen({
   const [auditLogs, setAuditLogs] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
+  const [galPeriodWeek, setGalPeriodWeek] = useState(true);
   const [staleDays, setStaleDays] = useState(30);
 
   useEffect(() => {
@@ -90,6 +91,37 @@ export default function DashboardScreen({
     };
   }, []);
 
+  const thisMonthRange = useMemo(() => {
+    const now = new Date();
+    const first = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    const last = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
+    const label = now.toLocaleString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+    return {
+      start: first.getTime(),
+      end: last.getTime(),
+      label,
+    };
+  }, []);
+
   const gallonsUsedThisWeek = useMemo(() => {
     const isCheckOut = (log) =>
       log.action === "check_out" ||
@@ -108,6 +140,25 @@ export default function DashboardScreen({
     });
     return total;
   }, [auditLogs, thisWeekRange]);
+
+  const gallonsUsedThisMonth = useMemo(() => {
+    const isCheckOut = (log) =>
+      log.action === "check_out" ||
+      (log.action === "update" && log.details?._actionType === "check_out");
+    const getQty = (log) => {
+      if (!log.details) return 0;
+      const q = log.details.quantityChange ?? log.details._quantityChange;
+      return typeof q === "number" ? Math.abs(q) : 0;
+    };
+    let total = 0;
+    auditLogs.forEach((log) => {
+      if (!log.itemId || !isCheckOut(log)) return;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < thisMonthRange.start || t > thisMonthRange.end) return;
+      total += getQty(log);
+    });
+    return total;
+  }, [auditLogs, thisMonthRange]);
 
   const notScannedCount = useMemo(() => {
     const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
@@ -377,17 +428,30 @@ export default function DashboardScreen({
             </Card.Content>
           </Card>
 
-          <Card style={styles.statCard}>
+          <Card
+            style={[styles.statCard, styles.statCardClickable]}
+            onPress={() => setGalPeriodWeek((prev) => !prev)}
+          >
             <Card.Content>
-              <Text style={styles.statLabel}>Gal checked out this week</Text>
-              <Title style={styles.statValue}>{gallonsUsedThisWeek}</Title>
-              <Text style={styles.statSubtext}>{thisWeekRange.label}</Text>
+              <Text style={styles.statLabel}>
+                Checked out this {galPeriodWeek ? "week" : "month"}
+              </Text>
+              <Title style={styles.statValue}>
+                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
+                <Text style={styles.statValueUnit}> gal</Text>
+              </Title>
+              <Text style={styles.statSubtext}>
+                {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
+              </Text>
+              <Text style={styles.statSubtextHint}>
+                Tap for {galPeriodWeek ? "month" : "week"}
+              </Text>
             </Card.Content>
           </Card>
 
           {isAdmin && (
           <Card
-            style={styles.statCard}
+            style={[styles.statCard, styles.statCardClickable]}
             onPress={() => setStaleDays((d) => (d === 30 ? 60 : d === 60 ? 90 : 30))}
           >
             <Card.Content>
@@ -413,11 +477,11 @@ export default function DashboardScreen({
 
           {mostUsedColor && (
             <Card
-              style={styles.statCard}
+              style={[styles.statCard, styles.statCardClickable]}
               onPress={() => setMostUsedByWeek((prev) => !prev)}
             >
               <Card.Content>
-                <Text style={styles.statLabel}>Most gallons checked out</Text>
+                <Text style={styles.statLabel}>Color most checked out</Text>
                 <Title
                   style={[styles.statValue, { fontSize: 18 }]}
                   numberOfLines={1}
@@ -663,6 +727,9 @@ const styles = StyleSheet.create({
     minWidth: 200,
     elevation: 2,
   },
+  statCardClickable: {
+    backgroundColor: "rgba(0,0,0,0.06)",
+  },
   statLabel: {
     fontSize: 12,
     color: "#666",
@@ -674,6 +741,10 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: "bold",
     color: "#6f95ab",
+  },
+  statValueUnit: {
+    fontSize: 18,
+    color: "#666",
   },
   statSubtext: {
     fontSize: 12,
@@ -687,8 +758,9 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
   staleDaysInline: {
-    fontSize: 11,
-    color: "#666",
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#444",
   },
   historyCard: {
     elevation: 2,

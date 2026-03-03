@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Alert, Platform, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme } from 'react-native-paper';
+import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text } from 'react-native-paper';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -55,6 +55,8 @@ export default function App() {
   const actorName = isAdmin ? 'Admin' : (userName || 'unknown');
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [actionLoadingMessage, setActionLoadingMessage] = useState('');
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
 
   useEffect(() => {
@@ -164,6 +166,17 @@ export default function App() {
     }
   };
 
+  const runWithLoading = async (message, fn) => {
+    setActionLoadingMessage(message || '');
+    setIsActionLoading(true);
+    try {
+      await fn();
+    } finally {
+      setIsActionLoading(false);
+      setActionLoadingMessage('');
+    }
+  };
+
   const loadInventory = async (showLoading = false) => {
     try {
       if (showLoading) {
@@ -267,54 +280,56 @@ export default function App() {
 
   const handleCheckIn = async (quantity) => {
     if (!scannedItem) return;
-    
-    // All users can check in via QR scan
-    const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
-    if (result.success) {
-      await loadInventory();
-      Alert.alert(
-        'Success',
-        `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-      );
-      await AuditService.log({
-        type: 'check_in',
-        user: actorName,
-        itemId: scannedItem.id,
-        quantity: quantity,
-        newQuantity: result.item.quantity,
-      });
-      setScannedItem(null);
-      setPreviousScreen('home');
-      setCurrentScreen('list');
-    } else {
-      Alert.alert('Error', 'Failed to check in quantity.');
-    }
+    await runWithLoading('Saving check-in...', async () => {
+      // All users can check in via QR scan
+      const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
+      if (result.success) {
+        await loadInventory();
+        Alert.alert(
+          'Success',
+          `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+        );
+        await AuditService.log({
+          type: 'check_in',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity: quantity,
+          newQuantity: result.item.quantity,
+        });
+        setScannedItem(null);
+        setPreviousScreen('home');
+        setCurrentScreen('list');
+      } else {
+        Alert.alert('Error', 'Failed to check in quantity.');
+      }
+    });
   };
 
   const handleCheckOut = async (quantity) => {
     if (!scannedItem) return;
-    
-    // All users can check out via QR scan
-    const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
-    if (result.success) {
-      await loadInventory();
-      Alert.alert(
-        'Success',
-        `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-      );
-      await AuditService.log({
-        type: 'check_out',
-        user: actorName,
-        itemId: scannedItem.id,
-        quantity: quantity,
-        newQuantity: result.item.quantity,
-      });
-      setScannedItem(null);
-      setPreviousScreen('home');
-      setCurrentScreen('list');
-    } else {
-      Alert.alert('Error', 'Failed to check out quantity.');
-    }
+    await runWithLoading('Saving check-out...', async () => {
+      // All users can check out via QR scan
+      const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
+      if (result.success) {
+        await loadInventory();
+        Alert.alert(
+          'Success',
+          `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+        );
+        await AuditService.log({
+          type: 'check_out',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity: quantity,
+          newQuantity: result.item.quantity,
+        });
+        setScannedItem(null);
+        setPreviousScreen('home');
+        setCurrentScreen('list');
+      } else {
+        Alert.alert('Error', 'Failed to check out quantity.');
+      }
+    });
   };
 
   const handleAddItem = async (item) => {
@@ -322,29 +337,30 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can add new inventory items.');
       return;
     }
-
-    const result = await InventoryService.addItem({
-      ...item,
-      // Treat manual creation as an initial "last scanned" event so the UI isn't blank
-      lastScanned: new Date().toISOString(),
-      lastScannedBy: actorName,
-      userName: actorName,
-    });
-    if (result.success) {
-      await loadInventory();
-      setCurrentScreen('home');
-      setPreviousScreen('home');
-      Alert.alert('Success', 'Item added successfully.');
-      await AuditService.log({
-        type: 'add_item',
-        user: actorName,
-        itemId: result.item?.id,
-        name: result.item?.name,
-        quantity: result.item?.quantity,
+    await runWithLoading('Saving new item...', async () => {
+      const result = await InventoryService.addItem({
+        ...item,
+        // Treat manual creation as an initial "last scanned" event so the UI isn't blank
+        lastScanned: new Date().toISOString(),
+        lastScannedBy: actorName,
+        userName: actorName,
       });
-    } else {
-      Alert.alert('Error', result.error || 'Failed to add item.');
-    }
+      if (result.success) {
+        await loadInventory();
+        setCurrentScreen('home');
+        setPreviousScreen('home');
+        Alert.alert('Success', 'Item added successfully.');
+        await AuditService.log({
+          type: 'add_item',
+          user: actorName,
+          itemId: result.item?.id,
+          name: result.item?.name,
+          quantity: result.item?.quantity,
+        });
+      } else {
+        Alert.alert('Error', result.error || 'Failed to add item.');
+      }
+    });
   };
 
   const handleWriteTag = async (itemId) => {
@@ -533,20 +549,21 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can change inventory quantities.');
       return;
     }
-
-    const result = await InventoryService.updateQuantity(itemId, change, actorName);
-    if (result.success) {
-      await loadInventory();
-      if (selectedItem && selectedItem.id === itemId) {
-        setSelectedItem(result.item);
+    await runWithLoading('Updating quantity...', async () => {
+      const result = await InventoryService.updateQuantity(itemId, change, actorName);
+      if (result.success) {
+        await loadInventory();
+        if (selectedItem && selectedItem.id === itemId) {
+          setSelectedItem(result.item);
+        }
+        await AuditService.log({
+          type: 'qty_adjust',
+          user: actorName,
+          itemId,
+          delta: change,
+        });
       }
-      await AuditService.log({
-        type: 'qty_adjust',
-        user: actorName,
-        itemId,
-        delta: change,
-      });
-    }
+    });
   };
 
   const handleChangeItemId = async (oldId, newId) => {
@@ -554,25 +571,27 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can change paint IDs.');
       return { success: false, error: 'Not allowed' };
     }
-    const result = await InventoryService.updateItemId(oldId, newId, actorName);
-    if (result.success) {
-      await loadInventory();
-      if (selectedItem && selectedItem.id === oldId) {
-        const updatedItem = await InventoryService.getItem(newId);
-        if (updatedItem) {
-          setSelectedItem(updatedItem);
+    return await runWithLoading('Updating paint ID...', async () => {
+      const result = await InventoryService.updateItemId(oldId, newId, actorName);
+      if (result.success) {
+        await loadInventory();
+        if (selectedItem && selectedItem.id === oldId) {
+          const updatedItem = await InventoryService.getItem(newId);
+          if (updatedItem) {
+            setSelectedItem(updatedItem);
+          }
         }
+        await AuditService.log({
+          type: 'change_item_id',
+          user: actorName,
+          from: (oldId ?? '').toString(),
+          to: result.itemId || newId,
+        });
+        return result;
+      } else {
+        return result;
       }
-      await AuditService.log({
-        type: 'change_item_id',
-        user: actorName,
-        from: (oldId ?? '').toString(),
-        to: result.itemId || newId,
-      });
-      return result;
-    } else {
-      return result;
-    }
+    });
   };
 
   const renderScreen = () => {
@@ -736,6 +755,16 @@ export default function App() {
       <View style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}>
         <StatusBar style="auto" />
         {renderScreen()}
+        {isActionLoading && (
+          <View style={styles.loadingOverlay} pointerEvents="auto">
+            <View style={styles.loadingCard}>
+              <ActivityIndicator size="large" color={paperTheme.colors.primary} />
+              {!!actionLoadingMessage && (
+                <Text style={styles.loadingText}>{actionLoadingMessage}</Text>
+              )}
+            </View>
+          </View>
+        )}
       </View>
     </PaperProvider>
   );
@@ -774,10 +803,40 @@ const styles = StyleSheet.create({
   webMain: {
     flex: 1,
     paddingLeft: 20,
-    overflow: 'hidden',
+    ...(Platform.OS === 'web'
+      ? {
+          overflowY: 'auto',
+          overflowX: 'hidden',
+        }
+      : {
+          overflow: 'hidden',
+        }),
   },
   webMainNarrow: {
     flex: 0.4,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  loadingCard: {
+    paddingVertical: 24,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    backgroundColor: '#222',
+    opacity: 0.95,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    textAlign: 'center',
   },
 });
 

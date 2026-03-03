@@ -35,7 +35,6 @@ export default function InventoryListScreen({
   const isWeb = Platform.OS === "web";
   const { width, height } = useWindowDimensions();
   const isDesktop = isWeb && width > 768;
-  const isLargeDesktop = isWeb && width > 1024; // full-height table, no page scroll; smaller gets page scroll
   const isMobileLandscape = !isDesktop && width > height;
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'
@@ -43,6 +42,7 @@ export default function InventoryListScreen({
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
   const [auditLogs, setAuditLogs] = useState([]);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
+  const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
 
   useEffect(() => {
     let cancelled = false;
@@ -291,6 +291,35 @@ export default function InventoryListScreen({
             <Text style={styles.itemLocation}>📍 {item.location}</Text>
           )}
           <Text style={styles.itemId}>ID: {itemId}</Text>
+          {(() => {
+            const t = item.type ? String(item.type).toLowerCase() : "";
+            const label = item.type
+              ? String(item.type).charAt(0).toUpperCase() +
+                String(item.type).slice(1).toLowerCase()
+              : "";
+            const materialTypeColor =
+              t === "paint"
+                ? "#1565c0"
+                : t === "clear"
+                  ? "#e65100"
+                  : t === "stain"
+                    ? "#2e7d32"
+                    : t === "primer"
+                      ? theme.dark
+                        ? "#f5f5dc"
+                        : "#5d4037"
+                      : t === "dye"
+                        ? "#7e57c2"
+                        : theme.dark
+                          ? "#fff"
+                          : "#666";
+            if (!label) return null;
+            return (
+              <Text style={[styles.materialTypeText, { color: materialTypeColor }]}>
+                {label}
+              </Text>
+            );
+          })()}
           {item.lastScanned && (
             <Text style={styles.lastScanned}>
               Last scanned:{" "}
@@ -323,34 +352,17 @@ export default function InventoryListScreen({
     return sortOrder === "asc" ? "↑" : "↓";
   };
 
-  // Desktop/Web Dashboard View
+  // Desktop/Web Dashboard View: only the table area scrolls
   if (isDesktop) {
-    // Large desktop: full-height layout, no page scroll; only table scrolls. Tablet/phone landscape: page scrolls.
-    const useFullHeight = isLargeDesktop;
-    const WebRoot = useFullHeight ? View : ScrollView;
-    const webRootProps = useFullHeight
-      ? {
-          style: [
-            styles.container,
-            styles.webDesktopRoot,
-            { backgroundColor: theme.colors.background },
-          ],
-        }
-      : {
-          style: [styles.container, { backgroundColor: theme.colors.background }],
-          contentContainerStyle: styles.webScrollContent,
-          refreshControl: (
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.colors.primary}
-            />
-          ),
-        };
-
     return (
-      <WebRoot {...webRootProps}>
-        <View style={[styles.webContainer, useFullHeight && styles.webContainerFlex]}>
+      <View
+        style={[
+          styles.container,
+          styles.webDesktopRoot,
+          { backgroundColor: theme.colors.background },
+        ]}
+      >
+        <View style={[styles.webContainer, styles.webContainerFlex]}>
           {/* Header */}
           <View style={styles.webHeader}>
             <View style={styles.webHeaderLeft}>
@@ -382,8 +394,8 @@ export default function InventoryListScreen({
             </View>
           </View>
 
-          {/* Analytics + Table: centered on desktop to balance empty space */}
-          <View style={styles.webContentCentered}>
+          {/* Analytics + Table: centered; table area fills remaining height and scrolls */}
+          <View style={[styles.webContentCentered, styles.webContentCenteredFlex]}>
           {/* Analytics Cards */}
           <View style={styles.analyticsRow}>
             <Card style={styles.analyticsCard}>
@@ -434,27 +446,29 @@ export default function InventoryListScreen({
                 </Card.Content>
               </Card>
             )}
-            <Card style={styles.analyticsCard}>
+            <Card
+              style={[styles.analyticsCard, styles.analyticsCardFilter]}
+              onPress={() => setGalPeriodWeek((prev) => !prev)}
+            >
               <Card.Content>
-                <Text style={styles.analyticsLabel}>Gal checked out this week</Text>
-                <Title style={styles.analyticsValue}>
-                  {gallonsUsedThisWeek}
-                </Title>
-                <Text style={styles.analyticsSubtext}>{thisWeekRange.label}</Text>
-              </Card.Content>
-            </Card>
-            <Card style={styles.analyticsCard}>
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>Gal checked out this month</Text>
-                <Title style={styles.analyticsValue}>
-                  {gallonsUsedThisMonth}
-                </Title>
-                <Text style={styles.analyticsSubtext}>{thisMonthRange.label}</Text>
+                <Text style={styles.analyticsLabel}>
+                  Checked out this {galPeriodWeek ? "week" : "month"}
+                </Text>
+              <Title style={styles.analyticsValue}>
+                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
+                <Text style={styles.analyticsValueUnit}> gal</Text>
+              </Title>
+               <Text style={styles.analyticsSubtext}>
+                  {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
+                </Text>
+                <Text style={styles.analyticsSubtext}>
+                  Tap for {galPeriodWeek ? "month" : "week"}
+                </Text>
               </Card.Content>
             </Card>
             {mostUsedColor && (
               <Card
-                style={styles.analyticsCard}
+                style={[styles.analyticsCard, styles.analyticsCardFilter]}
                 onPress={() => setMostUsedByWeek((prev) => !prev)}
               >
                 <Card.Content>
@@ -479,10 +493,10 @@ export default function InventoryListScreen({
             )}
           </View>
 
-          {/* Search and Table - on large desktop fills remaining height */}
-          <View style={useFullHeight ? styles.tableCardWrapper : undefined}>
-            <Card style={useFullHeight ? styles.tableCardFlex : styles.tableCard}>
-              <Card.Content style={useFullHeight ? styles.tableCardContentFlex : undefined}>
+          {/* Search and Table - fills remaining height, scrolls internally */}
+          <View style={styles.tableCardWrapper}>
+            <Card style={styles.tableCardFlex}>
+              <Card.Content style={styles.tableCardContentFlex}>
                 <View style={styles.tableHeader}>
                   <Searchbar
                     placeholder="Search by name, ID, location, or type..."
@@ -507,13 +521,17 @@ export default function InventoryListScreen({
                   </View>
                 ) : (
                   <ScrollView
-                    style={[
-                      styles.tableScrollOuter,
-                      !useFullHeight && styles.tableScrollOuterMaxHeight,
-                    ]}
+                    style={styles.tableScrollOuter}
                     contentContainerStyle={styles.tableScrollOuterContent}
                     showsVerticalScrollIndicator={true}
                     nestedScrollEnabled
+                    refreshControl={
+                      <RefreshControl
+                        refreshing={isRefreshing}
+                        onRefresh={onRefresh}
+                        tintColor={theme.colors.primary}
+                      />
+                    }
                   >
                     <ScrollView
                       horizontal
@@ -764,53 +782,65 @@ export default function InventoryListScreen({
           </View>
           </View>
         </View>
-      </WebRoot>
+      </View>
     );
   }
 
   // Mobile View (original card-based layout)
-  return (
-    <View
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-    >
-      <View style={styles.header}>
-        <Button icon="arrow-left" onPress={onBack} mode="text">
-          Back
-        </Button>
-        <Text style={styles.headerTitle}>Inventory</Text>
-        <View style={styles.refreshContainer}>
-          <IconButton
-            icon="refresh"
-            size={24}
-            onPress={onRefresh}
-            disabled={isRefreshing}
-            iconColor={theme.colors.primary}
-          />
-          {isRefreshing && (
-            <ActivityIndicator
-              size="small"
-              color={theme.colors.primary}
-              style={styles.refreshIndicator}
-            />
-          )}
-        </View>
-      </View>
-
-      <Searchbar
-        placeholder="Search by name, ID, location, or type..."
-        onChangeText={setSearchQuery}
-        value={searchQuery}
-        style={styles.searchbar}
-      />
-
-      {/* Mobile stats: only in landscape; hide when value is 0; filter cards are tappable */}
-      {isMobileLandscape && (
-      <View
+  // Mobile landscape: whole page (header + search + stats + list) in one ScrollView with overflow scroll
+  if (isMobileLandscape) {
+    return (
+      <ScrollView
         style={[
-          styles.analyticsRowMobile,
-          styles.analyticsRowMobileLandscape,
+          styles.container,
+          { backgroundColor: theme.colors.background },
+          Platform.OS === "web" && styles.mobileLandscapeScrollWeb,
         ]}
+        contentContainerStyle={styles.mobileLandscapeScrollContent}
+        showsVerticalScrollIndicator={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+          />
+        }
       >
+        <View style={styles.header}>
+          <Button icon="arrow-left" onPress={onBack} mode="text">
+            Back
+          </Button>
+          <Text style={styles.headerTitle}>Inventory</Text>
+          <View style={styles.refreshContainer}>
+            <IconButton
+              icon="refresh"
+              size={24}
+              onPress={onRefresh}
+              disabled={isRefreshing}
+              iconColor={theme.colors.primary}
+            />
+            {isRefreshing && (
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.primary}
+                style={styles.refreshIndicator}
+              />
+            )}
+          </View>
+        </View>
+
+        <Searchbar
+            placeholder="Search by name, ID, location, or type..."
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchbar}
+          />
+          <View
+            style={[
+              styles.analyticsRowMobile,
+              styles.analyticsRowMobileLandscape,
+            ]}
+          >
         {analytics.totalGallons > 0 && (
           <Card
             style={[
@@ -883,12 +913,13 @@ export default function InventoryListScreen({
             </Card.Content>
           </Card>
         )}
-        {gallonsUsedThisWeek > 0 && (
+        {(gallonsUsedThisWeek > 0 || gallonsUsedThisMonth > 0) && (
           <Card
             style={[
               styles.analyticsCardMobile,
               isMobileLandscape && styles.analyticsCardMobileLandscape,
             ]}
+            onPress={() => setGalPeriodWeek((prev) => !prev)}
           >
             <Card.Content
               style={[
@@ -896,30 +927,15 @@ export default function InventoryListScreen({
                 isMobileLandscape && styles.analyticsCardMobileContentLandscape,
               ]}
             >
-              <Text style={styles.analyticsLabelMobile}>Gal this week</Text>
+              <Text style={styles.analyticsLabelMobile}>
+                Gal this {galPeriodWeek ? "week" : "month"}
+              </Text>
               <Title style={styles.analyticsValueMobile}>
-                {gallonsUsedThisWeek}
+                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
               </Title>
-            </Card.Content>
-          </Card>
-        )}
-        {gallonsUsedThisMonth > 0 && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-            ]}
-          >
-            <Card.Content
-              style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
-              ]}
-            >
-              <Text style={styles.analyticsLabelMobile}>Gal this month</Text>
-              <Title style={styles.analyticsValueMobile}>
-                {gallonsUsedThisMonth}
-              </Title>
+              <Text style={styles.analyticsSubtextMobile}>
+                Tap for {galPeriodWeek ? "month" : "week"}
+              </Text>
             </Card.Content>
           </Card>
         )}
@@ -928,6 +944,7 @@ export default function InventoryListScreen({
             style={[
               styles.analyticsCardMobile,
               isMobileLandscape && styles.analyticsCardMobileLandscape,
+              styles.analyticsCardFilter,
             ]}
             onPress={() => setMostUsedByWeek((prev) => !prev)}
           >
@@ -950,9 +967,66 @@ export default function InventoryListScreen({
             </Card.Content>
           </Card>
         )}
-      </View>
-      )}
+          </View>
 
+          {filteredAndSortedInventory.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>
+                {searchQuery ? "No items found" : "No items in inventory"}
+              </Text>
+              <Text style={styles.emptySubtext}>
+                {searchQuery
+                  ? "Try a different search term"
+                  : "Scan a QR Code to add your first item"}
+              </Text>
+            </View>
+          ) : (
+            <View style={[styles.list, styles.listLandscape]}>
+              {filteredAndSortedInventory.map((item) => (
+                <View key={item.id?.toString() || Math.random().toString()}>
+                  {renderItem({ item })}
+                </View>
+              ))}
+            </View>
+          )}
+      </ScrollView>
+    );
+  }
+
+  // Mobile portrait: fixed header, scrollable list only
+  return (
+    <View
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
+      <View style={styles.header}>
+        <Button icon="arrow-left" onPress={onBack} mode="text">
+          Back
+        </Button>
+        <Text style={styles.headerTitle}>Inventory</Text>
+        <View style={styles.refreshContainer}>
+          <IconButton
+            icon="refresh"
+            size={24}
+            onPress={onRefresh}
+            disabled={isRefreshing}
+            iconColor={theme.colors.primary}
+          />
+          {isRefreshing && (
+            <ActivityIndicator
+              size="small"
+              color={theme.colors.primary}
+              style={styles.refreshIndicator}
+            />
+          )}
+        </View>
+      </View>
+
+      <Searchbar
+        placeholder="Search by name, ID, location, or type..."
+        onChangeText={setSearchQuery}
+        value={searchQuery}
+        style={styles.searchbar}
+      />
       {filteredAndSortedInventory.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
@@ -971,10 +1045,7 @@ export default function InventoryListScreen({
           keyExtractor={(item) =>
             item.id?.toString() || Math.random().toString()
           }
-          contentContainerStyle={[
-            styles.list,
-            isMobileLandscape && styles.listLandscape,
-          ]}
+          contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1022,6 +1093,13 @@ const styles = StyleSheet.create({
   },
   list: {
     padding: 16,
+  },
+  mobileLandscapeScrollWeb: {
+    overflow: "auto",
+    overflowX: "hidden",
+  },
+  mobileLandscapeScrollContent: {
+    paddingBottom: 32,
   },
   card: {
     marginBottom: 12,
@@ -1105,6 +1183,10 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 1200,
   },
+  webContentCenteredFlex: {
+    flex: 1,
+    minHeight: 0,
+  },
   webScrollContent: {},
   webHeader: {
     flexDirection: "row",
@@ -1136,10 +1218,10 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   analyticsCardFilter: {
-    backgroundColor: "rgba(0,0,0,0.03)",
+    backgroundColor: "rgba(0,0,0,0.04)",
   },
   analyticsCardFilterActive: {
-    backgroundColor: "rgba(102, 126, 234, 0.12)",
+    backgroundColor: "rgba(0,0,0,0.08)",
   },
   analyticsRowMobile: {
     flexDirection: "row",
@@ -1203,6 +1285,10 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#6f95ab",
   },
+  analyticsValueUnit: {
+    fontSize: 18,
+    color: "#666",
+  },
   analyticsSubtext: {
     fontSize: 11,
     color: "#999",
@@ -1252,9 +1338,6 @@ const styles = StyleSheet.create({
       overflowY: "auto",
       overflowX: "hidden",
     }),
-  },
-  tableScrollOuterMaxHeight: {
-    maxHeight: 560,
   },
   tableScrollOuterContent: {
     flexGrow: 0,
