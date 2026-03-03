@@ -34,7 +34,8 @@ export default function InventoryListScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width, height } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
   const isMobileLandscape = !isDesktop && width > height;
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'

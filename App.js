@@ -38,8 +38,9 @@ const darkTheme = {
 export default function App() {
   const isWeb = Platform.OS === 'web';
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
-  const isNarrowDesktop = isWeb && width > 768 && width <= 1024;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
+  const isNarrowDesktop = isWeb && width >= desktopBreakpoint && width <= 1024;
   
   const [currentScreen, setCurrentScreen] = useState('home');
   const [previousScreen, setPreviousScreen] = useState('home');

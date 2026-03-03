@@ -44,7 +44,8 @@ export default function ItemDetailScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
   const [name, setName] = useState(item?.name || "");
   const [quantity, setQuantity] = useState(item?.quantity?.toString() || "0");
   const [type, setType] = useState(item?.type || "");

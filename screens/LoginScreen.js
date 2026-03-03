@@ -14,7 +14,8 @@ export default function LoginScreen({ onLogin, isDarkMode, onToggleDarkMode }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
   const [name, setName] = useState("");
 
   const submit = () => {

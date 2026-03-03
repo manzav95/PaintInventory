@@ -36,7 +36,8 @@ export default function SettingsScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
   const [nextIdInput, setNextIdInput] = useState(nextIdFormatted || "");
   const [minQuantityInput, setMinQuantityInput] = useState(
     String(minQuantity ?? 30),

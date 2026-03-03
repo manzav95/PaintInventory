@@ -17,7 +17,8 @@ export default function CheckInOutScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 768;
+  const desktopBreakpoint = 700;
+  const isDesktop = isWeb && width >= desktopBreakpoint;
   const [quantity, setQuantity] = useState("");
   const [action, setAction] = useState(null); // 'in' or 'out'
 
