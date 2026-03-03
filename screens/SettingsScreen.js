@@ -92,14 +92,6 @@ export default function SettingsScreen({
                   >
                     Dark Mode
                   </Text>
-                  <Text
-                    style={[
-                      styles.settingDescription,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Toggle dark or light theme for this device.
-                  </Text>
                 </View>
                 <Switch
                   value={isDarkMode}
