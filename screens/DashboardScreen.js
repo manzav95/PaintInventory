@@ -410,11 +410,10 @@ export default function DashboardScreen({
           {isAdmin && (
           <Card style={styles.statCard}>
             <Card.Content>
-              <Text style={styles.statLabel}>Total items</Text>
-              <Title style={styles.statValue}>{inventory.length}</Title>
-              <Text style={styles.statSubtext}>
-                {inventory.filter((i) => (i.type || "").toLowerCase() === "paint").length} paint
-              </Text>
+              <Text style={styles.statLabel}>Total value</Text>
+              <Title style={styles.statValue}>
+                ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </Title>
             </Card.Content>
           </Card>
           )}
@@ -427,6 +426,18 @@ export default function DashboardScreen({
               </Title>
             </Card.Content>
           </Card>
+
+          {isAdmin && (
+          <Card style={styles.statCard}>
+            <Card.Content>
+              <Text style={styles.statLabel}>Total items</Text>
+              <Title style={styles.statValue}>{inventory.length}</Title>
+              <Text style={styles.statSubtext}>
+                {inventory.filter((i) => (i.type || "").toLowerCase() === "paint").length} paint
+              </Text>
+            </Card.Content>
+          </Card>
+          )}
 
           <Card
             style={[styles.statCard, styles.statCardClickable]}
@@ -460,17 +471,6 @@ export default function DashboardScreen({
               </Text>
               <Title style={styles.statValue}>{notScannedCount}</Title>
               <Text style={styles.statSubtextHint}>Tap to change period</Text>
-            </Card.Content>
-          </Card>
-          )}
-
-          {isAdmin && (
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Total value</Text>
-              <Title style={styles.statValue}>
-                ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </Title>
             </Card.Content>
           </Card>
           )}
