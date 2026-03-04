@@ -22,30 +22,33 @@ export default function CheckInOutScreen({
   const [quantity, setQuantity] = useState("");
   const [action, setAction] = useState(null); // 'in' or 'out'
 
+  // Alert.alert is a no-op on web; use window.alert so user always gets feedback
+  const showAlert = (title, message) => {
+    if (Platform.OS === "web" && typeof window !== "undefined" && window.alert) {
+      window.alert(message ? `${title}\n\n${message}` : title);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
   const handleSubmit = () => {
     const qty = parseFloat(quantity);
-    const currentQty = typeof item.quantity === "number" ? item.quantity : 0;
+    const currentQty = Number(item.quantity) || 0;
 
     if (isNaN(qty) || qty <= 0) {
-      Alert.alert(
-        "Invalid Quantity",
-        "Please enter a valid quantity greater than 0.",
-      );
+      showAlert("Invalid Quantity", "Please enter a valid quantity greater than 0.");
       return;
     }
 
     if (action === "out") {
       if (currentQty <= 0) {
-        Alert.alert(
-          "Cannot Check Out",
-          "This item currently has 0 gallons available to check out.",
-        );
+        showAlert("Cannot check out", "This item currently has 0 gallons available to check out.");
         return;
       }
       if (qty > currentQty) {
-        Alert.alert(
-          "Cannot Check Out",
-          `You are trying to remove ${qty} gallons but only ${currentQty} gallons are available.`,
+        showAlert(
+          "Cannot check out",
+          `Only ${currentQty} gallon${currentQty !== 1 ? "s" : ""} available. You cannot check out ${qty} gallons.`,
         );
         return;
       }

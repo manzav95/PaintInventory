@@ -307,14 +307,100 @@ app.get('/api/audit', async (req, res) => {
   }
 });
 
+// --- Upcoming orders (admin use) ---
+app.get('/api/orders', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10) || 100, 500);
+    const orders = await db.getOrders(limit);
+    res.json(orders);
+  } catch (error) {
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ error: 'Failed to fetch orders' });
+  }
+});
+
+app.get('/api/orders/on-order-summary', async (req, res) => {
+  try {
+    const summary = await db.getOnOrderSummary();
+    res.json(summary);
+  } catch (error) {
+    console.error('Error fetching on-order summary:', error);
+    res.status(500).json({ error: 'Failed to fetch on-order summary' });
+  }
+});
+
+app.post('/api/orders', async (req, res) => {
+  const body = req.body || {};
+  console.log('[Orders] POST /api/orders received. Body keys:', Object.keys(body), 'po_number:', body.po_number, 'lines count:', Array.isArray(body.lines) ? body.lines.length : 0);
+  try {
+    const po_number = body.po_number;
+    const lead_time_days = body.lead_time_days;
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const userName = body.userName || null;
+    if (!po_number || !String(po_number).trim()) {
+      return res.status(400).json({ success: false, error: 'PO number is required.' });
+    }
+    const order = await db.createOrder(
+      String(po_number).trim(),
+      lead_time_days,
+      lines,
+      userName,
+    );
+    console.log('[Orders] Created order id:', order?.id);
+    res.json(order);
+  } catch (error) {
+    console.error('Error creating order:', error);
+    res.status(500).json({ error: 'Failed to create order', detail: error.message });
+  }
+});
+
+app.put('/api/orders/:id', async (req, res) => {
+  const body = req.body || {};
+  console.log('[Orders] PUT /api/orders/' + req.params.id + ' received. Body keys:', Object.keys(body));
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) return res.status(400).json({ success: false, error: 'Invalid order ID' });
+    const po_number = body.po_number;
+    const lead_time_days = body.lead_time_days;
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    if (!po_number || !String(po_number).trim()) {
+      return res.status(400).json({ success: false, error: 'PO number is required.' });
+    }
+    const result = await db.updateOrder(id, po_number, lead_time_days, lines);
+    if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
+    console.log('[Orders] Updated order id:', id);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating order:', error);
+    res.status(500).json({ error: 'Failed to update order', detail: error.message });
+  }
+});
+
+app.patch('/api/orders/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ success: false, error: 'Invalid order ID' });
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ success: false, error: 'status is required' });
+    const result = await db.updateOrderStatus(id, status);
+    if (!result.success) return res.status(404).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating order:', error);
+    res.status(500).json({ error: 'Failed to update order' });
+  }
+});
+
 // Root route - helpful info
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Paint Inventory Tracker API',
     version: '1.0.0',
+    orders: true,
     endpoints: {
       health: '/api/health',
       items: '/api/items',
+      orders: '/api/orders',
       'settings: next-id': '/api/settings/next-id',
       'settings: min-quantity': '/api/settings/min-quantity',
       audit: '/api/audit'

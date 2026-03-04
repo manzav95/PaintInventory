@@ -227,10 +227,21 @@ class InventoryService {
       if (!item) {
         return { success: false, error: 'Item not found' };
       }
-      
-      const newQuantity = Math.max(0, (item.quantity || 0) + change);
+
+      const currentQty = Number(item.quantity) || 0;
+      const newQuantity = currentQty + change;
+
+      // For check-out, do not allow negative stock; return a clear error instead of clamping
+      if (actionType === 'check_out' && newQuantity < 0) {
+        return {
+          success: false,
+          error: `Only ${currentQty} gallon${currentQty !== 1 ? 's' : ''} available. You cannot check out ${Math.abs(change)} gallons.`,
+        };
+      }
+
+      const clampedQuantity = Math.max(0, newQuantity);
       const updateData = {
-        quantity: newQuantity,
+        quantity: clampedQuantity,
         lastScanned: new Date().toISOString(),
         lastScannedBy: userName || null,
         userName,

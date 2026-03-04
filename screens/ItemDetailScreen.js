@@ -40,6 +40,7 @@ export default function ItemDetailScreen({
   onQuantityChange,
   onBack,
   isAdmin,
+  onOrderSummary = {},
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -57,6 +58,9 @@ export default function ItemDetailScreen({
   const [priceInput, setPriceInput] = useState(
     item?.price != null && item?.price !== "" ? String(item.price) : "",
   );
+  const [displayOrderInput, setDisplayOrderInput] = useState(
+    item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
+  );
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
 
@@ -71,6 +75,11 @@ export default function ItemDetailScreen({
   useEffect(() => {
     setType(item?.type || "");
   }, [item?.id, item?.type]);
+  useEffect(() => {
+    setDisplayOrderInput(
+      item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
+    );
+  }, [item?.id, item?.display_order]);
 
   const handleSave = async () => {
     if (!isAdmin) {
@@ -111,6 +120,11 @@ export default function ItemDetailScreen({
       Alert.alert("Invalid", "Unit price must be 0 or greater.");
       return;
     }
+    const displayOrderVal = displayOrderInput.trim() === "" ? 0 : parseInt(displayOrderInput, 10);
+    if (isNaN(displayOrderVal) || displayOrderVal < 0) {
+      Alert.alert("Invalid", "Display order must be 0 or greater.");
+      return;
+    }
 
     const priceVal = priceInput.trim() === "" ? null : parseFloat(priceInput);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
@@ -123,6 +137,7 @@ export default function ItemDetailScreen({
       ...(minQ !== undefined && { minQuantity: minQ }),
       ...(priceVal != null && !isNaN(priceVal) && priceVal >= 0 ? { price: priceVal } : { price: null }),
       type: typeVal,
+      display_order: displayOrderVal,
     };
 
     onSave(updatedItem);
@@ -335,6 +350,27 @@ export default function ItemDetailScreen({
                 disabled={!isAdmin}
               />
             </View>
+            {(() => {
+              const id = item?.id != null ? item.id : null;
+              const orderInfo = id != null && (onOrderSummary[id] || onOrderSummary[String(id)]);
+              if (orderInfo && orderInfo.quantity > 0) {
+                const exp = orderInfo.expectedDate
+                  ? new Date(orderInfo.expectedDate).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })
+                  : "";
+                return (
+                  <Text
+                    style={[styles.onOrderText, { color: theme.colors.primary, marginBottom: 12 }]}
+                  >
+                    On order: {orderInfo.quantity} gal{exp ? ` · Expected ~${exp}` : ""}
+                  </Text>
+                );
+              }
+              return null;
+            })()}
 
             <Text style={styles.label}>Minimum quantity (low stock)</Text>
             {isAdmin ? (
@@ -373,6 +409,21 @@ export default function ItemDetailScreen({
                   ? `$${Number(item.price).toFixed(2)}`
                   : "—"}
               </Text>
+            )}
+
+            {isAdmin && (
+              <>
+                <Text style={styles.label}>Display order (for True order list)</Text>
+                <TextInput
+                  label="Order number"
+                  value={displayOrderInput}
+                  onChangeText={setDisplayOrderInput}
+                  mode="outlined"
+                  keyboardType="number-pad"
+                  style={styles.input}
+                  placeholder="0"
+                />
+              </>
             )}
 
             {item?.lastScanned && (
@@ -464,6 +515,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "monospace",
     color: "#6f95ab",
+  },
+  onOrderText: {
+    fontSize: 14,
   },
   input: {
     marginBottom: 16,

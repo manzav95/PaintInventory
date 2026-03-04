@@ -30,6 +30,7 @@ export default function InventoryListScreen({
   onRefresh,
   isRefreshing = false,
   isAdmin = false,
+  onOrderSummary = {},
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -40,6 +41,7 @@ export default function InventoryListScreen({
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc', 'desc'
+  const [listOrderMode, setListOrderMode] = useState("alphabetical"); // 'alphabetical' | 'trueOrder'
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
   const [auditLogs, setAuditLogs] = useState([]);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
@@ -224,35 +226,46 @@ export default function InventoryListScreen({
     });
 
     // Sort
-    filtered.sort((a, b) => {
-      let aVal, bVal;
-      switch (sortBy) {
-        case "quantity":
-          aVal = a.quantity || 0;
-          bVal = b.quantity || 0;
-          break;
-        case "lastScanned":
-          aVal = a.lastScanned ? new Date(a.lastScanned).getTime() : 0;
-          bVal = b.lastScanned ? new Date(b.lastScanned).getTime() : 0;
-          break;
-        case "location":
-          aVal = (a.location || "").toLowerCase();
-          bVal = (b.location || "").toLowerCase();
-          break;
-        default: // 'name'
-          aVal = (a.name || "").toLowerCase();
-          bVal = (b.name || "").toLowerCase();
-      }
+    if (listOrderMode === "trueOrder") {
+      filtered.sort((a, b) => {
+        const aOrder = a.display_order != null && !isNaN(Number(a.display_order)) ? Number(a.display_order) : 999999;
+        const bOrder = b.display_order != null && !isNaN(Number(b.display_order)) ? Number(b.display_order) : 999999;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        const aName = (a.name || "").toLowerCase();
+        const bName = (b.name || "").toLowerCase();
+        return aName.localeCompare(bName);
+      });
+    } else {
+      filtered.sort((a, b) => {
+        let aVal, bVal;
+        switch (sortBy) {
+          case "quantity":
+            aVal = a.quantity || 0;
+            bVal = b.quantity || 0;
+            break;
+          case "lastScanned":
+            aVal = a.lastScanned ? new Date(a.lastScanned).getTime() : 0;
+            bVal = b.lastScanned ? new Date(b.lastScanned).getTime() : 0;
+            break;
+          case "location":
+            aVal = (a.location || "").toLowerCase();
+            bVal = (b.location || "").toLowerCase();
+            break;
+          default: // 'name'
+            aVal = (a.name || "").toLowerCase();
+            bVal = (b.name || "").toLowerCase();
+        }
 
-      if (sortOrder === "asc") {
-        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-      } else {
-        return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
-      }
-    });
+        if (sortOrder === "asc") {
+          return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+        } else {
+          return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+        }
+      });
+    }
 
     return filtered;
-  }, [inventory, searchQuery, sortBy, sortOrder, stockFilter, minQuantity]);
+  }, [inventory, searchQuery, sortBy, sortOrder, stockFilter, minQuantity, listOrderMode]);
 
   const renderItem = ({ item }) => {
     const isLowStock =
@@ -270,12 +283,8 @@ export default function InventoryListScreen({
 
     return (
       <Card
-        style={[
-          styles.card,
-          lowStockCardStyle,
-          !isAdmin && styles.nonClickableCard,
-        ]}
-        onPress={isAdmin ? () => onItemSelect(item) : undefined}
+        style={[styles.card, lowStockCardStyle]}
+        onPress={() => onItemSelect(item)}
       >
         <Card.Content>
           <View style={styles.itemHeader}>
@@ -292,6 +301,20 @@ export default function InventoryListScreen({
             <Text style={styles.itemLocation}>📍 {item.location}</Text>
           )}
           <Text style={styles.itemId}>ID: {itemId}</Text>
+          {(() => {
+            const orderInfo = onOrderSummary[item.id] || onOrderSummary[itemId];
+            if (orderInfo && orderInfo.quantity > 0) {
+              const exp = orderInfo.expectedDate
+                ? new Date(orderInfo.expectedDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                : "";
+              return (
+                <Text style={[styles.onOrderText, { color: theme.colors.primary }]}>
+                  On order: {orderInfo.quantity} gal{exp ? ` · Expected ~${exp}` : ""}
+                </Text>
+              );
+            }
+            return null;
+          })()}
           {(() => {
             const t = item.type ? String(item.type).toLowerCase() : "";
             const label = item.type
@@ -506,6 +529,16 @@ export default function InventoryListScreen({
                     style={styles.webSearchbar}
                     inputStyle={styles.searchbarInput}
                   />
+                  <Button
+                    mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
+                    compact
+                    onPress={() =>
+                      setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
+                    }
+                    style={styles.orderToggleButton}
+                  >
+                    {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
+                  </Button>
                   <Text style={styles.resultCount}>
                     {filteredAndSortedInventory.length} of {inventory.length}{" "}
                     items
@@ -576,6 +609,9 @@ export default function InventoryListScreen({
                       <DataTable.Title style={styles.tableCell}>
                         Location
                       </DataTable.Title>
+                      <DataTable.Title style={styles.tableCell}>
+                        On order
+                      </DataTable.Title>
                       <DataTable.Title
                         style={styles.lastScannedCell}
                         sortDirection={
@@ -598,9 +634,7 @@ export default function InventoryListScreen({
                       return (
                         <DataTable.Row
                           key={item.id}
-                          onPress={
-                            isAdmin ? () => onItemSelect(item) : undefined
-                          }
+                          onPress={() => onItemSelect(item)}
                           style={
                             isLowStock
                               ? {
@@ -703,6 +737,43 @@ export default function InventoryListScreen({
                             >
                               {item.location || "-"}
                             </Text>
+                          </DataTable.Cell>
+                          <DataTable.Cell style={styles.tableCell}>
+                            {(() => {
+                              const orderInfo =
+                                onOrderSummary[item.id] ||
+                                onOrderSummary[String(item.id)];
+                              if (orderInfo && orderInfo.quantity > 0) {
+                                const exp = orderInfo.expectedDate
+                                  ? new Date(orderInfo.expectedDate).toLocaleDateString("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                      year: "numeric",
+                                    })
+                                  : "";
+                                return (
+                                  <Text
+                                    style={{
+                                      fontSize: 12,
+                                      color: theme.colors.primary,
+                                    }}
+                                  >
+                                    {orderInfo.quantity} gal
+                                    {exp ? ` ~${exp}` : ""}
+                                  </Text>
+                                );
+                              }
+                              return (
+                                <Text
+                                  style={[
+                                    styles.idText,
+                                    { color: theme.dark ? "#999" : "#999" },
+                                  ]}
+                                >
+                                  —
+                                </Text>
+                              );
+                            })()}
                           </DataTable.Cell>
                           <DataTable.Cell style={styles.lastScannedCell}>
                             {(() => {
@@ -836,6 +907,18 @@ export default function InventoryListScreen({
             value={searchQuery}
             style={styles.searchbar}
           />
+          <View style={styles.orderToggleRow}>
+            <Button
+              mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
+              compact
+              onPress={() =>
+                setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
+              }
+              style={styles.orderToggleButtonMobile}
+            >
+              {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
+            </Button>
+          </View>
           <View
             style={[
               styles.analyticsRowMobile,
@@ -1028,6 +1111,18 @@ export default function InventoryListScreen({
         value={searchQuery}
         style={styles.searchbar}
       />
+      <View style={styles.orderToggleRow}>
+        <Button
+          mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
+          compact
+          onPress={() =>
+            setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
+          }
+          style={styles.orderToggleButtonMobile}
+        >
+          {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
+        </Button>
+      </View>
       {filteredAndSortedInventory.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
@@ -1139,6 +1234,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#999",
     fontFamily: "monospace",
+    marginBottom: 4,
+  },
+  onOrderText: {
+    fontSize: 12,
     marginBottom: 4,
   },
   lastScanned: {
@@ -1330,6 +1429,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#666",
     whiteSpace: "nowrap",
+  },
+  orderToggleButton: {
+    alignSelf: "center",
+  },
+  orderToggleRow: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  orderToggleButtonMobile: {
+    alignSelf: "flex-start",
   },
   tableScrollOuter: {
     flex: 1,

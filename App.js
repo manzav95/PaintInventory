@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Alert, Platform, useWindowDimensions } from 'react-native';
+import { StyleSheet, View, Alert, Platform, useWindowDimensions, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text } from 'react-native-paper';
+import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
 import AuditService from './services/auditService';
+import OrderService from './services/orderService';
 import config from './config';
 import HomeScreen from './screens/HomeScreen';
 import DashboardScreen from './screens/DashboardScreen';
@@ -15,8 +16,10 @@ import QRScanScreen from './screens/QRScanScreen';
 import AddItemScreen from './screens/AddItemScreen';
 import LoginScreen from './screens/LoginScreen';
 import ItemDetailScreen from './screens/ItemDetailScreen';
+import ItemTransactionHistoryScreen from './screens/ItemTransactionHistoryScreen';
 import InventoryListScreen from './screens/InventoryListScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 
 const lightTheme = {
@@ -58,6 +61,8 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionLoadingMessage, setActionLoadingMessage] = useState('');
+  const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
+  const [onOrderSummary, setOnOrderSummary] = useState({});
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
 
   useEffect(() => {
@@ -210,6 +215,14 @@ export default function App() {
       setNextIdFormatted(formatted);
       const minQ = await InventoryService.getMinQuantity();
       setMinQuantity(minQ);
+
+      try {
+        const summary = await OrderService.getOnOrderSummary();
+        setOnOrderSummary(summary || {});
+      } catch (e) {
+        console.error('Error loading on-order summary:', e);
+        setOnOrderSummary({});
+      }
     } catch (error) {
       console.error('Error loading inventory:', error);
       Alert.alert('Error', `Failed to load inventory: ${error.message}`);
@@ -328,7 +341,12 @@ export default function App() {
         setPreviousScreen('home');
         setCurrentScreen('list');
       } else {
-        Alert.alert('Error', 'Failed to check out quantity.');
+        const msg = result.error || 'Failed to check out quantity.';
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+          window.alert(`Cannot check out\n\n${msg}`);
+        } else {
+          Alert.alert('Cannot check out', msg);
+        }
       }
     });
   };
@@ -408,6 +426,7 @@ export default function App() {
         ...(item.hasOwnProperty('minQuantity') && { minQuantity: item.minQuantity }),
         ...(item.hasOwnProperty('price') && { price: item.price }),
         ...(item.hasOwnProperty('type') && { type: item.type }),
+        ...(item.hasOwnProperty('display_order') && { display_order: item.display_order }),
       };
       result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
     } else {
@@ -628,6 +647,10 @@ export default function App() {
                     setPreviousScreen('home');
                     setCurrentScreen('settings');
                   }}
+                  onOpenUpcomingOrders={isAdmin ? () => {
+                    setPreviousScreen('home');
+                    setCurrentScreen('orders');
+                  } : undefined}
                   isWeb={true}
                 />
               </View>
@@ -665,6 +688,10 @@ export default function App() {
               setPreviousScreen('home');
               setCurrentScreen('settings');
             }}
+            onOpenUpcomingOrders={isAdmin ? () => {
+              setPreviousScreen('home');
+              setCurrentScreen('orders');
+            } : undefined}
           />
         );
       case 'scan':
@@ -711,6 +738,7 @@ export default function App() {
             onQuantityChange={handleQuantityChange}
             onBack={() => setCurrentScreen(previousScreen)}
             isAdmin={isAdmin}
+            onOrderSummary={onOrderSummary}
           />
         );
       case 'list':
@@ -721,12 +749,33 @@ export default function App() {
             inventory={inventory}
             minQuantity={minQuantity}
             isAdmin={isAdmin}
+            onOrderSummary={onOrderSummary}
             onItemSelect={(item) => {
               setPreviousScreen('list');
               setSelectedItem(item);
-              setCurrentScreen('detail');
+              if (isAdmin) {
+                setShowAdminItemDialog(true);
+              } else {
+                setCurrentScreen('itemHistory');
+              }
             }}
             onBack={() => setCurrentScreen('home')}
+          />
+        );
+      case 'itemHistory':
+        return (
+          <ItemTransactionHistoryScreen
+            item={selectedItem}
+            onBack={() => setCurrentScreen('list')}
+          />
+        );
+      case 'orders':
+        return (
+          <UpcomingOrdersScreen
+            onBack={() => setCurrentScreen(previousScreen)}
+            inventory={inventory}
+            userName={actorName}
+            onOrdersChanged={loadInventory}
           />
         );
       case 'settings':
@@ -766,6 +815,60 @@ export default function App() {
             </View>
           </View>
         )}
+        <Modal
+          visible={showAdminItemDialog}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowAdminItemDialog(false)}
+        >
+          <TouchableOpacity
+            style={styles.adminDialogOverlay}
+            activeOpacity={1}
+            onPress={() => setShowAdminItemDialog(false)}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={(e) => e.stopPropagation()}
+              style={[styles.adminDialogCard, { backgroundColor: paperTheme.colors.surface }]}
+            >
+              <Text style={[styles.adminDialogTitle, { color: paperTheme.colors.onSurface }]}>
+                Item
+              </Text>
+              <Text style={[styles.adminDialogMessage, { color: paperTheme.colors.onSurfaceVariant }]}>
+                View transaction history or edit item details?
+              </Text>
+              <View style={styles.adminDialogButtons}>
+                <Button
+                  mode="contained"
+                  onPress={() => {
+                    setShowAdminItemDialog(false);
+                    setCurrentScreen('itemHistory');
+                  }}
+                  style={styles.adminDialogButton}
+                >
+                  Transaction history
+                </Button>
+                <Button
+                  mode="contained"
+                  onPress={() => {
+                    setShowAdminItemDialog(false);
+                    setCurrentScreen('detail');
+                  }}
+                  style={styles.adminDialogButton}
+                >
+                  Edit item details
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => setShowAdminItemDialog(false)}
+                  style={styles.adminDialogButton}
+                >
+                  Cancel
+                </Button>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
       </View>
     </PaperProvider>
   );
@@ -838,6 +941,35 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     textAlign: 'center',
+  },
+  adminDialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  adminDialogCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 12,
+    padding: 24,
+    elevation: 4,
+  },
+  adminDialogTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  adminDialogMessage: {
+    fontSize: 15,
+    marginBottom: 20,
+  },
+  adminDialogButtons: {
+    gap: 12,
+  },
+  adminDialogButton: {
+    marginBottom: 8,
   },
 });
 

@@ -69,6 +69,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'display_order') THEN
+          ALTER TABLE items ADD COLUMN "display_order" INTEGER DEFAULT 0;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     await client.query(`
@@ -98,6 +105,26 @@ class Database {
       )
     `);
     console.log("Audit log table ready");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        po_number TEXT NOT NULL,
+        placed_at TEXT NOT NULL,
+        lead_time_days INTEGER NOT NULL DEFAULT 5,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_by TEXT DEFAULT NULL
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS order_lines (
+        id SERIAL PRIMARY KEY,
+        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        item_id TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    console.log("Orders tables ready");
   }
 
   async getAllItems() {
@@ -118,9 +145,10 @@ class Database {
     const type = item.type && ["paint", "primer", "clear", "stain", "dye"].includes(String(item.type).toLowerCase())
       ? String(item.type).toLowerCase()
       : null;
+    const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [
         item.id,
         item.name,
@@ -134,9 +162,10 @@ class Database {
         item.minQuantity != null ? item.minQuantity : null,
         price,
         type,
+        displayOrder,
       ],
     );
-    return { success: true, item: { ...item, updatedAt: now, price, type } };
+    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder } };
   }
 
   async updateItem(itemId, updates) {
@@ -153,6 +182,7 @@ class Database {
       "minQuantity",
       "price",
       "type",
+      "display_order",
     ];
     const fields = [];
     const values = [];
@@ -166,7 +196,8 @@ class Database {
           key === "createdAt" ||
           key === "updatedAt" ||
           key === "minQuantity" ||
-          key === "type"
+          key === "type" ||
+          key === "display_order"
             ? `"${key}"`
             : key;
         fields.push(`${col} = $${paramIndex}`);
@@ -177,6 +208,9 @@ class Database {
           const v = updates[key];
           const allowed = ["paint", "primer", "clear", "stain", "dye"];
           values.push(v && allowed.includes(String(v).toLowerCase()) ? String(v).toLowerCase() : null);
+        } else if (key === "display_order") {
+          const v = updates[key];
+          values.push(v == null || v === "" ? 0 : (isNaN(Number(v)) ? 0 : Number(v)));
         } else {
           values.push(updates[key]);
         }
@@ -282,6 +316,112 @@ class Database {
           ? JSON.parse(row.details || "{}")
           : row.details || {},
     }));
+  }
+
+  async createOrder(poNumber, leadTimeDays, lines, createdBy) {
+    const now = new Date().toISOString();
+    const result = await this.pool.query(
+      `INSERT INTO orders (po_number, placed_at, lead_time_days, status, created_by)
+       VALUES ($1, $2, $3, 'open', $4) RETURNING id`,
+      [String(poNumber).trim(), now, leadTimeDays == null ? 5 : Math.max(0, parseInt(leadTimeDays, 10) || 5), createdBy || null],
+    );
+    const orderId = result.rows[0].id;
+    for (const line of lines || []) {
+      const itemId = line.itemId || line.item_id;
+      const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
+      if (!itemId || qty <= 0) continue;
+      await this.pool.query(
+        `INSERT INTO order_lines (order_id, item_id, quantity) VALUES ($1, $2, $3)`,
+        [orderId, String(itemId).trim(), qty],
+      );
+    }
+    return this.getOrderById(orderId);
+  }
+
+  async getOrderById(orderId) {
+    const orderResult = await this.pool.query(
+      "SELECT * FROM orders WHERE id = $1",
+      [orderId],
+    );
+    const order = orderResult.rows[0] || null;
+    if (!order) return null;
+    const linesResult = await this.pool.query(
+      "SELECT * FROM order_lines WHERE order_id = $1 ORDER BY id",
+      [orderId],
+    );
+    order.lines = linesResult.rows.map((r) => ({ itemId: r.item_id, quantity: r.quantity }));
+    return order;
+  }
+
+  async getOrders(limit = 100) {
+    const result = await this.pool.query(
+      "SELECT * FROM orders ORDER BY placed_at DESC LIMIT $1",
+      [limit],
+    );
+    const orders = [];
+    for (const row of result.rows) {
+      const order = await this.getOrderById(row.id);
+      if (order) orders.push(order);
+    }
+    return orders;
+  }
+
+  async updateOrderStatus(orderId, status) {
+    if (status !== "open" && status !== "received") return { success: false, error: "Invalid status" };
+    const result = await this.pool.query(
+      "UPDATE orders SET status = $1 WHERE id = $2",
+      [status, orderId],
+    );
+    if (result.rowCount === 0) return { success: false, error: "Order not found" };
+    return { success: true, order: await this.getOrderById(orderId) };
+  }
+
+  async updateOrder(orderId, poNumber, leadTimeDays, lines) {
+    const id = typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
+    if (!Number.isInteger(id) || id < 1) return { success: false, error: "Invalid order ID" };
+    const order = await this.getOrderById(id);
+    if (!order) return { success: false, error: "Order not found" };
+    if (order.status !== "open") return { success: false, error: "Only open orders can be updated" };
+    const updateResult = await this.pool.query(
+      "UPDATE orders SET po_number = $1, lead_time_days = $2 WHERE id = $3",
+      [String(poNumber).trim(), Math.max(0, parseInt(leadTimeDays, 10) || 5), id],
+    );
+    if (updateResult.rowCount === 0) return { success: false, error: "Order not found" };
+    await this.pool.query("DELETE FROM order_lines WHERE order_id = $1", [id]);
+    for (const line of lines || []) {
+      const itemId = line.itemId || line.item_id;
+      const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
+      if (!itemId || qty <= 0) continue;
+      await this.pool.query(
+        "INSERT INTO order_lines (order_id, item_id, quantity) VALUES ($1, $2, $3)",
+        [id, String(itemId).trim(), qty],
+      );
+    }
+    return { success: true, order: await this.getOrderById(id) };
+  }
+
+  async getOnOrderSummary() {
+    const result = await this.pool.query(
+      `SELECT ol.item_id, ol.quantity, o.placed_at, o.lead_time_days
+       FROM order_lines ol
+       JOIN orders o ON o.id = ol.order_id
+       WHERE o.status = 'open'
+       ORDER BY o.placed_at ASC`,
+    );
+    const byItem = {};
+    for (const row of result.rows) {
+      const id = row.item_id;
+      const placed = new Date(row.placed_at);
+      const days = parseInt(row.lead_time_days, 10) || 5;
+      const expected = new Date(placed);
+      expected.setDate(expected.getDate() + days);
+      if (!byItem[id]) {
+        byItem[id] = { quantity: 0, expectedDate: expected.toISOString() };
+      }
+      byItem[id].quantity += parseInt(row.quantity, 10) || 0;
+      if (expected > new Date(byItem[id].expectedDate)) byItem[id].expectedDate = expected.toISOString();
+    }
+    return byItem;
   }
 
   close() {

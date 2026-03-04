@@ -77,6 +77,7 @@ export default function HomeScreen({
   onRefresh,
   isRefreshing = false,
   onOpenSettings,
+  onOpenUpcomingOrders,
   isWeb = false,
 }) {
   const theme = useTheme();
@@ -179,6 +180,16 @@ export default function HomeScreen({
       >
         View Inventory
       </Button>
+      {isAdmin && onOpenUpcomingOrders && (
+        <Button
+          mode="outlined"
+          onPress={onOpenUpcomingOrders}
+          style={styles.button}
+          icon="truck-delivery"
+        >
+          Upcoming orders
+        </Button>
+      )}
     </>
   );
 
