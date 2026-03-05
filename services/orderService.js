@@ -41,28 +41,52 @@ export default {
     }
   },
 
-  async createOrder(poNumber, leadTimeDays, lines, userName) {
+  async getBackOrderCount() {
+    try {
+      const data = await _fetch('/api/orders/back-order-count');
+      return data && typeof data.count === 'number' ? data.count : 0;
+    } catch (e) {
+      console.error('OrderService getBackOrderCount:', e);
+      return 0;
+    }
+  },
+
+  async getLateOrderCount() {
+    try {
+      const data = await _fetch('/api/orders/late-order-count');
+      return data && typeof data.count === 'number' ? data.count : 0;
+    } catch (e) {
+      console.error('OrderService getLateOrderCount:', e);
+      return 0;
+    }
+  },
+
+  async createOrder(poNumber, leadTimeDays, lines, userName, placedAt = null) {
     console.log('[OrderService] createOrder → API base:', API_URL);
+    const body = {
+      po_number: poNumber,
+      lead_time_days: leadTimeDays,
+      lines: lines || [],
+      userName: userName || null,
+    };
+    if (placedAt) body.placed_at = placedAt;
     return _fetch('/api/orders', {
       method: 'POST',
-      body: JSON.stringify({
-        po_number: poNumber,
-        lead_time_days: leadTimeDays,
-        lines: lines || [],
-        userName: userName || null,
-      }),
+      body: JSON.stringify(body),
     });
   },
 
-  async updateOrder(orderId, poNumber, leadTimeDays, lines) {
+  async updateOrder(orderId, poNumber, leadTimeDays, lines, placedAt = null) {
     console.log('[OrderService] updateOrder → API base:', API_URL);
+    const body = {
+      po_number: poNumber,
+      lead_time_days: leadTimeDays,
+      lines: lines || [],
+    };
+    if (placedAt) body.placed_at = placedAt;
     return _fetch(`/api/orders/${orderId}`, {
       method: 'PUT',
-      body: JSON.stringify({
-        po_number: poNumber,
-        lead_time_days: leadTimeDays,
-        lines: lines || [],
-      }),
+      body: JSON.stringify(body),
     });
   },
 
@@ -70,6 +94,20 @@ export default {
     return _fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
       body: JSON.stringify({ status: 'received' }),
+    });
+  },
+
+  async receiveOrderLine(orderId, itemId, quantity) {
+    return _fetch(`/api/orders/${orderId}/receive`, {
+      method: 'POST',
+      body: JSON.stringify({ itemId, quantity }),
+    });
+  },
+
+  async updateOrderReceivedLines(orderId, lines) {
+    return _fetch(`/api/orders/${orderId}/received-lines`, {
+      method: 'PUT',
+      body: JSON.stringify({ lines }),
     });
   },
 };

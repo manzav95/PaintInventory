@@ -18,6 +18,21 @@ import {
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 
+const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+function isRecycleDue(item) {
+  const t = (item.type || "").toLowerCase();
+  if (!CUSTOM_TYPES.includes(t)) return false;
+  const qty = item.quantity || 0;
+  if (qty <= 0) return false;
+  const rd = item.recycle_date;
+  if (!rd) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const recycleDate = new Date(rd);
+  recycleDate.setHours(0, 0, 0, 0);
+  return recycleDate.getTime() <= today.getTime();
+}
+
 export default function DashboardScreen({
   inventory,
   minQuantity = 30,
@@ -25,6 +40,7 @@ export default function DashboardScreen({
   isRefreshing = false,
   showTransactionTable = true,
   isAdmin = false,
+  onOpenRecycleDue,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -168,6 +184,11 @@ export default function DashboardScreen({
     }).length;
   }, [inventory, staleDays]);
 
+  const recycleDueCount = useMemo(
+    () => inventory.filter((item) => isRecycleDue(item)).length,
+    [inventory],
+  );
+
   const totalValue = useMemo(() => {
     return inventory.reduce((sum, item) => {
       const qty = item.quantity ?? 0;
@@ -219,8 +240,8 @@ export default function DashboardScreen({
   const isStandardUserVisibleAction = (log) => {
     const a = log.action;
     const d = log.details;
-    if (a === "check_in" || a === "check_out" || a === "delete") return true;
-    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out")) return true;
+    if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
+    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
     return false;
   };
 
@@ -234,7 +255,7 @@ export default function DashboardScreen({
     if (u && u !== "unknown") return log.userName;
     const adminOnly =
       ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out"));
+      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving"));
     return adminOnly ? "Admin" : (log.userName || "Unknown");
   };
 
@@ -265,6 +286,8 @@ export default function DashboardScreen({
         return "#81c784"; // Subtle green
       } else if (details._actionType === "check_out") {
         return "#e57373"; // Subtle red
+      } else if (details._actionType === "receiving") {
+        return "#64b5f6"; // Blue for receiving
       }
     }
 
@@ -273,6 +296,8 @@ export default function DashboardScreen({
         return "#81c784"; // Subtle green
       case "check_out":
         return "#e57373"; // Subtle red
+      case "receiving":
+        return "#64b5f6"; // Blue for receiving
       case "add":
         return "#64b5f6"; // Subtle blue
       case "delete":
@@ -293,6 +318,8 @@ export default function DashboardScreen({
         return "Checked In";
       } else if (details._actionType === "check_out") {
         return "Checked Out";
+      } else if (details._actionType === "receiving") {
+        return "Receiving";
       }
     }
 
@@ -303,6 +330,8 @@ export default function DashboardScreen({
       return "Checked In";
     } else if (action === "check_out") {
       return "Checked Out";
+    } else if (action === "receiving") {
+      return "Receiving";
     } else if (action === "update") {
       // If it's an update with quantity change, it's a manual adjustment
       // (check_in/check_out are now logged separately)
@@ -324,10 +353,12 @@ export default function DashboardScreen({
       const isCheckInOut =
         action === "check_in" ||
         action === "check_out" ||
+        action === "receiving" ||
         (action === "update" &&
           details._actionType &&
           (details._actionType === "check_in" ||
-            details._actionType === "check_out"));
+            details._actionType === "check_out" ||
+            details._actionType === "receiving"));
 
       if (isCheckInOut) {
         // For check_in and check_out, show the quantity change amount
@@ -367,10 +398,12 @@ export default function DashboardScreen({
       const isCheckInOut =
         action === "check_in" ||
         action === "check_out" ||
+        action === "receiving" ||
         (action === "update" &&
           details._actionType &&
           (details._actionType === "check_in" ||
-            details._actionType === "check_out"));
+            details._actionType === "check_out" ||
+            details._actionType === "receiving"));
 
       if (isCheckInOut && typeof details.quantity === "number") {
         return details.quantity;
@@ -473,6 +506,21 @@ export default function DashboardScreen({
               <Text style={styles.statSubtextHint}>Tap to change period</Text>
             </Card.Content>
           </Card>
+          )}
+
+          {recycleDueCount > 0 && onOpenRecycleDue && (
+            <Card
+              style={[styles.statCard, styles.statCardClickable]}
+              onPress={onOpenRecycleDue}
+            >
+              <Card.Content>
+                <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                <Title style={[styles.statValue, { color: "#e65100" }]}>
+                  {recycleDueCount}
+                </Title>
+                <Text style={styles.statSubtextHint}>Tap to View List</Text>
+              </Card.Content>
+            </Card>
           )}
 
           {mostUsedColor && (

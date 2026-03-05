@@ -63,6 +63,8 @@ export default function App() {
   const [actionLoadingMessage, setActionLoadingMessage] = useState('');
   const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
   const [onOrderSummary, setOnOrderSummary] = useState({});
+  const [recycleDueFilter, setRecycleDueFilter] = useState(false);
+  const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
 
   useEffect(() => {
@@ -319,6 +321,32 @@ export default function App() {
     });
   };
 
+  const handleReceiveDelivery = async (orderId, quantity) => {
+    if (!scannedItem) return;
+    await runWithLoading('Recording delivery...', async () => {
+      const receiveResult = await OrderService.receiveOrderLine(orderId, scannedItem.id, quantity);
+      if (!receiveResult.success) throw new Error(receiveResult.error || 'Failed to record PO receive');
+      const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
+      if (!result.success) throw new Error(result.error || 'Failed to update inventory');
+      await loadInventory();
+      Alert.alert(
+        'Success',
+        `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+      );
+      await AuditService.log({
+        type: 'receiving',
+        user: actorName,
+        itemId: scannedItem.id,
+        quantity,
+        newQuantity: result.item.quantity,
+        orderId,
+      });
+      setScannedItem(null);
+      setPreviousScreen('home');
+      setCurrentScreen('home');
+    });
+  };
+
   const handleCheckOut = async (quantity) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-out...', async () => {
@@ -428,6 +456,7 @@ export default function App() {
         ...(item.hasOwnProperty('type') && { type: item.type }),
         ...(item.hasOwnProperty('display_order') && { display_order: item.display_order }),
         ...(item.hasOwnProperty('hex_color') && { hex_color: item.hex_color }),
+        ...(item.hasOwnProperty('recycle_date') && { recycle_date: item.recycle_date }),
       };
       result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
     } else {
@@ -570,8 +599,9 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can change inventory quantities.');
       return;
     }
+    const actionType = change > 0 ? 'check_in' : 'check_out';
     await runWithLoading('Updating quantity...', async () => {
-      const result = await InventoryService.updateQuantity(itemId, change, actorName);
+      const result = await InventoryService.updateQuantity(itemId, change, actorName, actionType);
       if (result.success) {
         await loadInventory();
         if (selectedItem && selectedItem.id === itemId) {
@@ -633,6 +663,10 @@ export default function App() {
                   onScanQR={handleScanQR}
                   onAddManual={handleAddManual}
                   onViewInventory={() => setCurrentScreen('list')}
+                  onOpenRecycleDue={() => {
+                    setRecycleDueFilter(true);
+                    setCurrentScreen('list');
+                  }}
                   inventory={inventory}
                   minQuantity={minQuantity}
                   userName={isAdmin ? 'Admin' : userName}
@@ -649,6 +683,17 @@ export default function App() {
                     setCurrentScreen('settings');
                   }}
                   onOpenUpcomingOrders={isAdmin ? () => {
+                    setOrdersInitialFilter(null);
+                    setPreviousScreen('home');
+                    setCurrentScreen('orders');
+                  } : undefined}
+                  onOpenBackOrders={isAdmin ? () => {
+                    setOrdersInitialFilter('back_orders');
+                    setPreviousScreen('home');
+                    setCurrentScreen('orders');
+                  } : undefined}
+                  onOpenLateOrders={isAdmin ? () => {
+                    setOrdersInitialFilter('late_orders');
                     setPreviousScreen('home');
                     setCurrentScreen('orders');
                   } : undefined}
@@ -663,6 +708,10 @@ export default function App() {
                   isRefreshing={isRefreshing}
                   showTransactionTable={!isNarrowDesktop}
                   isAdmin={isAdmin}
+                  onOpenRecycleDue={() => {
+                    setRecycleDueFilter(true);
+                    setCurrentScreen('list');
+                  }}
                 />
               </View>
             </View>
@@ -673,6 +722,10 @@ export default function App() {
             onScanQR={handleScanQR}
             onAddManual={handleAddManual}
             onViewInventory={() => setCurrentScreen('list')}
+            onOpenRecycleDue={() => {
+              setRecycleDueFilter(true);
+              setCurrentScreen('list');
+            }}
             inventory={inventory}
             minQuantity={minQuantity}
             nfcEnabled={nfcStatus.isEnabled}
@@ -690,6 +743,17 @@ export default function App() {
               setCurrentScreen('settings');
             }}
             onOpenUpcomingOrders={isAdmin ? () => {
+              setOrdersInitialFilter(null);
+              setPreviousScreen('home');
+              setCurrentScreen('orders');
+            } : undefined}
+            onOpenBackOrders={isAdmin ? () => {
+              setOrdersInitialFilter('back_orders');
+              setPreviousScreen('home');
+              setCurrentScreen('orders');
+            } : undefined}
+            onOpenLateOrders={isAdmin ? () => {
+              setOrdersInitialFilter('late_orders');
               setPreviousScreen('home');
               setCurrentScreen('orders');
             } : undefined}
@@ -719,6 +783,8 @@ export default function App() {
               setScannedItem(null);
               setCurrentScreen('home');
             }}
+            onOrderSummary={onOrderSummary}
+            onReceiveDelivery={handleReceiveDelivery}
           />
         );
       case 'add':
@@ -751,6 +817,8 @@ export default function App() {
             minQuantity={minQuantity}
             isAdmin={isAdmin}
             onOrderSummary={onOrderSummary}
+            recycleDueFilter={recycleDueFilter}
+            onClearRecycleDueFilter={() => setRecycleDueFilter(false)}
             onItemSelect={(item) => {
               setPreviousScreen('list');
               setSelectedItem(item);
@@ -773,10 +841,17 @@ export default function App() {
       case 'orders':
         return (
           <UpcomingOrdersScreen
-            onBack={() => setCurrentScreen(previousScreen)}
+            onBack={() => {
+              setOrdersInitialFilter(null);
+              setCurrentScreen(previousScreen);
+            }}
             inventory={inventory}
             userName={actorName}
-            onOrdersChanged={loadInventory}
+            onOrdersChanged={() => {
+              loadInventory();
+              if (isAdmin) OrderService.getBackOrderCount().then((c) => {}); // HomeScreen will refresh on return
+            }}
+            initialFilter={ordersInitialFilter}
           />
         );
       case 'settings':

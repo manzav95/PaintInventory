@@ -95,23 +95,32 @@ app.put('/api/items/:id', async (req, res) => {
     const currentItem = await db.getItem(id);
     const oldQuantity = currentItem?.quantity || 0;
     const newQuantity = updates.quantity;
-    
+
     // Extract action type flag (if present) and remove it from updates before saving
     const actionType = updates._actionType;
     const quantityChange = updates._quantityChange;
-    
+
     console.log('Extracted actionType:', actionType, 'quantityChange:', quantityChange, 'for item:', id);
-    
+
     delete updates._actionType;
     delete updates._quantityChange;
-    
+
+    // On check-in, set recycle_date to 4 months from now for custom paint/stain (replaces previous date)
+    const customTypes = ['custom_paint', 'custom_stain'];
+    const itemType = (currentItem?.type || '').toLowerCase();
+    if (actionType === 'check_in' && customTypes.includes(itemType)) {
+      const d = new Date();
+      d.setMonth(d.getMonth() + 4);
+      updates.recycle_date = d.toISOString().slice(0, 10);
+    }
+
     const result = await db.updateItem(id, updates);
     if (result.success) {
       // Determine action type for audit log
       let auditActionType = 'update';
       
-      // If action type was explicitly set (check_in/check_out), use it
-      if (actionType === 'check_in' || actionType === 'check_out') {
+      // If action type was explicitly set (check_in/check_out/receiving), use it
+      if (actionType === 'check_in' || actionType === 'check_out' || actionType === 'receiving') {
         auditActionType = actionType;
         console.log('Setting audit action to:', auditActionType, 'for item:', id);
       } else if (newQuantity !== undefined && oldQuantity !== undefined) {
@@ -329,6 +338,26 @@ app.get('/api/orders/on-order-summary', async (req, res) => {
   }
 });
 
+app.get('/api/orders/back-order-count', async (req, res) => {
+  try {
+    const count = await db.getBackOrderCount();
+    res.json({ count });
+  } catch (error) {
+    console.error('Error fetching back order count:', error);
+    res.status(500).json({ error: 'Failed to fetch back order count' });
+  }
+});
+
+app.get('/api/orders/late-order-count', async (req, res) => {
+  try {
+    const count = await db.getLateOrderCount();
+    res.json({ count });
+  } catch (error) {
+    console.error('Error fetching late order count:', error);
+    res.status(500).json({ error: 'Failed to fetch late order count' });
+  }
+});
+
 app.post('/api/orders', async (req, res) => {
   const body = req.body || {};
   console.log('[Orders] POST /api/orders received. Body keys:', Object.keys(body), 'po_number:', body.po_number, 'lines count:', Array.isArray(body.lines) ? body.lines.length : 0);
@@ -340,11 +369,13 @@ app.post('/api/orders', async (req, res) => {
     if (!po_number || !String(po_number).trim()) {
       return res.status(400).json({ success: false, error: 'PO number is required.' });
     }
+    const placed_at = body.placed_at || null;
     const order = await db.createOrder(
       String(po_number).trim(),
       lead_time_days,
       lines,
       userName,
+      placed_at,
     );
     console.log('[Orders] Created order id:', order?.id);
     res.json(order);
@@ -366,7 +397,8 @@ app.put('/api/orders/:id', async (req, res) => {
     if (!po_number || !String(po_number).trim()) {
       return res.status(400).json({ success: false, error: 'PO number is required.' });
     }
-    const result = await db.updateOrder(id, po_number, lead_time_days, lines);
+    const placed_at = body.placed_at || null;
+    const result = await db.updateOrder(id, po_number, lead_time_days, lines, placed_at);
     if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
     console.log('[Orders] Updated order id:', id);
     res.json(result);
@@ -388,6 +420,37 @@ app.patch('/api/orders/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating order:', error);
     res.status(500).json({ error: 'Failed to update order' });
+  }
+});
+
+app.post('/api/orders/:id/receive', async (req, res) => {
+  try {
+    const orderId = parseInt(req.params.id, 10);
+    if (isNaN(orderId)) return res.status(400).json({ success: false, error: 'Invalid order ID' });
+    const { itemId, quantity } = req.body;
+    if (!itemId || quantity == null) return res.status(400).json({ success: false, error: 'itemId and quantity are required' });
+    const receiveQty = Math.max(0, parseInt(quantity, 10) || 0);
+    if (receiveQty <= 0) return res.status(400).json({ success: false, error: 'Quantity must be greater than 0' });
+    const result = await db.receiveOrderLine(orderId, String(itemId).trim(), receiveQty);
+    if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error('Error receiving order line:', error);
+    res.status(500).json({ error: 'Failed to receive order line' });
+  }
+});
+
+app.put('/api/orders/:id/received-lines', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) return res.status(400).json({ success: false, error: 'Invalid order ID' });
+    const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
+    const result = await db.updateOrderReceivedLines(id, lines);
+    if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating order received lines:', error);
+    res.status(500).json({ error: 'Failed to update received quantities' });
   }
 });
 

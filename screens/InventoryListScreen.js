@@ -24,6 +24,21 @@ import {
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 
+const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+const STANDARD_TYPES = ["paint", "primer", "clear", "catalyst", "stain", "dye"];
+
+function isRecycleDue(item) {
+  const rd = item.recycle_date;
+  if (!rd || (item.quantity || 0) <= 0) return false;
+  if (!CUSTOM_TYPES.includes((item.type || "").toLowerCase())) return false;
+  const d = new Date(rd);
+  if (isNaN(d.getTime())) return false;
+  d.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() <= today.getTime();
+}
+
 export default function InventoryListScreen({
   inventory,
   minQuantity = 30,
@@ -33,6 +48,8 @@ export default function InventoryListScreen({
   isRefreshing = false,
   isAdmin = false,
   onOrderSummary = {},
+  recycleDueFilter = false,
+  onClearRecycleDueFilter,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -50,6 +67,9 @@ export default function InventoryListScreen({
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
   const [viewMode, setViewMode] = useState("inventory"); // 'inventory' | 'colorBook' — default to standard inventory
+  const [bookFilter, setBookFilter] = useState(
+    recycleDueFilter ? "custom" : "standard",
+  ); // 'standard' | 'custom'
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +85,15 @@ export default function InventoryListScreen({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (recycleDueFilter) setBookFilter("custom");
+  }, [recycleDueFilter]);
+
+  const handleBack = () => {
+    onClearRecycleDueFilter?.();
+    onBack();
+  };
 
   // Calculate analytics
   const analytics = useMemo(() => {
@@ -228,6 +257,7 @@ export default function InventoryListScreen({
     const d = log.details;
     if (a === "check_in") return "Checked in";
     if (a === "check_out") return "Checked out";
+    if (a === "receiving" || (a === "update" && d?._actionType === "receiving")) return "Receiving";
     if (a === "update" && d?._actionType === "check_in") return "Checked in";
     if (a === "update" && d?._actionType === "check_out") return "Checked out";
     if (a === "add") return "Added";
@@ -235,7 +265,7 @@ export default function InventoryListScreen({
     return "Updated";
   };
 
-  // Filter and sort inventory (search + optional stock filter)
+  // Filter and sort inventory (search + optional stock filter + book filter + recycle due)
   const filteredAndSortedInventory = useMemo(() => {
     const min = minQuantity ?? 30;
     let filtered = inventory.filter((item) => {
@@ -252,6 +282,12 @@ export default function InventoryListScreen({
         return qty > 0 && qty >= (item.minQuantity ?? min);
       if (stockFilter === "lowStock")
         return qty > 0 && qty < (item.minQuantity ?? min);
+      const itemType = (item.type || "").toLowerCase();
+      if (bookFilter === "standard" && CUSTOM_TYPES.includes(itemType))
+        return false;
+      if (bookFilter === "custom" && !CUSTOM_TYPES.includes(itemType))
+        return false;
+      if (recycleDueFilter && !isRecycleDue(item)) return false;
       return true;
     });
 
@@ -309,15 +345,21 @@ export default function InventoryListScreen({
     stockFilter,
     minQuantity,
     listOrderMode,
+    bookFilter,
+    recycleDueFilter,
   ]);
 
-  // Paint-only items with valid hex for mobile color book grid
+  // Paint/custom items with valid hex for color book grid (filtered by bookFilter)
   const colorBookItems = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
+    const typeLower = (t) => (t || "").toLowerCase();
     return inventory
       .filter((item) => {
-        const isPaint = (item.type || "").toLowerCase() === "paint";
-        if (!isPaint || !getValidHex(item.hex_color)) return false;
+        if (!getValidHex(item.hex_color)) return false;
+        const t = typeLower(item.type);
+        if (bookFilter === "standard" && t !== "paint") return false;
+        if (bookFilter === "custom" && !CUSTOM_TYPES.includes(t)) return false;
+        if (recycleDueFilter && !isRecycleDue(item)) return false;
         if (!query) return true;
         return (
           item.name?.toLowerCase().includes(query) ||
@@ -329,7 +371,7 @@ export default function InventoryListScreen({
           .toLowerCase()
           .localeCompare((b.name || "").toLowerCase()),
       );
-  }, [inventory, searchQuery]);
+  }, [inventory, searchQuery, bookFilter, recycleDueFilter]);
 
   const renderColorCard = ({ item, desktop = false }) => {
     const bgHex = getValidHex(item.hex_color) || "#e0e0e0";
@@ -494,16 +536,21 @@ export default function InventoryListScreen({
             })()}
             {(() => {
               const t = item.type ? String(item.type).toLowerCase() : "";
-              const label = item.type
-                ? String(item.type).charAt(0).toUpperCase() +
-                  String(item.type).slice(1).toLowerCase()
-                : "";
+              const label =
+                t === "custom_paint"
+                  ? "Custom paint"
+                  : t === "custom_stain"
+                    ? "Custom stain"
+                    : item.type
+                      ? String(item.type).charAt(0).toUpperCase() +
+                        String(item.type).slice(1).toLowerCase()
+                      : "";
               const materialTypeColor =
-                t === "paint"
+                t === "paint" || t === "custom_paint"
                   ? "#1565c0"
                   : t === "clear"
                     ? "#e65100"
-                    : t === "stain"
+                    : t === "stain" || t === "custom_stain"
                       ? "#2e7d32"
                       : t === "primer"
                         ? theme.dark
@@ -591,7 +638,7 @@ export default function InventoryListScreen({
             <View style={styles.webHeaderLeft}>
               <Button
                 icon="arrow-left"
-                onPress={onBack}
+                onPress={handleBack}
                 mode="text"
                 style={styles.backButton}
               >
@@ -600,6 +647,35 @@ export default function InventoryListScreen({
               <Title style={styles.webTitle}>Inventory Dashboard</Title>
             </View>
             <View style={styles.refreshContainer}>
+              <View
+                style={[
+                  styles.headerFilterGroup,
+                  styles.headerFilterGroupSpacer,
+                ]}
+              >
+                {isAdmin && (
+                  <>
+                    <Button
+                      mode={
+                        bookFilter === "standard" ? "contained" : "outlined"
+                      }
+                      compact
+                      onPress={() => setBookFilter("standard")}
+                      style={styles.viewModeButton}
+                    >
+                      Standard
+                    </Button>
+                    <Button
+                      mode={bookFilter === "custom" ? "contained" : "outlined"}
+                      compact
+                      onPress={() => setBookFilter("custom")}
+                      style={styles.viewModeButton}
+                    >
+                      Custom
+                    </Button>
+                  </>
+                )}
+              </View>
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
                 compact
@@ -608,10 +684,10 @@ export default function InventoryListScreen({
                     viewMode === "colorBook" ? "inventory" : "colorBook",
                   )
                 }
-                style={styles.viewModeButton}
+                style={styles.viewModeButtonColorBook}
                 icon="palette-outline"
               >
-                {viewMode === "colorBook" ? "Inventory" : "Color book"}
+                {viewMode === "colorBook" ? "Inventory" : "Color Book"}
               </Button>
               <IconButton
                 icon="refresh"
@@ -630,7 +706,20 @@ export default function InventoryListScreen({
             </View>
           </View>
 
-          {/* Color book view (desktop): 4-column grid */}
+          {recycleDueFilter && (
+            <View style={styles.recycleDueBanner}>
+              <Text style={styles.recycleDueBannerText}>
+                Showing: Paint Needing Recycle
+              </Text>
+              {onClearRecycleDueFilter && (
+                <Button mode="text" compact onPress={onClearRecycleDueFilter}>
+                  Clear Filter
+                </Button>
+              )}
+            </View>
+          )}
+
+          {/* Color Book view (desktop): 4-column grid */}
           {viewMode === "colorBook" ? (
             <View
               style={[styles.webContentCentered, styles.webContentCenteredFlex]}
@@ -667,7 +756,9 @@ export default function InventoryListScreen({
               )}
             </View>
           ) : (
-            <View style={styles.webContentCentered}>
+            <View
+              style={[styles.webContentCentered, styles.webContentCenteredFlex]}
+            >
               {/* Analytics + Table: centered; table area fills remaining height and scrolls */}
               <View
                 style={[
@@ -966,20 +1057,26 @@ export default function InventoryListScreen({
                                         const t = item.type
                                           ? String(item.type).toLowerCase()
                                           : "";
-                                        const label = item.type
-                                          ? String(item.type)
-                                              .charAt(0)
-                                              .toUpperCase() +
-                                            String(item.type)
-                                              .slice(1)
-                                              .toLowerCase()
-                                          : "";
+                                        const label =
+                                          t === "custom_paint"
+                                            ? "Custom paint"
+                                            : t === "custom_stain"
+                                              ? "Custom stain"
+                                              : item.type
+                                                ? String(item.type)
+                                                    .charAt(0)
+                                                    .toUpperCase() +
+                                                  String(item.type)
+                                                    .slice(1)
+                                                    .toLowerCase()
+                                                : "";
                                         const materialTypeColor =
-                                          t === "paint"
+                                          t === "paint" || t === "custom_paint"
                                             ? "#1565c0"
                                             : t === "clear"
                                               ? "#e65100"
-                                              : t === "stain"
+                                              : t === "stain" ||
+                                                  t === "custom_stain"
                                                 ? "#2e7d32"
                                                 : t === "primer"
                                                   ? theme.dark
@@ -1213,13 +1310,37 @@ export default function InventoryListScreen({
           }
         >
           <View style={styles.header}>
-            <Button icon="arrow-left" onPress={onBack} mode="text">
+            <Button icon="arrow-left" onPress={handleBack} mode="text">
               Back
             </Button>
             <Text style={styles.headerTitle}>
-              {viewMode === "colorBook" ? "Color book" : "Inventory"}
+              {viewMode === "colorBook" ? "Color Book" : "Inventory"}
             </Text>
             <View style={styles.refreshContainer}>
+              <View style={styles.headerFilterGroup}>
+                {isAdmin && (
+                  <>
+                    <Button
+                      mode={
+                        bookFilter === "standard" ? "contained" : "outlined"
+                      }
+                      compact
+                      onPress={() => setBookFilter("standard")}
+                      style={styles.viewModeButtonMobile}
+                    >
+                      Standard
+                    </Button>
+                    <Button
+                      mode={bookFilter === "custom" ? "contained" : "outlined"}
+                      compact
+                      onPress={() => setBookFilter("custom")}
+                      style={styles.viewModeButtonMobile}
+                    >
+                      Custom
+                    </Button>
+                  </>
+                )}
+              </View>
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
                 compact
@@ -1231,7 +1352,7 @@ export default function InventoryListScreen({
                 style={styles.viewModeButtonMobile}
                 icon="palette-outline"
               >
-                {viewMode === "colorBook" ? "List" : "Colors"}
+                {viewMode === "colorBook" ? "Inventory" : "Color Book"}
               </Button>
               <IconButton
                 icon="refresh"
@@ -1260,6 +1381,18 @@ export default function InventoryListScreen({
             value={searchQuery}
             style={styles.searchbar}
           />
+          {recycleDueFilter && (
+            <View style={styles.recycleDueBanner}>
+              <Text style={styles.recycleDueBannerText}>
+                Showing: Paint Needing Recycle
+              </Text>
+              {onClearRecycleDueFilter && (
+                <Button mode="text" compact onPress={onClearRecycleDueFilter}>
+                  Clear Filter
+                </Button>
+              )}
+            </View>
+          )}
           {viewMode === "inventory" && (
             <View
               style={[
@@ -1481,14 +1614,54 @@ export default function InventoryListScreen({
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <View style={styles.header}>
-        <Button icon="arrow-left" onPress={onBack} mode="text">
-          Back
-        </Button>
-        <Text style={styles.headerTitle}>
-          {viewMode === "colorBook" ? "Color book" : "Inventory"}
-        </Text>
-        <View style={styles.refreshContainer}>
+      <View style={styles.headerMobilePortrait}>
+        <View style={styles.headerRow1}>
+          <Button icon="arrow-left" onPress={handleBack} mode="text">
+            Back
+          </Button>
+          <Text style={styles.headerTitle}>
+            {viewMode === "colorBook" ? "Color Book" : "Inventory"}
+          </Text>
+          <View style={styles.refreshContainer}>
+            <IconButton
+              icon="refresh"
+              size={24}
+              onPress={onRefresh}
+              disabled={isRefreshing}
+              iconColor={theme.colors.primary}
+            />
+            {isRefreshing && (
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.primary}
+                style={styles.refreshIndicator}
+              />
+            )}
+          </View>
+        </View>
+        <View style={styles.headerFilterRow}>
+          <View style={styles.headerFilterGroup}>
+            {isAdmin && (
+              <>
+                <Button
+                  mode={bookFilter === "standard" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setBookFilter("standard")}
+                  style={styles.viewModeButtonMobile}
+                >
+                  Standard
+                </Button>
+                <Button
+                  mode={bookFilter === "custom" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setBookFilter("custom")}
+                  style={styles.viewModeButtonMobile}
+                >
+                  Custom
+                </Button>
+              </>
+            )}
+          </View>
           <Button
             mode={viewMode === "colorBook" ? "contained" : "outlined"}
             compact
@@ -1498,22 +1671,8 @@ export default function InventoryListScreen({
             style={styles.viewModeButtonMobile}
             icon="palette-outline"
           >
-            {viewMode === "colorBook" ? "List" : "Colors"}
+            {viewMode === "colorBook" ? "Inventory" : "Color Book"}
           </Button>
-          <IconButton
-            icon="refresh"
-            size={24}
-            onPress={onRefresh}
-            disabled={isRefreshing}
-            iconColor={theme.colors.primary}
-          />
-          {isRefreshing && (
-            <ActivityIndicator
-              size="small"
-              color={theme.colors.primary}
-              style={styles.refreshIndicator}
-            />
-          )}
         </View>
       </View>
 
@@ -1529,50 +1688,72 @@ export default function InventoryListScreen({
           style={styles.searchbar}
         />
       </View>
-      <View style={styles.listContent}>
-      {viewMode === "inventory" && filteredAndSortedInventory.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>
-            {searchQuery ? "No items found" : "No items in inventory"}
+      {recycleDueFilter && (
+        <View style={styles.recycleDueBanner}>
+          <Text style={styles.recycleDueBannerText}>
+            Showing: Paint Needing Recycle
           </Text>
-          <Text style={styles.emptySubtext}>
-            {searchQuery
-              ? "Try a different search term"
-              : "Scan a QR Code to add your first item"}
-          </Text>
+          {onClearRecycleDueFilter && (
+            <Button mode="text" compact onPress={onClearRecycleDueFilter}>
+              Clear Filter
+            </Button>
+          )}
         </View>
-      ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>
-            {searchQuery
-              ? "No paint colors found"
-              : "No paint colors with hex in inventory"}
-          </Text>
-          <Text style={styles.emptySubtext}>
-            {searchQuery
-              ? "Try a different search"
-              : "Add paint items with a color (hex) to see them here"}
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          key={viewMode}
-          data={viewMode === "inventory" ? filteredAndSortedInventory : colorBookItems}
-          renderItem={viewMode === "inventory" ? renderItem : renderColorCard}
-          keyExtractor={(item) => item.id?.toString() || String(Math.random())}
-          numColumns={viewMode === "colorBook" ? 2 : 1}
-          columnWrapperStyle={viewMode === "colorBook" ? styles.colorBookRow : undefined}
-          style={styles.listFlex}
-          contentContainerStyle={viewMode === "colorBook" ? styles.colorBookList : styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.colors.primary}
-            />
-          }
-        />
       )}
+      <View style={styles.listContent}>
+        {viewMode === "inventory" && filteredAndSortedInventory.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>
+              {searchQuery ? "No items found" : "No items in inventory"}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {searchQuery
+                ? "Try a different search term"
+                : "Scan a QR Code to add your first item"}
+            </Text>
+          </View>
+        ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>
+              {searchQuery
+                ? "No paint colors found"
+                : "No paint colors with hex in inventory"}
+            </Text>
+            <Text style={styles.emptySubtext}>
+              {searchQuery
+                ? "Try a different search"
+                : "Add paint items with a color (hex) to see them here"}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            key={viewMode}
+            data={
+              viewMode === "inventory"
+                ? filteredAndSortedInventory
+                : colorBookItems
+            }
+            renderItem={viewMode === "inventory" ? renderItem : renderColorCard}
+            keyExtractor={(item) =>
+              item.id?.toString() || String(Math.random())
+            }
+            numColumns={viewMode === "colorBook" ? 2 : 1}
+            columnWrapperStyle={
+              viewMode === "colorBook" ? styles.colorBookRow : undefined
+            }
+            style={styles.listFlex}
+            contentContainerStyle={
+              viewMode === "colorBook" ? styles.colorBookList : styles.list
+            }
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={onRefresh}
+                tintColor={theme.colors.primary}
+              />
+            }
+          />
+        )}
       </View>
       <ColorPreviewModal />
     </View>
@@ -1598,6 +1779,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     minHeight: 48,
+  },
+  headerMobilePortrait: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    paddingBottom: 12,
+  },
+  headerRow1: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 48,
+  },
+  headerFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  headerFilterGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerFilterGroupSpacer: {
+    marginRight: 24,
   },
   headerTitle: {
     fontSize: 20,
@@ -1818,6 +2026,22 @@ const styles = StyleSheet.create({
   webTitle: {
     fontSize: 28,
     fontWeight: "bold",
+  },
+  recycleDueBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: "rgba(255, 152, 0, 0.15)",
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 8,
+  },
+  recycleDueBannerText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#e65100",
   },
   analyticsRow: {
     flexDirection: "row",
@@ -2065,6 +2289,9 @@ const styles = StyleSheet.create({
   },
   viewModeButton: {
     marginRight: 8,
+  },
+  viewModeButtonColorBook: {
+    marginLeft: 8,
   },
   viewModeButtonMobile: {
     marginRight: 4,

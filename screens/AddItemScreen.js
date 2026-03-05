@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -22,9 +22,14 @@ const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
   { label: "Primer", value: "primer" },
   { label: "Clear", value: "clear" },
+  { label: "Catalyst", value: "catalyst" },
   { label: "Stain", value: "stain" },
   { label: "Dye", value: "dye" },
+  { label: "Custom Paint", value: "custom_paint" },
+  { label: "Custom Stain", value: "custom_stain" },
 ];
+
+const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
@@ -48,6 +53,8 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const [hexColor, setHexColor] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+
+  const isCustomType = CUSTOM_TYPES.includes(type);
 
   const normalizeHex = (raw) => {
     const s = String(raw).trim().replace(/^#/, "");
@@ -81,6 +88,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
     const priceNum = price.trim() === "" ? undefined : parseFloat(price);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
     const hexVal = normalizeHex(hexColor);
+    // Recycle date for custom types is set on first check-in (4 months from that date), not on add
     const item = {
       ...(itemId.trim() && { id: itemId.trim() }),
       name: name.trim(),
@@ -298,6 +306,12 @@ export default function AddItemScreen({ onSave, onCancel }) {
               )}
             </View>
 
+            {isCustomType && (
+              <Text style={[styles.recycleHint, { color: theme.colors.onSurfaceVariant }]}>
+                Recycle date is set automatically on first check-in (4 months from that date).
+              </Text>
+            )}
+
             <View style={styles.buttonContainer}>
               <Button
                 mode="contained"
@@ -361,6 +375,11 @@ const styles = StyleSheet.create({
     marginTop: -10,
     marginBottom: 10,
     marginLeft: 4,
+    fontStyle: "italic",
+  },
+  recycleHint: {
+    fontSize: 12,
+    marginBottom: 12,
     fontStyle: "italic",
   },
   webContentContainer: {

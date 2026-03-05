@@ -22,9 +22,14 @@ const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
   { label: "Primer", value: "primer" },
   { label: "Clear", value: "clear" },
+  { label: "Catalyst", value: "catalyst" },
   { label: "Stain", value: "stain" },
   { label: "Dye", value: "dye" },
+  { label: "Custom Paint", value: "custom_paint" },
+  { label: "Custom Stain", value: "custom_stain" },
 ];
+
+const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
@@ -62,8 +67,13 @@ export default function ItemDetailScreen({
     item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
   );
   const [hexColorInput, setHexColorInput] = useState(item?.hex_color ?? "");
+  const [recycleDateInput, setRecycleDateInput] = useState(
+    item?.recycle_date ?? "",
+  );
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+
+  const isCustomType = CUSTOM_TYPES.includes(type);
 
   const normalizeHex = (raw) => {
     const s = String(raw).trim().replace(/^#/, "");
@@ -92,6 +102,9 @@ export default function ItemDetailScreen({
   useEffect(() => {
     setHexColorInput(item?.hex_color ?? "");
   }, [item?.id, item?.hex_color]);
+  useEffect(() => {
+    setRecycleDateInput(item?.recycle_date ?? "");
+  }, [item?.id, item?.recycle_date]);
 
   const handleSave = async () => {
     if (!isAdmin) {
@@ -141,6 +154,7 @@ export default function ItemDetailScreen({
     const priceVal = priceInput.trim() === "" ? null : parseFloat(priceInput);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const hexVal = normalizeHex(hexColorInput);
+    const recycleVal = recycleDateInput.trim() ? recycleDateInput.trim() : null;
     const updatedItem = {
       ...item,
       id: idInput.trim() || item?.id,
@@ -152,6 +166,7 @@ export default function ItemDetailScreen({
       type: typeVal,
       display_order: displayOrderVal,
       hex_color: hexVal || null,
+      recycle_date: recycleVal,
     };
 
     onSave(updatedItem);
@@ -479,6 +494,16 @@ export default function ItemDetailScreen({
               </View>
             )}
 
+            {isCustomType && (
+              <>
+                <Text style={styles.label}>Recycle date</Text>
+                <Text style={styles.itemId}>{recycleDateInput || "—"}</Text>
+                <Text style={[styles.recycleHint, { color: theme.colors.onSurfaceVariant }]}>
+                  Set automatically on each check-in (4 months from check-in date).
+                </Text>
+              </>
+            )}
+
             {item?.lastScanned && (
               <Text style={styles.lastScanned}>
                 Last scanned:{" "}
@@ -568,6 +593,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "monospace",
     color: "#6f95ab",
+  },
+  recycleHint: {
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 12,
+    fontStyle: "italic",
   },
   onOrderText: {
     fontSize: 14,

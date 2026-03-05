@@ -176,6 +176,7 @@ class InventoryService {
         ...(item.type && { type: item.type }),
         ...(item.display_order != null && { display_order: item.display_order }),
         ...(item.hex_color && { hex_color: item.hex_color }),
+        ...(item.recycle_date && { recycle_date: item.recycle_date }),
       };
 
       const result = await _fetch('/api/items', {

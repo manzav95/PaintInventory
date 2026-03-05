@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
+import OrderService from "../services/orderService";
 
 function formatAction(action, details) {
   if (action === "update" && details?._actionType === "check_in") return "Checked In";
@@ -24,6 +25,8 @@ function formatAction(action, details) {
   if (action === "add") return "New Entry";
   if (action === "check_in") return "Checked In";
   if (action === "check_out") return "Checked Out";
+  if (action === "update" && details?._actionType === "receiving") return "Receiving";
+  if (action === "receiving") return "Receiving";
   if (action === "update") return "Manual Adjustment";
   if (action === "delete") return "Deleted";
   if (action === "change_id") return "ID Changed";
@@ -35,6 +38,8 @@ function getActionColor(action, details) {
   if (action === "update" && details?._actionType === "check_out") return "#e57373";
   if (action === "check_in") return "#81c784";
   if (action === "check_out") return "#e57373";
+  if (action === "update" && details?._actionType === "receiving") return "#64b5f6";
+  if (action === "receiving") return "#64b5f6";
   if (action === "add") return "#64b5f6";
   if (action === "delete") return "#f44336";
   if (action === "update") return "#ba68c8";
@@ -46,9 +51,10 @@ function getQuantityDisplay(action, details) {
   const isCheckInOut =
     action === "check_in" ||
     action === "check_out" ||
+    action === "receiving" ||
     (action === "update" &&
       details._actionType &&
-      (details._actionType === "check_in" || details._actionType === "check_out"));
+      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
   if (isCheckInOut && typeof details.quantityChange === "number") {
     return String(details.quantityChange);
   }
@@ -61,10 +67,26 @@ function getQuantityDisplay(action, details) {
   return "-";
 }
 
+const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+function isRecycleDue(item) {
+  const t = (item.type || "").toLowerCase();
+  if (!CUSTOM_TYPES.includes(t)) return false;
+  const qty = item.quantity || 0;
+  if (qty <= 0) return false;
+  const rd = item.recycle_date;
+  if (!rd) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const recycleDate = new Date(rd);
+  recycleDate.setHours(0, 0, 0, 0);
+  return recycleDate.getTime() <= today.getTime();
+}
+
 export default function HomeScreen({
   onScanQR,
   onAddManual,
   onViewInventory,
+  onOpenRecycleDue,
   inventory,
   minQuantity = 30,
   userName,
@@ -78,6 +100,8 @@ export default function HomeScreen({
   isRefreshing = false,
   onOpenSettings,
   onOpenUpcomingOrders,
+  onOpenBackOrders,
+  onOpenLateOrders,
   isWeb = false,
 }) {
   const theme = useTheme();
@@ -85,6 +109,8 @@ export default function HomeScreen({
   const isDesktop = isWeb && width > 1024;
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditLogsLoading, setAuditLogsLoading] = useState(!isDesktop);
+  const [backOrderCount, setBackOrderCount] = useState(0);
+  const [lateOrderCount, setLateOrderCount] = useState(0);
 
   const lowStockItems = useMemo(
     () =>
@@ -93,6 +119,11 @@ export default function HomeScreen({
           (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30),
       ),
     [inventory, minQuantity],
+  );
+
+  const recycleDueCount = useMemo(
+    () => inventory.filter((item) => isRecycleDue(item)).length,
+    [inventory],
   );
 
   const loadAuditLogs = async () => {
@@ -110,6 +141,26 @@ export default function HomeScreen({
   useEffect(() => {
     if (!isDesktop) loadAuditLogs();
   }, [isDesktop]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [back, late] = await Promise.all([
+          OrderService.getBackOrderCount(),
+          OrderService.getLateOrderCount(),
+        ]);
+        if (!cancelled) {
+          setBackOrderCount(back);
+          setLateOrderCount(late);
+        }
+      } catch (e) {
+        if (!cancelled) console.error("HomeScreen order counts:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin]);
 
   const todayStart = useMemo(() => {
     const d = new Date();
@@ -132,8 +183,8 @@ export default function HomeScreen({
     return todayLogs.filter((log) => {
       const a = log.action;
       const d = log.details;
-      if (a === "check_in" || a === "check_out" || a === "delete") return true;
-      if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out")) return true;
+      if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
+      if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
       return false;
     });
   }, [auditLogs, isDesktop, todayStart, todayEnd, isAdmin]);
@@ -143,13 +194,25 @@ export default function HomeScreen({
     if (u && u !== "unknown") return log.userName;
     const adminOnly =
       ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out"));
+      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving"));
     return adminOnly ? "Admin" : (log.userName || "Unknown");
   };
 
   const handleRefresh = async () => {
     await onRefresh?.();
     if (!isDesktop) await loadAuditLogs();
+    if (isAdmin) {
+      try {
+        const [back, late] = await Promise.all([
+          OrderService.getBackOrderCount(),
+          OrderService.getLateOrderCount(),
+        ]);
+        setBackOrderCount(back);
+        setLateOrderCount(late);
+      } catch (e) {
+        console.error("HomeScreen order counts:", e);
+      }
+    }
   };
 
   const qrButtonText = isDesktop ? "Manual Entry" : "QR Scan or Text Input";
@@ -271,6 +334,39 @@ export default function HomeScreen({
         <View style={styles.content}>
           {isDesktop ? (
             <>
+              {recycleDueCount > 0 && onOpenRecycleDue && (
+                <Card style={styles.card} onPress={onOpenRecycleDue}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                    <Title style={[styles.statValue, { color: "#e65100" }]}>
+                      {recycleDueCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View List</Text>
+                  </Card.Content>
+                </Card>
+              )}
+              {backOrderCount > 0 && onOpenBackOrders && (
+                <Card style={styles.card} onPress={onOpenBackOrders}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Back Orders</Text>
+                    <Title style={[styles.statValue, { color: "#ff9800" }]}>
+                      {backOrderCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View</Text>
+                  </Card.Content>
+                </Card>
+              )}
+              {lateOrderCount > 0 && onOpenLateOrders && (
+                <Card style={styles.card} onPress={onOpenLateOrders}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Late Orders</Text>
+                    <Title style={[styles.statValue, { color: "#d32f2f" }]}>
+                      {lateOrderCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View</Text>
+                  </Card.Content>
+                </Card>
+              )}
               {lowStockItems.length > 0 ? (
                 <Card style={styles.card}>
                   <Card.Content>
@@ -301,6 +397,39 @@ export default function HomeScreen({
             </>
           ) : (
             <>
+              {recycleDueCount > 0 && onOpenRecycleDue && (
+                <Card style={styles.card} onPress={onOpenRecycleDue}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                    <Title style={[styles.statValue, { color: "#e65100" }]}>
+                      {recycleDueCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View List</Text>
+                  </Card.Content>
+                </Card>
+              )}
+              {backOrderCount > 0 && onOpenBackOrders && (
+                <Card style={styles.card} onPress={onOpenBackOrders}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Back Orders</Text>
+                    <Title style={[styles.statValue, { color: "#ff9800" }]}>
+                      {backOrderCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View</Text>
+                  </Card.Content>
+                </Card>
+              )}
+              {lateOrderCount > 0 && onOpenLateOrders && (
+                <Card style={styles.card} onPress={onOpenLateOrders}>
+                  <Card.Content>
+                    <Text style={styles.statLabel}>Late Orders</Text>
+                    <Title style={[styles.statValue, { color: "#d32f2f" }]}>
+                      {lateOrderCount}
+                    </Title>
+                    <Text style={styles.statHint}>Tap to View</Text>
+                  </Card.Content>
+                </Card>
+              )}
               {actionButtons}
               <Card style={styles.card}>
                 <Card.Content>
@@ -476,6 +605,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 10,
     color: "#6f95ab",
+  },
+  statHint: {
+    fontSize: 12,
+    color: "#888",
+    textAlign: "center",
+    marginTop: 4,
   },
   lowStockItem: {
     flexDirection: "row",

@@ -23,10 +23,12 @@ function getActionColor(action, details) {
   if (action === "update" && details?._actionType) {
     if (details._actionType === "check_in") return "#81c784";
     if (details._actionType === "check_out") return "#e57373";
+    if (details._actionType === "receiving") return "#64b5f6";
   }
   switch (action) {
     case "check_in": return "#81c784";
     case "check_out": return "#e57373";
+    case "receiving": return "#64b5f6";
     case "add": return "#64b5f6";
     case "delete": return "#f44336";
     case "update": return "#ba68c8";
@@ -39,11 +41,13 @@ function formatAction(action, details) {
   if (action === "update" && details?._actionType) {
     if (details._actionType === "check_in") return "Checked In";
     if (details._actionType === "check_out") return "Checked Out";
+    if (details._actionType === "receiving") return "Receiving";
   }
   const map = {
     add: "New Entry",
     check_in: "Checked In",
     check_out: "Checked Out",
+    receiving: "Receiving",
     update: "Manual Adjustment",
     delete: "Deleted",
     change_id: "ID Changed",
@@ -57,9 +61,10 @@ function getQuantity(action, details) {
   const isCheckInOut =
     action === "check_in" ||
     action === "check_out" ||
+    action === "receiving" ||
     (action === "update" &&
       details._actionType &&
-      (details._actionType === "check_in" || details._actionType === "check_out"));
+      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
   if (isCheckInOut) {
     const q = details.quantityChange ?? details._quantityChange;
     if (typeof q === "number") return Math.abs(q);
@@ -77,7 +82,8 @@ function getTotalQuantity(action, details) {
   const isCheckInOut =
     action === "check_in" ||
     action === "check_out" ||
-    (action === "update" && details._actionType && (details._actionType === "check_in" || details._actionType === "check_out"));
+    action === "receiving" ||
+    (action === "update" && details._actionType && (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
   if (isCheckInOut && typeof details.quantity === "number") return details.quantity;
   if (action === "update" && typeof details.quantity === "number") return details.quantity;
   if (action === "add" && typeof details.quantity === "number") return details.quantity;
@@ -90,7 +96,7 @@ function getDisplayUserName(log) {
   if (u && u !== "unknown") return log.userName;
   const adminOnly =
     ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-    (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out"));
+    (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving"));
   return adminOnly ? "Admin" : (log.userName || "Unknown");
 }
 

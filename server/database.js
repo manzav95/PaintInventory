@@ -83,6 +83,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'recycle_date') THEN
+          ALTER TABLE items ADD COLUMN recycle_date TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     await client.query(`
@@ -131,6 +138,20 @@ class Database {
         quantity INTEGER NOT NULL DEFAULT 0
       )
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'received_quantity') THEN
+          ALTER TABLE order_lines ADD COLUMN received_quantity INTEGER NOT NULL DEFAULT 0;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'received_at') THEN
+          ALTER TABLE order_lines ADD COLUMN received_at TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Orders tables ready");
   }
 
@@ -149,14 +170,16 @@ class Database {
   async addItem(item) {
     const now = new Date().toISOString();
     const price = item.price != null && !isNaN(Number(item.price)) ? Number(item.price) : null;
-    const type = item.type && ["paint", "primer", "clear", "stain", "dye"].includes(String(item.type).toLowerCase())
+    const allowedTypes = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain"];
+    const type = item.type && allowedTypes.includes(String(item.type).toLowerCase())
       ? String(item.type).toLowerCase()
       : null;
     const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
     const hexColor = item.hex_color != null && String(item.hex_color).trim() !== "" ? String(item.hex_color).trim() : null;
+    const recycleDate = item.recycle_date != null && String(item.recycle_date).trim() !== "" ? String(item.recycle_date).trim() : null;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         item.id,
         item.name,
@@ -172,9 +195,10 @@ class Database {
         type,
         displayOrder,
         hexColor,
+        recycleDate,
       ],
     );
-    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder, hex_color: hexColor } };
+    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder, hex_color: hexColor, recycle_date: recycleDate } };
   }
 
   async updateItem(itemId, updates) {
@@ -193,6 +217,7 @@ class Database {
       "type",
       "display_order",
       "hex_color",
+      "recycle_date",
     ];
     const fields = [];
     const values = [];
@@ -208,7 +233,8 @@ class Database {
           key === "minQuantity" ||
           key === "type" ||
           key === "display_order" ||
-          key === "hex_color"
+          key === "hex_color" ||
+          key === "recycle_date"
             ? `"${key}"`
             : key;
         fields.push(`${col} = $${paramIndex}`);
@@ -217,12 +243,15 @@ class Database {
           values.push(v == null || v === "" ? null : (isNaN(Number(v)) ? null : Number(v)));
         } else if (key === "type") {
           const v = updates[key];
-          const allowed = ["paint", "primer", "clear", "stain", "dye"];
+          const allowed = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain"];
           values.push(v && allowed.includes(String(v).toLowerCase()) ? String(v).toLowerCase() : null);
         } else if (key === "display_order") {
           const v = updates[key];
           values.push(v == null || v === "" ? 0 : (isNaN(Number(v)) ? 0 : Number(v)));
         } else if (key === "hex_color") {
+          const v = updates[key];
+          values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
+        } else if (key === "recycle_date") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else {
@@ -332,12 +361,14 @@ class Database {
     }));
   }
 
-  async createOrder(poNumber, leadTimeDays, lines, createdBy) {
-    const now = new Date().toISOString();
+  async createOrder(poNumber, leadTimeDays, lines, createdBy, placedAt = null) {
+    const placed = placedAt && !Number.isNaN(new Date(placedAt).getTime())
+      ? new Date(placedAt).toISOString()
+      : new Date().toISOString();
     const result = await this.pool.query(
       `INSERT INTO orders (po_number, placed_at, lead_time_days, status, created_by)
        VALUES ($1, $2, $3, 'open', $4) RETURNING id`,
-      [String(poNumber).trim(), now, leadTimeDays == null ? 5 : Math.max(0, parseInt(leadTimeDays, 10) || 5), createdBy || null],
+      [String(poNumber).trim(), placed, leadTimeDays == null ? 5 : Math.max(0, parseInt(leadTimeDays, 10) || 5), createdBy || null],
     );
     const orderId = result.rows[0].id;
     for (const line of lines || []) {
@@ -363,7 +394,12 @@ class Database {
       "SELECT * FROM order_lines WHERE order_id = $1 ORDER BY id",
       [orderId],
     );
-    order.lines = linesResult.rows.map((r) => ({ itemId: r.item_id, quantity: r.quantity }));
+    order.lines = linesResult.rows.map((r) => ({
+      itemId: r.item_id,
+      quantity: r.quantity,
+      received_quantity: r.received_quantity != null ? r.received_quantity : 0,
+      received_at: r.received_at || null,
+    }));
     return order;
   }
 
@@ -390,16 +426,24 @@ class Database {
     return { success: true, order: await this.getOrderById(orderId) };
   }
 
-  async updateOrder(orderId, poNumber, leadTimeDays, lines) {
+  async updateOrder(orderId, poNumber, leadTimeDays, lines, placedAt = null) {
     const id = typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
     if (!Number.isInteger(id) || id < 1) return { success: false, error: "Invalid order ID" };
     const order = await this.getOrderById(id);
     if (!order) return { success: false, error: "Order not found" };
     if (order.status !== "open") return { success: false, error: "Only open orders can be updated" };
-    const updateResult = await this.pool.query(
-      "UPDATE orders SET po_number = $1, lead_time_days = $2 WHERE id = $3",
-      [String(poNumber).trim(), Math.max(0, parseInt(leadTimeDays, 10) || 5), id],
-    );
+    const placed = placedAt && !Number.isNaN(new Date(placedAt).getTime())
+      ? new Date(placedAt).toISOString()
+      : null;
+    const updateResult = placed
+      ? await this.pool.query(
+          "UPDATE orders SET po_number = $1, lead_time_days = $2, placed_at = $3 WHERE id = $4",
+          [String(poNumber).trim(), Math.max(0, parseInt(leadTimeDays, 10) || 5), placed, id],
+        )
+      : await this.pool.query(
+          "UPDATE orders SET po_number = $1, lead_time_days = $2 WHERE id = $3",
+          [String(poNumber).trim(), Math.max(0, parseInt(leadTimeDays, 10) || 5), id],
+        );
     if (updateResult.rowCount === 0) return { success: false, error: "Order not found" };
     await this.pool.query("DELETE FROM order_lines WHERE order_id = $1", [id]);
     for (const line of lines || []) {
@@ -416,7 +460,7 @@ class Database {
 
   async getOnOrderSummary() {
     const result = await this.pool.query(
-      `SELECT ol.item_id, ol.quantity, o.placed_at, o.lead_time_days
+      `SELECT ol.item_id, ol.quantity, ol.received_quantity, o.placed_at, o.lead_time_days
        FROM order_lines ol
        JOIN orders o ON o.id = ol.order_id
        WHERE o.status = 'open'
@@ -425,6 +469,10 @@ class Database {
     const byItem = {};
     for (const row of result.rows) {
       const id = row.item_id;
+      const ordered = parseInt(row.quantity, 10) || 0;
+      const received = parseInt(row.received_quantity, 10) || 0;
+      const remaining = Math.max(0, ordered - received);
+      if (remaining <= 0) continue;
       const placed = new Date(row.placed_at);
       const days = parseInt(row.lead_time_days, 10) || 5;
       const expected = new Date(placed);
@@ -432,10 +480,93 @@ class Database {
       if (!byItem[id]) {
         byItem[id] = { quantity: 0, expectedDate: expected.toISOString() };
       }
-      byItem[id].quantity += parseInt(row.quantity, 10) || 0;
+      byItem[id].quantity += remaining;
       if (expected > new Date(byItem[id].expectedDate)) byItem[id].expectedDate = expected.toISOString();
     }
     return byItem;
+  }
+
+  async receiveOrderLine(orderId, itemId, quantity, userName) {
+    const order = await this.getOrderById(orderId);
+    if (!order) return { success: false, error: "Order not found" };
+    if (order.status !== "open") return { success: false, error: "Order is not open for receiving" };
+    const line = (order.lines || []).find((l) => String(l.itemId) === String(itemId));
+    if (!line) return { success: false, error: "Item not on this order" };
+    const ordered = parseInt(line.quantity, 10) || 0;
+    const alreadyReceived = parseInt(line.received_quantity, 10) || 0;
+    const receiveQty = Math.max(0, Math.min(quantity, ordered - alreadyReceived));
+    if (receiveQty <= 0) return { success: false, error: "No quantity remaining to receive for this line" };
+    const now = new Date().toISOString();
+    const newReceived = alreadyReceived + receiveQty;
+    await this.pool.query(
+      `UPDATE order_lines SET received_quantity = $1, received_at = $2 WHERE order_id = $3 AND item_id = $4`,
+      [newReceived, now, orderId, String(itemId).trim()],
+    );
+    const updatedOrder = await this.getOrderById(orderId);
+    const allReceived = (updatedOrder.lines || []).every(
+      (l) => (parseInt(l.received_quantity, 10) || 0) >= (parseInt(l.quantity, 10) || 0),
+    );
+    if (allReceived) {
+      await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", ["received", orderId]);
+      updatedOrder.status = "received";
+    }
+    return { success: true, receivedQuantity: receiveQty, order: await this.getOrderById(orderId) };
+  }
+
+  async getBackOrderCount() {
+    const result = await this.pool.query(
+      `SELECT COUNT(*) AS count FROM (
+         SELECT o.id
+         FROM orders o
+         JOIN order_lines ol ON ol.order_id = o.id
+         WHERE o.status = 'open'
+         GROUP BY o.id
+         HAVING SUM(COALESCE(ol.received_quantity, 0)) > 0
+            AND SUM(ol.quantity - COALESCE(ol.received_quantity, 0)) > 0
+       ) t`,
+    );
+    return result.rows[0] ? parseInt(result.rows[0].count, 10) : 0;
+  }
+
+  async getLateOrderCount() {
+    const result = await this.pool.query(
+      `SELECT COUNT(*) AS count
+       FROM orders o
+       WHERE o.status = 'open'
+         AND (o.placed_at::timestamp + (COALESCE(o.lead_time_days, 5) + 1) * interval '1 day')::date < current_date`,
+    );
+    return result.rows[0] ? parseInt(result.rows[0].count, 10) : 0;
+  }
+
+  async updateOrderReceivedLines(orderId, lines) {
+    const id = typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
+    if (!Number.isInteger(id) || id < 1) return { success: false, error: "Invalid order ID" };
+    const order = await this.getOrderById(id);
+    if (!order) return { success: false, error: "Order not found" };
+    if (order.status !== "received") return { success: false, error: "Only completed (received) orders can have received quantities adjusted" };
+    for (const entry of lines || []) {
+      const itemId = (entry.itemId != null ? entry.itemId : entry.item_id) != null ? String(entry.itemId != null ? entry.itemId : entry.item_id).trim() : null;
+      const receivedQty = Math.max(0, parseInt(entry.received_quantity, 10) || 0);
+      if (!itemId) continue;
+      const line = (order.lines || []).find((l) => String(l.itemId) === String(itemId));
+      if (!line) continue;
+      const ordered = parseInt(line.quantity, 10) || 0;
+      const newReceived = Math.min(receivedQty, ordered);
+      const newReceivedAt = newReceived > 0 ? (line.received_at || new Date().toISOString()) : null;
+      await this.pool.query(
+        "UPDATE order_lines SET received_quantity = $1, received_at = $2 WHERE order_id = $3 AND item_id = $4",
+        [newReceived, newReceivedAt, id, itemId],
+      );
+    }
+    const updated = await this.getOrderById(id);
+    const anyRemaining = (updated.lines || []).some(
+      (l) => (parseInt(l.received_quantity, 10) || 0) < (parseInt(l.quantity, 10) || 0),
+    );
+    if (anyRemaining) {
+      await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", ["open", id]);
+      updated.status = "open";
+    }
+    return { success: true, order: await this.getOrderById(id) };
   }
 
   close() {
