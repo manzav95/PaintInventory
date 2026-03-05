@@ -368,7 +368,8 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 12,
     marginBottom: 20,
   },
@@ -388,7 +389,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cancelButton: {
-    marginTop: 10,
+    marginTop: 28,
   },
   modalOverlay: {
     flex: 1,
