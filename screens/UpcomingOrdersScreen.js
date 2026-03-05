@@ -110,7 +110,7 @@ export default function UpcomingOrdersScreen({
 
   useEffect(() => {
     if (editingOrder) return;
-    const defaultDays = getDefaultLeadTimeDays(lines, inventory);
+    const defaultDays = getDefaultLeadTimeDays(lines, inventory || []);
     setLeadTimeDays(String(defaultDays));
   }, [lines, inventory, editingOrder]);
 
@@ -276,7 +276,8 @@ export default function UpcomingOrdersScreen({
     return item ? item.name || itemId : itemId;
   };
 
-  const filteredOrders = orders.filter((order) => {
+  const filteredOrders = (orders || []).filter((order) => {
+    if (!order) return false;
     if (orderFilter === "existing") return isExistingOrder(order);
     if (orderFilter === "back_orders") return isBackOrder(order);
     if (orderFilter === "late_orders") return isLateOrder(order);
@@ -360,14 +361,17 @@ export default function UpcomingOrdersScreen({
       .slice(0, MAX_AUTOCOMPLETE);
   };
 
+  const bgColor = theme?.colors?.background ?? "#fff";
+  const primaryColor = theme?.colors?.primary ?? "#6f95ab";
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: bgColor }]}>
       <View style={styles.header}>
         <IconButton
           icon="arrow-left"
           size={24}
           onPress={onBack}
-          iconColor={theme.colors.primary}
+          iconColor={primaryColor}
         />
         <Title style={styles.title}>Upcoming Deliveries</Title>
         <View style={styles.headerRight}>
@@ -422,32 +426,32 @@ export default function UpcomingOrdersScreen({
                 Line items
               </Text>
               {lines.map((line, index) => (
-                <View key={index} style={styles.lineRow}>
-                  <View
-                    style={[
-                      styles.lineItemIdWrap,
-                      focusedLineIndex === index && styles.lineItemIdWrapFocused,
-                    ]}
-                  >
+                <View
+                  key={index}
+                  style={[
+                    styles.lineRow,
+                    focusedLineIndex === index && styles.lineRowDropdownOpen,
+                  ]}
+                >
+                  <View style={styles.lineItemIdWrap}>
                     <TextInput
-                      label="Item (type to search by name)"
+                      label="Item"
                       value={line.searchQuery}
                       onChangeText={(v) => updateLine(index, "searchQuery", v)}
                       onFocus={() => setFocusedLineIndex(index)}
-                      onBlur={() => setTimeout(() => setFocusedLineIndex(null), 200)}
+                      onBlur={() => setTimeout(() => setFocusedLineIndex(null), 180)}
                       mode="outlined"
                       style={[styles.input, styles.lineItemId]}
-                      placeholder="e.g. Red Paint or H66AAA00001"
+                      placeholder="Type to search..."
+                      right={<TextInput.Icon icon="menu-down" />}
                     />
                     {focusedLineIndex === index && (
                       <View
                         style={[
                           styles.dropdown,
                           {
-                            backgroundColor:
-                              theme.colors.surface ||
-                              (theme.dark ? "#1e1e1e" : "#ffffff"),
-                            borderColor: theme.colors.outline,
+                            backgroundColor: (theme && theme.dark) ? "#2d2d2d" : "#ffffff",
+                            borderColor: (theme && theme.dark) ? "#444" : "#ccc",
                           },
                         ]}
                         collapsable={false}
@@ -458,12 +462,7 @@ export default function UpcomingOrdersScreen({
                           style={styles.dropdownScroll}
                         >
                           {getFilteredInventory(line.searchQuery).length === 0 ? (
-                            <Text
-                              style={[
-                                styles.dropdownItem,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
+                            <Text style={[styles.dropdownItem, { color: theme.colors.onSurfaceVariant }]}>
                               No matches
                             </Text>
                           ) : (
@@ -477,7 +476,7 @@ export default function UpcomingOrdersScreen({
                                 }}
                                 style={({ pressed }) => [
                                   styles.dropdownItemWrap,
-                                  pressed && { backgroundColor: theme.colors.surfaceVariant },
+                                  { backgroundColor: pressed ? ((theme && theme.dark) ? "#3d3d3d" : "#eee") : "transparent" },
                                 ]}
                               >
                                 <Text
@@ -486,12 +485,7 @@ export default function UpcomingOrdersScreen({
                                 >
                                   {invItem.name || invItem.id}
                                 </Text>
-                                <Text
-                                  style={[
-                                    styles.dropdownItemId,
-                                    { color: theme.colors.onSurfaceVariant },
-                                  ]}
-                                >
+                                <Text style={[styles.dropdownItemId, { color: theme.colors.onSurfaceVariant }]}>
                                   {invItem.id}
                                 </Text>
                               </Pressable>
@@ -824,12 +818,14 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  lineRowDropdownOpen: {
+    position: "relative",
+    zIndex: 10000,
+    elevation: 10000,
+  },
   lineItemIdWrap: {
     flex: 1,
     position: "relative",
-  },
-  lineItemIdWrapFocused: {
-    zIndex: 1000,
   },
   lineItemId: {
     flex: 1,
@@ -839,20 +835,20 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: "100%",
-    marginTop: -8,
+    marginTop: 2,
     borderWidth: 1,
     borderRadius: 8,
-    maxHeight: 220,
-    zIndex: 1000,
-    elevation: 8,
+    maxHeight: 200,
+    zIndex: 10001,
+    elevation: 10001,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
     overflow: "hidden",
   },
   dropdownScroll: {
-    maxHeight: 216,
+    maxHeight: 196,
   },
   dropdownItemWrap: {
     paddingVertical: 10,
