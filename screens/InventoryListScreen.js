@@ -7,6 +7,8 @@ import {
   Platform,
   useWindowDimensions,
   ScrollView,
+  Modal,
+  Pressable,
 } from "react-native";
 import {
   Card,
@@ -46,6 +48,8 @@ export default function InventoryListScreen({
   const [auditLogs, setAuditLogs] = useState([]);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
+  const [colorPreviewItem, setColorPreviewItem] = useState(null);
+  const [viewMode, setViewMode] = useState("inventory"); // 'inventory' | 'colorBook' — default to standard inventory
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +61,9 @@ export default function InventoryListScreen({
         if (!cancelled) console.error("InventoryListScreen audit load:", e);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Calculate analytics
@@ -67,9 +73,7 @@ export default function InventoryListScreen({
       0,
     );
     const lowStockCount = inventory.filter(
-      (item) =>
-        (item.quantity || 0) <
-        (item.minQuantity ?? minQuantity ?? 30),
+      (item) => (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30),
     ).length;
     const outOfStockCount = inventory.filter(
       (item) => (item.quantity || 0) === 0,
@@ -112,8 +116,19 @@ export default function InventoryListScreen({
   const thisMonthRange = useMemo(() => {
     const now = new Date();
     const first = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-    const label = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+    const last = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999,
+    );
+    const label = now.toLocaleString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
     return { start: first.getTime(), end: last.getTime(), label };
   }, []);
 
@@ -192,6 +207,21 @@ export default function InventoryListScreen({
     return map;
   }, [auditLogs]);
 
+  const getValidHex = (raw) => {
+    if (!raw || typeof raw !== "string") return null;
+    const s = raw.trim().replace(/^#/, "");
+    if (/^[0-9A-Fa-f]{6}$/.test(s)) return "#" + s;
+    if (/^[0-9A-Fa-f]{3}$/.test(s))
+      return (
+        "#" +
+        s
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      );
+    return null;
+  };
+
   const getActionLabel = (log) => {
     if (!log) return null;
     const a = log.action;
@@ -228,8 +258,14 @@ export default function InventoryListScreen({
     // Sort
     if (listOrderMode === "trueOrder") {
       filtered.sort((a, b) => {
-        const aOrder = a.display_order != null && !isNaN(Number(a.display_order)) ? Number(a.display_order) : 999999;
-        const bOrder = b.display_order != null && !isNaN(Number(b.display_order)) ? Number(b.display_order) : 999999;
+        const aOrder =
+          a.display_order != null && !isNaN(Number(a.display_order))
+            ? Number(a.display_order)
+            : 999999;
+        const bOrder =
+          b.display_order != null && !isNaN(Number(b.display_order))
+            ? Number(b.display_order)
+            : 999999;
         if (aOrder !== bOrder) return aOrder - bOrder;
         const aName = (a.name || "").toLowerCase();
         const bName = (b.name || "").toLowerCase();
@@ -265,7 +301,130 @@ export default function InventoryListScreen({
     }
 
     return filtered;
-  }, [inventory, searchQuery, sortBy, sortOrder, stockFilter, minQuantity, listOrderMode]);
+  }, [
+    inventory,
+    searchQuery,
+    sortBy,
+    sortOrder,
+    stockFilter,
+    minQuantity,
+    listOrderMode,
+  ]);
+
+  // Paint-only items with valid hex for mobile color book grid
+  const colorBookItems = useMemo(() => {
+    const query = searchQuery.toLowerCase().trim();
+    return inventory
+      .filter((item) => {
+        const isPaint = (item.type || "").toLowerCase() === "paint";
+        if (!isPaint || !getValidHex(item.hex_color)) return false;
+        if (!query) return true;
+        return (
+          item.name?.toLowerCase().includes(query) ||
+          item.id?.toString().toLowerCase().includes(query)
+        );
+      })
+      .sort((a, b) =>
+        (a.name || "")
+          .toLowerCase()
+          .localeCompare((b.name || "").toLowerCase()),
+      );
+  }, [inventory, searchQuery]);
+
+  const renderColorCard = ({ item, desktop = false }) => {
+    const bgHex = getValidHex(item.hex_color) || "#e0e0e0";
+    const name = item.name || "Unnamed";
+    return (
+      <Pressable
+        style={
+          desktop ? styles.colorBookCardWrapDesktop : styles.colorBookCardWrap
+        }
+        onPress={() => setColorPreviewItem(item)}
+      >
+        <View style={[styles.colorBookCard, { backgroundColor: bgHex }]} />
+        <Text
+          style={[styles.colorBookCardName, { color: theme.colors.onSurface }]}
+          numberOfLines={2}
+        >
+          {name}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const ColorPreviewModal = () => {
+    const it = colorPreviewItem;
+    if (!it) return null;
+    const bgHex = getValidHex(it.hex_color) || "#e0e0e0";
+    const name = it.name || "Unnamed";
+    return (
+      <Modal
+        visible={!!it}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setColorPreviewItem(null)}
+      >
+        <Pressable
+          style={styles.colorModalBackdrop}
+          onPress={() => setColorPreviewItem(null)}
+        >
+          <Pressable
+            style={[
+              styles.colorModalBox,
+              { backgroundColor: theme.colors.surface },
+            ]}
+            onPress={(e) => e?.stopPropagation?.()}
+          >
+            <View
+              style={[styles.colorModalSwatch, { backgroundColor: bgHex }]}
+            />
+            <View
+              style={[
+                styles.colorModalNameRow,
+                {
+                  backgroundColor: theme.dark
+                    ? "rgba(255,255,255,0.06)"
+                    : "rgba(0,0,0,0.04)",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.colorModalName,
+                  { color: theme.colors.onSurface },
+                ]}
+                numberOfLines={2}
+              >
+                {name}
+              </Text>
+              <Text
+                style={[
+                  styles.colorModalId,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                ID: {it.id != null ? String(it.id) : "—"}
+              </Text>
+            </View>
+            <IconButton
+              icon="close"
+              size={24}
+              onPress={() => setColorPreviewItem(null)}
+              style={[
+                styles.colorModalClose,
+                {
+                  backgroundColor: theme.dark
+                    ? "rgba(255,255,255,0.15)"
+                    : "rgba(255,255,255,0.9)",
+                },
+              ]}
+              iconColor={theme.colors.onSurface}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  };
 
   const renderItem = ({ item }) => {
     const isLowStock =
@@ -282,81 +441,121 @@ export default function InventoryListScreen({
       : null;
 
     return (
-      <Card
-        style={[styles.card, lowStockCardStyle]}
-        onPress={() => onItemSelect(item)}
-      >
-        <Card.Content>
-          <View style={styles.itemHeader}>
-            <Text style={[styles.itemName, isLowStock && styles.lowStockText]}>
-              {item.name || "Unnamed Item"}
-            </Text>
-            <Text
-              style={[styles.itemQuantity, isLowStock && styles.lowStockText]}
-            >
-              {item.quantity || 0} gal
-            </Text>
-          </View>
-          {item.location && (
-            <Text style={styles.itemLocation}>📍 {item.location}</Text>
-          )}
-          <Text style={styles.itemId}>ID: {itemId}</Text>
-          {(() => {
-            const orderInfo = onOrderSummary[item.id] || onOrderSummary[itemId];
-            if (orderInfo && orderInfo.quantity > 0) {
-              const exp = orderInfo.expectedDate
-                ? new Date(orderInfo.expectedDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      <Card style={[styles.card, lowStockCardStyle]}>
+        <Card.Content style={styles.itemCardContent}>
+          <Pressable
+            style={styles.itemCardPressable}
+            onPress={() => onItemSelect(item)}
+          >
+            <View style={styles.itemHeader}>
+              <Text
+                style={[styles.itemName, isLowStock && styles.lowStockText]}
+              >
+                {item.name || "Unnamed Item"}
+              </Text>
+              <View style={styles.itemHeaderRight}>
+                <Text
+                  style={[
+                    styles.itemQuantity,
+                    isLowStock && styles.lowStockText,
+                  ]}
+                >
+                  {item.quantity || 0} gal
+                </Text>
+              </View>
+            </View>
+            {item.location && (
+              <Text style={styles.itemLocation}>📍 {item.location}</Text>
+            )}
+            <Text style={styles.itemId}>ID: {itemId}</Text>
+            {(() => {
+              const orderInfo =
+                onOrderSummary[item.id] || onOrderSummary[itemId];
+              if (orderInfo && orderInfo.quantity > 0) {
+                const exp = orderInfo.expectedDate
+                  ? new Date(orderInfo.expectedDate).toLocaleDateString(
+                      "en-US",
+                      { month: "short", day: "numeric", year: "numeric" },
+                    )
+                  : "";
+                return (
+                  <Text
+                    style={[
+                      styles.onOrderText,
+                      { color: theme.colors.primary },
+                    ]}
+                  >
+                    On order: {orderInfo.quantity} gal
+                    {exp ? ` · Expected ~${exp}` : ""}
+                  </Text>
+                );
+              }
+              return null;
+            })()}
+            {(() => {
+              const t = item.type ? String(item.type).toLowerCase() : "";
+              const label = item.type
+                ? String(item.type).charAt(0).toUpperCase() +
+                  String(item.type).slice(1).toLowerCase()
                 : "";
+              const materialTypeColor =
+                t === "paint"
+                  ? "#1565c0"
+                  : t === "clear"
+                    ? "#e65100"
+                    : t === "stain"
+                      ? "#2e7d32"
+                      : t === "primer"
+                        ? theme.dark
+                          ? "#f5f5dc"
+                          : "#5d4037"
+                        : t === "dye"
+                          ? "#7e57c2"
+                          : theme.dark
+                            ? "#fff"
+                            : "#666";
+              if (!label) return null;
               return (
-                <Text style={[styles.onOrderText, { color: theme.colors.primary }]}>
-                  On order: {orderInfo.quantity} gal{exp ? ` · Expected ~${exp}` : ""}
+                <Text
+                  style={[
+                    styles.materialTypeText,
+                    { color: materialTypeColor },
+                  ]}
+                >
+                  {label}
                 </Text>
               );
-            }
-            return null;
-          })()}
-          {(() => {
-            const t = item.type ? String(item.type).toLowerCase() : "";
-            const label = item.type
-              ? String(item.type).charAt(0).toUpperCase() +
-                String(item.type).slice(1).toLowerCase()
-              : "";
-            const materialTypeColor =
-              t === "paint"
-                ? "#1565c0"
-                : t === "clear"
-                  ? "#e65100"
-                  : t === "stain"
-                    ? "#2e7d32"
-                    : t === "primer"
-                      ? theme.dark
-                        ? "#f5f5dc"
-                        : "#5d4037"
-                      : t === "dye"
-                        ? "#7e57c2"
-                        : theme.dark
-                          ? "#fff"
-                          : "#666";
-            if (!label) return null;
-            return (
-              <Text style={[styles.materialTypeText, { color: materialTypeColor }]}>
-                {label}
+            })()}
+            <View style={styles.cardBottomRow}>
+              <Text
+                style={styles.lastScanned}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {item.lastScanned
+                  ? `Last scanned: ${new Date(item.lastScanned).toLocaleString(
+                      "en-US",
+                      {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      },
+                    )} by ${item?.lastScannedBy || "unknown"}`
+                  : " "}
               </Text>
-            );
-          })()}
-          {item.lastScanned && (
-            <Text style={styles.lastScanned}>
-              Last scanned:{" "}
-              {new Date(item.lastScanned).toLocaleString("en-US", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}{" "}
-              by {item?.lastScannedBy || "unknown"}
-            </Text>
-          )}
+              {getValidHex(item.hex_color) ? (
+                <IconButton
+                  icon="palette-outline"
+                  size={26}
+                  onPress={() => setColorPreviewItem(item)}
+                  style={styles.colorPreviewButtonBottom}
+                  iconColor={theme.colors.primary}
+                />
+              ) : null}
+            </View>
+          </Pressable>
         </Card.Content>
       </Card>
     );
@@ -401,6 +600,19 @@ export default function InventoryListScreen({
               <Title style={styles.webTitle}>Inventory Dashboard</Title>
             </View>
             <View style={styles.refreshContainer}>
+              <Button
+                mode={viewMode === "colorBook" ? "contained" : "outlined"}
+                compact
+                onPress={() =>
+                  setViewMode(
+                    viewMode === "colorBook" ? "inventory" : "colorBook",
+                  )
+                }
+                style={styles.viewModeButton}
+                icon="palette-outline"
+              >
+                {viewMode === "colorBook" ? "Inventory" : "Color book"}
+              </Button>
               <IconButton
                 icon="refresh"
                 size={24}
@@ -418,441 +630,562 @@ export default function InventoryListScreen({
             </View>
           </View>
 
-          {/* Analytics + Table: centered; table area fills remaining height and scrolls */}
-          <View style={[styles.webContentCentered, styles.webContentCenteredFlex]}>
-          {/* Analytics Cards */}
-          <View style={styles.analyticsRow}>
-            <Card style={styles.analyticsCard}>
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>Total Gallons</Text>
-                <Title style={styles.analyticsValue}>
-                  {analytics.totalGallons.toLocaleString()}
-                </Title>
-              </Card.Content>
-            </Card>
-            {analytics.lowStockCount > 0 && (
-              <Card
-                style={[
-                  styles.analyticsCard,
-                  styles.analyticsCardFilter,
-                  stockFilter === "lowStock" && styles.analyticsCardFilterActive,
-                ]}
-                onPress={() =>
-                  setStockFilter((f) => (f === "lowStock" ? null : "lowStock"))
-                }
-              >
-                <Card.Content>
-                  <Text style={styles.analyticsLabel}>Low Stock</Text>
-                  <Title style={[styles.analyticsValue, { color: "#ff9800" }]}>
-                    {analytics.lowStockCount}
-                  </Title>
-                </Card.Content>
-              </Card>
-            )}
-            {analytics.outOfStockCount > 0 && (
-              <Card
-                style={[
-                  styles.analyticsCard,
-                  styles.analyticsCardFilter,
-                  stockFilter === "outOfStock" && styles.analyticsCardFilterActive,
-                ]}
-                onPress={() =>
-                  setStockFilter((f) =>
-                    f === "outOfStock" ? null : "outOfStock"
-                  )
-                }
-              >
-                <Card.Content>
-                  <Text style={styles.analyticsLabel}>Out of Stock</Text>
-                  <Title style={[styles.analyticsValue, { color: "#f44336" }]}>
-                    {analytics.outOfStockCount}
-                  </Title>
-                </Card.Content>
-              </Card>
-            )}
-            <Card
-              style={[styles.analyticsCard, styles.analyticsCardFilter]}
-              onPress={() => setGalPeriodWeek((prev) => !prev)}
+          {/* Color book view (desktop): 4-column grid */}
+          {viewMode === "colorBook" ? (
+            <View
+              style={[styles.webContentCentered, styles.webContentCenteredFlex]}
             >
-              <Card.Content>
-                <Text style={styles.analyticsLabel}>
-                  Checked out this {galPeriodWeek ? "week" : "month"}
-                </Text>
-              <Title style={styles.analyticsValue}>
-                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
-                <Text style={styles.analyticsValueUnit}> gal</Text>
-              </Title>
-               <Text style={styles.analyticsSubtext}>
-                  {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
-                </Text>
-                <Text style={styles.analyticsSubtext}>
-                  Tap for {galPeriodWeek ? "month" : "week"}
-                </Text>
-              </Card.Content>
-            </Card>
-            {mostUsedColor && (
-              <Card
-                style={[styles.analyticsCard, styles.analyticsCardFilter]}
-                onPress={() => setMostUsedByWeek((prev) => !prev)}
-              >
-                <Card.Content>
-                  <Text style={styles.analyticsLabel}>Most gallons checked out</Text>
-                  <Title
-                    style={[styles.analyticsValue, { fontSize: 18 }]}
-                    numberOfLines={1}
-                  >
-                    {mostUsedColor.name}
-                  </Title>
-                  <Text style={styles.analyticsSubtext}>
-                    {mostUsedColor.totalGal} gal —{" "}
-                    {mostUsedColor.isWeek
-                      ? `week of ${mostUsedColor.periodLabel}`
-                      : mostUsedColor.periodLabel}
-                  </Text>
-                  <Text style={styles.analyticsSubtext}>
-                    Tap for {mostUsedByWeek ? "month" : "week"}
-                  </Text>
-                </Card.Content>
-              </Card>
-            )}
-          </View>
-
-          {/* Search and Table - fills remaining height, scrolls internally */}
-          <View style={styles.tableCardWrapper}>
-            <Card style={styles.tableCardFlex}>
-              <Card.Content style={styles.tableCardContentFlex}>
-                <View style={styles.tableHeader}>
-                  <Searchbar
-                    placeholder="Search by name, ID, location, or type..."
-                    onChangeText={setSearchQuery}
-                    value={searchQuery}
-                    style={styles.webSearchbar}
-                    inputStyle={styles.searchbarInput}
-                  />
-                  <Button
-                    mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
-                    compact
-                    onPress={() =>
-                      setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
-                    }
-                    style={styles.orderToggleButton}
-                  >
-                    {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
-                  </Button>
-                  <Text style={styles.resultCount}>
-                    {filteredAndSortedInventory.length} of {inventory.length}{" "}
-                    items
+              <Searchbar
+                placeholder="Search colors by name or ID..."
+                onChangeText={setSearchQuery}
+                value={searchQuery}
+                style={styles.colorBookSearchbar}
+                inputStyle={styles.searchbarInput}
+              />
+              {colorBookItems.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>
+                    {searchQuery
+                      ? "No paint colors found"
+                      : "No paint colors with hex in inventory"}
                   </Text>
                 </View>
-
-                {filteredAndSortedInventory.length === 0 ? (
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>
-                      {searchQuery
-                        ? "No items found"
-                        : "No items in inventory"}
-                    </Text>
-                  </View>
-                ) : (
-                  <ScrollView
-                    style={styles.tableScrollOuter}
-                    contentContainerStyle={styles.tableScrollOuterContent}
-                    showsVerticalScrollIndicator={true}
-                    nestedScrollEnabled
-                    refreshControl={
-                      <RefreshControl
-                        refreshing={isRefreshing}
-                        onRefresh={onRefresh}
-                        tintColor={theme.colors.primary}
-                      />
-                    }
-                  >
-                    <ScrollView
-                      horizontal
-                      style={styles.tableScrollHorizontal}
-                      showsHorizontalScrollIndicator={true}
+              ) : (
+                <ScrollView
+                  style={styles.colorBookScrollDesktop}
+                  contentContainerStyle={styles.colorBookGridDesktop}
+                  showsVerticalScrollIndicator
+                >
+                  {colorBookItems.map((item) => (
+                    <React.Fragment
+                      key={item.id?.toString() || String(Math.random())}
                     >
-                    <DataTable style={styles.dataTable}>
-                    <DataTable.Header>
-                      <DataTable.Title
-                        style={styles.tableCell}
-                        sortDirection={
-                          getSortIcon("name")
-                            ? sortOrder === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : null
-                        }
-                        onPress={() => handleSort("name")}
-                      >
-                        Paint Name {getSortIcon("name")}
-                      </DataTable.Title>
-                      <DataTable.Title
-                        style={styles.tableCell}
-                        sortDirection={
-                          getSortIcon("quantity")
-                            ? sortOrder === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : null
-                        }
-                        onPress={() => handleSort("quantity")}
-                      >
-                        Quantity {getSortIcon("quantity")}
-                      </DataTable.Title>
-                      <DataTable.Title style={styles.tableCell}>
-                        ID
-                      </DataTable.Title>
-                      <DataTable.Title style={styles.tableCell}>
-                        Material Type
-                      </DataTable.Title>
-                      <DataTable.Title style={styles.tableCell}>
-                        Location
-                      </DataTable.Title>
-                      <DataTable.Title style={styles.tableCell}>
-                        On order
-                      </DataTable.Title>
-                      <DataTable.Title
-                        style={styles.lastScannedCell}
-                        sortDirection={
-                          getSortIcon("lastScanned")
-                            ? sortOrder === "asc"
-                              ? "ascending"
-                              : "descending"
-                            : null
-                        }
-                        onPress={() => handleSort("lastScanned")}
-                      >
-                        Last Action {getSortIcon("lastScanned")}
-                      </DataTable.Title>
-                    </DataTable.Header>
+                      {renderColorCard({ item, desktop: true })}
+                    </React.Fragment>
+                  ))}
+                </ScrollView>
+              )}
+            </View>
+          ) : (
+            <View style={styles.webContentCentered}>
+              {/* Analytics + Table: centered; table area fills remaining height and scrolls */}
+              <View
+                style={[
+                  styles.webContentCentered,
+                  styles.webContentCenteredFlex,
+                ]}
+              >
+                {/* Analytics Cards */}
+                <View style={styles.analyticsRow}>
+                  <Card style={styles.analyticsCard}>
+                    <Card.Content>
+                      <Text style={styles.analyticsLabel}>Total Gallons</Text>
+                      <Title style={styles.analyticsValue}>
+                        {analytics.totalGallons.toLocaleString()}
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                  {analytics.lowStockCount > 0 && (
+                    <Card
+                      style={[
+                        styles.analyticsCard,
+                        styles.analyticsCardFilter,
+                        stockFilter === "lowStock" &&
+                          styles.analyticsCardFilterActive,
+                      ]}
+                      onPress={() =>
+                        setStockFilter((f) =>
+                          f === "lowStock" ? null : "lowStock",
+                        )
+                      }
+                    >
+                      <Card.Content>
+                        <Text style={styles.analyticsLabel}>Low Stock</Text>
+                        <Title
+                          style={[styles.analyticsValue, { color: "#ff9800" }]}
+                        >
+                          {analytics.lowStockCount}
+                        </Title>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {analytics.outOfStockCount > 0 && (
+                    <Card
+                      style={[
+                        styles.analyticsCard,
+                        styles.analyticsCardFilter,
+                        stockFilter === "outOfStock" &&
+                          styles.analyticsCardFilterActive,
+                      ]}
+                      onPress={() =>
+                        setStockFilter((f) =>
+                          f === "outOfStock" ? null : "outOfStock",
+                        )
+                      }
+                    >
+                      <Card.Content>
+                        <Text style={styles.analyticsLabel}>Out of Stock</Text>
+                        <Title
+                          style={[styles.analyticsValue, { color: "#f44336" }]}
+                        >
+                          {analytics.outOfStockCount}
+                        </Title>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  <Card
+                    style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                    onPress={() => setGalPeriodWeek((prev) => !prev)}
+                  >
+                    <Card.Content>
+                      <Text style={styles.analyticsLabel}>
+                        Checked out this {galPeriodWeek ? "week" : "month"}
+                      </Text>
+                      <Title style={styles.analyticsValue}>
+                        {galPeriodWeek
+                          ? gallonsUsedThisWeek
+                          : gallonsUsedThisMonth}
+                        <Text style={styles.analyticsValueUnit}> gal</Text>
+                      </Title>
+                      <Text style={styles.analyticsSubtext}>
+                        {galPeriodWeek
+                          ? thisWeekRange.label
+                          : thisMonthRange.label}
+                      </Text>
+                      <Text style={styles.analyticsSubtext}>
+                        Tap for {galPeriodWeek ? "month" : "week"}
+                      </Text>
+                    </Card.Content>
+                  </Card>
+                  {mostUsedColor && (
+                    <Card
+                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                      onPress={() => setMostUsedByWeek((prev) => !prev)}
+                    >
+                      <Card.Content>
+                        <Text style={styles.analyticsLabel}>
+                          Most gallons checked out
+                        </Text>
+                        <Title
+                          style={[styles.analyticsValue, { fontSize: 18 }]}
+                          numberOfLines={1}
+                        >
+                          {mostUsedColor.name}
+                        </Title>
+                        <Text style={styles.analyticsSubtext}>
+                          {mostUsedColor.totalGal} gal —{" "}
+                          {mostUsedColor.isWeek
+                            ? `week of ${mostUsedColor.periodLabel}`
+                            : mostUsedColor.periodLabel}
+                        </Text>
+                        <Text style={styles.analyticsSubtext}>
+                          Tap for {mostUsedByWeek ? "month" : "week"}
+                        </Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                </View>
 
-                    {filteredAndSortedInventory.map((item) => {
-                      const isLowStock =
-      (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
-                      const isOutOfStock = (item.quantity || 0) === 0;
-                      return (
-                        <DataTable.Row
-                          key={item.id}
-                          onPress={() => onItemSelect(item)}
-                          style={
-                            isLowStock
-                              ? {
-                                  backgroundColor: theme.dark
-                                    ? "#3a3a3a"
-                                    : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
-                                  borderLeftWidth: 4,
-                                  borderLeftColor: "#ff6b6b",
-                                }
-                              : undefined
+                {/* Search and Table - fills remaining height, scrolls internally */}
+                <View style={styles.tableCardWrapper}>
+                  <Card style={styles.tableCardFlex}>
+                    <Card.Content style={styles.tableCardContentFlex}>
+                      <View style={styles.tableHeader}>
+                        <Searchbar
+                          placeholder="Search by name, ID, location, or type..."
+                          onChangeText={setSearchQuery}
+                          value={searchQuery}
+                          style={styles.webSearchbar}
+                          inputStyle={styles.searchbarInput}
+                        />
+                        <Text style={styles.resultCount}>
+                          {filteredAndSortedInventory.length} of{" "}
+                          {inventory.length} items
+                        </Text>
+                      </View>
+
+                      {filteredAndSortedInventory.length === 0 ? (
+                        <View style={styles.emptyState}>
+                          <Text style={styles.emptyText}>
+                            {searchQuery
+                              ? "No items found"
+                              : "No items in inventory"}
+                          </Text>
+                        </View>
+                      ) : (
+                        <ScrollView
+                          style={styles.tableScrollOuter}
+                          contentContainerStyle={styles.tableScrollOuterContent}
+                          showsVerticalScrollIndicator={true}
+                          nestedScrollEnabled
+                          refreshControl={
+                            <RefreshControl
+                              refreshing={isRefreshing}
+                              onRefresh={onRefresh}
+                              tintColor={theme.colors.primary}
+                            />
                           }
                         >
-                          <DataTable.Cell style={styles.tableCell}>
-                            <Text
-                              style={[
-                                styles.itemNameText,
-                                {
-                                  color:
-                                    theme.dark && !isLowStock
-                                      ? "#fff"
-                                      : undefined,
-                                },
-                                isLowStock && styles.lowStockText,
-                              ]}
-                            >
-                              {item.name || "Unnamed"}
-                            </Text>
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            <Text
-                              style={[
-                                styles.quantityText,
-                                {
-                                  color:
-                                    theme.dark && !isLowStock
-                                      ? "#fff"
-                                      : theme.dark
-                                        ? undefined
-                                        : theme.colors.onSurface,
-                                },
-                                isLowStock && styles.lowStockText,
-                              ]}
-                            >
-                              {item.quantity || 0} gal
-                            </Text>
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            <Text
-                              style={[
-                                styles.idText,
-                                { color: theme.dark ? "#fff" : "#666" },
-                              ]}
-                            >
-                              {item.id || "N/A"}
-                            </Text>
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            {(() => {
-                              const t = item.type
-                                ? String(item.type).toLowerCase()
-                                : "";
-                              const label = item.type
-                                ? String(item.type).charAt(0).toUpperCase() +
-                                  String(item.type).slice(1).toLowerCase()
-                                : "";
-                              const materialTypeColor =
-                                t === "paint"
-                                  ? "#1565c0"
-                                  : t === "clear"
-                                    ? "#e65100"
-                                    : t === "stain"
-                                      ? "#2e7d32"
-                                      : t === "primer"
-                                        ? theme.dark
-                                          ? "#f5f5dc"
-                                          : "#5d4037"
-                                        : t === "dye"
-                                          ? "#7e57c2"
-                                          : theme.dark
-                                            ? "#fff"
-                                            : "#666";
-                              return (
-                                <Text
+                          <ScrollView
+                            horizontal
+                            style={styles.tableScrollHorizontal}
+                            showsHorizontalScrollIndicator={true}
+                          >
+                            <DataTable style={styles.dataTable}>
+                              <DataTable.Header>
+                                <DataTable.Title
+                                  style={styles.tableCell}
+                                  sortDirection={
+                                    getSortIcon("name")
+                                      ? sortOrder === "asc"
+                                        ? "ascending"
+                                        : "descending"
+                                      : null
+                                  }
+                                  onPress={() => handleSort("name")}
+                                >
+                                  Paint Name {getSortIcon("name")}
+                                </DataTable.Title>
+                                <DataTable.Title
+                                  style={styles.tableCell}
+                                  sortDirection={
+                                    getSortIcon("quantity")
+                                      ? sortOrder === "asc"
+                                        ? "ascending"
+                                        : "descending"
+                                      : null
+                                  }
+                                  onPress={() => handleSort("quantity")}
+                                >
+                                  Quantity {getSortIcon("quantity")}
+                                </DataTable.Title>
+                                <DataTable.Title style={styles.tableCell}>
+                                  ID
+                                </DataTable.Title>
+                                <DataTable.Title style={styles.tableCell}>
+                                  Material Type
+                                </DataTable.Title>
+                                <DataTable.Title style={styles.tableCell}>
+                                  Location
+                                </DataTable.Title>
+                                <DataTable.Title
                                   style={[
-                                    styles.materialTypeText,
-                                    { color: materialTypeColor },
+                                    styles.tableCell,
+                                    styles.colorColHeader,
                                   ]}
                                 >
-                                  {label}
-                                </Text>
-                              );
-                            })()}
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            <Text
-                              style={[
-                                styles.locationText,
-                                { color: theme.dark ? "#fff" : "#666" },
-                              ]}
-                            >
-                              {item.location || "-"}
-                            </Text>
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.tableCell}>
-                            {(() => {
-                              const orderInfo =
-                                onOrderSummary[item.id] ||
-                                onOrderSummary[String(item.id)];
-                              if (orderInfo && orderInfo.quantity > 0) {
-                                const exp = orderInfo.expectedDate
-                                  ? new Date(orderInfo.expectedDate).toLocaleDateString("en-US", {
-                                      month: "short",
-                                      day: "numeric",
-                                      year: "numeric",
-                                    })
-                                  : "";
+                                  Color
+                                </DataTable.Title>
+                                <DataTable.Title style={styles.tableCell}>
+                                  On order
+                                </DataTable.Title>
+                                <DataTable.Title
+                                  style={styles.lastScannedCell}
+                                  sortDirection={
+                                    getSortIcon("lastScanned")
+                                      ? sortOrder === "asc"
+                                        ? "ascending"
+                                        : "descending"
+                                      : null
+                                  }
+                                  onPress={() => handleSort("lastScanned")}
+                                >
+                                  Last Action {getSortIcon("lastScanned")}
+                                </DataTable.Title>
+                              </DataTable.Header>
+
+                              {filteredAndSortedInventory.map((item) => {
+                                const isLowStock =
+                                  (item.quantity || 0) <
+                                  (item.minQuantity ?? minQuantity ?? 30);
+                                const isOutOfStock = (item.quantity || 0) === 0;
                                 return (
-                                  <Text
-                                    style={{
-                                      fontSize: 12,
-                                      color: theme.colors.primary,
-                                    }}
+                                  <DataTable.Row
+                                    key={item.id}
+                                    onPress={() => onItemSelect(item)}
+                                    style={
+                                      isLowStock
+                                        ? {
+                                            backgroundColor: theme.dark
+                                              ? "#3a3a3a"
+                                              : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
+                                            borderLeftWidth: 4,
+                                            borderLeftColor: "#ff6b6b",
+                                          }
+                                        : undefined
+                                    }
                                   >
-                                    {orderInfo.quantity} gal
-                                    {exp ? ` ~${exp}` : ""}
-                                  </Text>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      <Text
+                                        style={[
+                                          styles.itemNameText,
+                                          {
+                                            color:
+                                              theme.dark && !isLowStock
+                                                ? "#fff"
+                                                : undefined,
+                                          },
+                                          isLowStock && styles.lowStockText,
+                                        ]}
+                                      >
+                                        {item.name || "Unnamed"}
+                                      </Text>
+                                    </DataTable.Cell>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      <Text
+                                        style={[
+                                          styles.quantityText,
+                                          {
+                                            color:
+                                              theme.dark && !isLowStock
+                                                ? "#fff"
+                                                : theme.dark
+                                                  ? undefined
+                                                  : theme.colors.onSurface,
+                                          },
+                                          isLowStock && styles.lowStockText,
+                                        ]}
+                                      >
+                                        {item.quantity || 0} gal
+                                      </Text>
+                                    </DataTable.Cell>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      <Text
+                                        style={[
+                                          styles.idText,
+                                          {
+                                            color: theme.dark ? "#fff" : "#666",
+                                          },
+                                        ]}
+                                      >
+                                        {item.id || "N/A"}
+                                      </Text>
+                                    </DataTable.Cell>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      {(() => {
+                                        const t = item.type
+                                          ? String(item.type).toLowerCase()
+                                          : "";
+                                        const label = item.type
+                                          ? String(item.type)
+                                              .charAt(0)
+                                              .toUpperCase() +
+                                            String(item.type)
+                                              .slice(1)
+                                              .toLowerCase()
+                                          : "";
+                                        const materialTypeColor =
+                                          t === "paint"
+                                            ? "#1565c0"
+                                            : t === "clear"
+                                              ? "#e65100"
+                                              : t === "stain"
+                                                ? "#2e7d32"
+                                                : t === "primer"
+                                                  ? theme.dark
+                                                    ? "#f5f5dc"
+                                                    : "#5d4037"
+                                                  : t === "dye"
+                                                    ? "#7e57c2"
+                                                    : theme.dark
+                                                      ? "#fff"
+                                                      : "#666";
+                                        return (
+                                          <Text
+                                            style={[
+                                              styles.materialTypeText,
+                                              { color: materialTypeColor },
+                                            ]}
+                                          >
+                                            {label}
+                                          </Text>
+                                        );
+                                      })()}
+                                    </DataTable.Cell>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      <Text
+                                        style={[
+                                          styles.locationText,
+                                          {
+                                            color: theme.dark ? "#fff" : "#666",
+                                          },
+                                        ]}
+                                      >
+                                        {item.location || "-"}
+                                      </Text>
+                                    </DataTable.Cell>
+                                    <DataTable.Cell
+                                      style={[
+                                        styles.tableCell,
+                                        styles.colorColCell,
+                                      ]}
+                                    >
+                                      {getValidHex(item.hex_color) ? (
+                                        <IconButton
+                                          icon="palette-outline"
+                                          size={20}
+                                          onPress={() =>
+                                            setColorPreviewItem(item)
+                                          }
+                                          iconColor={theme.colors.primary}
+                                        />
+                                      ) : (
+                                        <Text
+                                          style={[
+                                            styles.idText,
+                                            {
+                                              color: theme.dark
+                                                ? "#999"
+                                                : "#999",
+                                            },
+                                          ]}
+                                        >
+                                          —
+                                        </Text>
+                                      )}
+                                    </DataTable.Cell>
+                                    <DataTable.Cell style={styles.tableCell}>
+                                      {(() => {
+                                        const orderInfo =
+                                          onOrderSummary[item.id] ||
+                                          onOrderSummary[String(item.id)];
+                                        if (
+                                          orderInfo &&
+                                          orderInfo.quantity > 0
+                                        ) {
+                                          const exp = orderInfo.expectedDate
+                                            ? new Date(
+                                                orderInfo.expectedDate,
+                                              ).toLocaleDateString("en-US", {
+                                                month: "short",
+                                                day: "numeric",
+                                                year: "numeric",
+                                              })
+                                            : "";
+                                          return (
+                                            <Text
+                                              style={{
+                                                fontSize: 12,
+                                                color: theme.colors.primary,
+                                              }}
+                                            >
+                                              {orderInfo.quantity} gal
+                                              {exp ? ` ~${exp}` : ""}
+                                            </Text>
+                                          );
+                                        }
+                                        return (
+                                          <Text
+                                            style={[
+                                              styles.idText,
+                                              {
+                                                color: theme.dark
+                                                  ? "#999"
+                                                  : "#999",
+                                              },
+                                            ]}
+                                          >
+                                            —
+                                          </Text>
+                                        );
+                                      })()}
+                                    </DataTable.Cell>
+                                    <DataTable.Cell
+                                      style={styles.lastScannedCell}
+                                    >
+                                      {(() => {
+                                        const log =
+                                          lastLogByItemId[
+                                            item.id != null
+                                              ? String(item.id)
+                                              : ""
+                                          ];
+                                        if (log) {
+                                          const ts = log.timestamp
+                                            ? new Date(
+                                                log.timestamp,
+                                              ).toLocaleString("en-US", {
+                                                month: "short",
+                                                day: "numeric",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                              })
+                                            : "—";
+                                          const user =
+                                            log.userName || "Unknown";
+                                          const actionLabel =
+                                            getActionLabel(log);
+                                          return (
+                                            <View>
+                                              <Text
+                                                style={[
+                                                  styles.timeText,
+                                                  {
+                                                    color: theme.dark
+                                                      ? "#fff"
+                                                      : "#666",
+                                                  },
+                                                ]}
+                                              >
+                                                {ts}
+                                              </Text>
+                                              <Text
+                                                style={[
+                                                  styles.lastScannedByText,
+                                                  {
+                                                    color: theme.dark
+                                                      ? "#fff"
+                                                      : "#333",
+                                                  },
+                                                ]}
+                                              >
+                                                {user}
+                                              </Text>
+                                              <Text
+                                                style={[
+                                                  styles.timeText,
+                                                  {
+                                                    color: theme.dark
+                                                      ? "#aaa"
+                                                      : "#666",
+                                                  },
+                                                ]}
+                                              >
+                                                {actionLabel}
+                                              </Text>
+                                            </View>
+                                          );
+                                        }
+                                        return (
+                                          <Text
+                                            style={[
+                                              styles.timeText,
+                                              {
+                                                color: theme.dark
+                                                  ? "#fff"
+                                                  : "#666",
+                                              },
+                                            ]}
+                                          >
+                                            Never
+                                          </Text>
+                                        );
+                                      })()}
+                                    </DataTable.Cell>
+                                  </DataTable.Row>
                                 );
-                              }
-                              return (
-                                <Text
-                                  style={[
-                                    styles.idText,
-                                    { color: theme.dark ? "#999" : "#999" },
-                                  ]}
-                                >
-                                  —
-                                </Text>
-                              );
-                            })()}
-                          </DataTable.Cell>
-                          <DataTable.Cell style={styles.lastScannedCell}>
-                            {(() => {
-                              const log =
-                                lastLogByItemId[item.id != null ? String(item.id) : ""];
-                              if (log) {
-                                const ts = log.timestamp
-                                  ? new Date(log.timestamp).toLocaleString(
-                                      "en-US",
-                                      {
-                                        month: "short",
-                                        day: "numeric",
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      },
-                                    )
-                                  : "—";
-                                const user = log.userName || "Unknown";
-                                const actionLabel = getActionLabel(log);
-                                return (
-                                  <View>
-                                    <Text
-                                      style={[
-                                        styles.timeText,
-                                        {
-                                          color: theme.dark ? "#fff" : "#666",
-                                        },
-                                      ]}
-                                    >
-                                      {ts}
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.lastScannedByText,
-                                        {
-                                          color: theme.dark ? "#fff" : "#333",
-                                        },
-                                      ]}
-                                    >
-                                      {user}
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.timeText,
-                                        {
-                                          color: theme.dark
-                                            ? "#aaa"
-                                            : "#666",
-                                        },
-                                      ]}
-                                    >
-                                      {actionLabel}
-                                    </Text>
-                                  </View>
-                                );
-                              }
-                              return (
-                                <Text
-                                  style={[
-                                    styles.timeText,
-                                    { color: theme.dark ? "#fff" : "#666" },
-                                  ]}
-                                >
-                                  Never
-                                </Text>
-                              );
-                            })()}
-                          </DataTable.Cell>
-                        </DataTable.Row>
-                      );
-                    })}
-                  </DataTable>
-                    </ScrollView>
-                  </ScrollView>
-                )}
-              </Card.Content>
-            </Card>
-          </View>
-          </View>
+                              })}
+                            </DataTable>
+                          </ScrollView>
+                        </ScrollView>
+                      )}
+                    </Card.Content>
+                  </Card>
+                </View>
+              </View>
+            </View>
+          )}
+          <ColorPreviewModal />
         </View>
       </View>
     );
@@ -862,218 +1195,284 @@ export default function InventoryListScreen({
   // Mobile landscape: whole page (header + search + stats + list) in one ScrollView with overflow scroll
   if (isMobileLandscape) {
     return (
-      <ScrollView
-        style={[
-          styles.container,
-          { backgroundColor: theme.colors.background },
-          Platform.OS === "web" && styles.mobileLandscapeScrollWeb,
-        ]}
-        contentContainerStyle={styles.mobileLandscapeScrollContent}
-        showsVerticalScrollIndicator={true}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={onRefresh}
-            tintColor={theme.colors.primary}
-          />
-        }
-      >
-        <View style={styles.header}>
-          <Button icon="arrow-left" onPress={onBack} mode="text">
-            Back
-          </Button>
-          <Text style={styles.headerTitle}>Inventory</Text>
-          <View style={styles.refreshContainer}>
-            <IconButton
-              icon="refresh"
-              size={24}
-              onPress={onRefresh}
-              disabled={isRefreshing}
-              iconColor={theme.colors.primary}
+      <>
+        <ScrollView
+          style={[
+            styles.container,
+            { backgroundColor: theme.colors.background },
+            Platform.OS === "web" && styles.mobileLandscapeScrollWeb,
+          ]}
+          contentContainerStyle={styles.mobileLandscapeScrollContent}
+          showsVerticalScrollIndicator={true}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.colors.primary}
             />
-            {isRefreshing && (
-              <ActivityIndicator
-                size="small"
-                color={theme.colors.primary}
-                style={styles.refreshIndicator}
+          }
+        >
+          <View style={styles.header}>
+            <Button icon="arrow-left" onPress={onBack} mode="text">
+              Back
+            </Button>
+            <Text style={styles.headerTitle}>
+              {viewMode === "colorBook" ? "Color book" : "Inventory"}
+            </Text>
+            <View style={styles.refreshContainer}>
+              <Button
+                mode={viewMode === "colorBook" ? "contained" : "outlined"}
+                compact
+                onPress={() =>
+                  setViewMode(
+                    viewMode === "colorBook" ? "inventory" : "colorBook",
+                  )
+                }
+                style={styles.viewModeButtonMobile}
+                icon="palette-outline"
+              >
+                {viewMode === "colorBook" ? "List" : "Colors"}
+              </Button>
+              <IconButton
+                icon="refresh"
+                size={24}
+                onPress={onRefresh}
+                disabled={isRefreshing}
+                iconColor={theme.colors.primary}
               />
-            )}
+              {isRefreshing && (
+                <ActivityIndicator
+                  size="small"
+                  color={theme.colors.primary}
+                  style={styles.refreshIndicator}
+                />
+              )}
+            </View>
           </View>
-        </View>
 
-        <Searchbar
-            placeholder="Search by name, ID, location, or type..."
+          <Searchbar
+            placeholder={
+              viewMode === "colorBook"
+                ? "Search colors by name or ID..."
+                : "Search by name, ID, location, or type..."
+            }
             onChangeText={setSearchQuery}
             value={searchQuery}
             style={styles.searchbar}
           />
-          <View style={styles.orderToggleRow}>
-            <Button
-              mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
-              compact
-              onPress={() =>
-                setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
-              }
-              style={styles.orderToggleButtonMobile}
-            >
-              {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
-            </Button>
-          </View>
-          <View
-            style={[
-              styles.analyticsRowMobile,
-              styles.analyticsRowMobileLandscape,
-            ]}
-          >
-        {analytics.totalGallons > 0 && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-            ]}
-          >
-            <Card.Content
+          {viewMode === "inventory" && (
+            <View
               style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
+                styles.analyticsRowMobile,
+                styles.analyticsRowMobileLandscape,
               ]}
             >
-              <Text style={styles.analyticsLabelMobile}>Total Gallons</Text>
-              <Title style={styles.analyticsValueMobile}>
-                {analytics.totalGallons.toLocaleString()}
-              </Title>
-            </Card.Content>
-          </Card>
-        )}
-        {analytics.lowStockCount > 0 && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-              styles.analyticsCardFilter,
-              stockFilter === "lowStock" && styles.analyticsCardFilterActive,
-            ]}
-            onPress={() =>
-              setStockFilter((f) => (f === "lowStock" ? null : "lowStock"))
-            }
-          >
-            <Card.Content
-              style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
-              ]}
-            >
-              <Text style={styles.analyticsLabelMobile}>Low Stock</Text>
-              <Title style={[styles.analyticsValueMobile, { color: "#ff9800" }]}>
-                {analytics.lowStockCount}
-              </Title>
-            </Card.Content>
-          </Card>
-        )}
-        {analytics.outOfStockCount > 0 && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-              styles.analyticsCardFilter,
-              stockFilter === "outOfStock" && styles.analyticsCardFilterActive,
-            ]}
-            onPress={() =>
-              setStockFilter((f) =>
-                f === "outOfStock" ? null : "outOfStock"
-              )
-            }
-          >
-            <Card.Content
-              style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
-              ]}
-            >
-              <Text style={styles.analyticsLabelMobile}>Out of Stock</Text>
-              <Title style={[styles.analyticsValueMobile, { color: "#f44336" }]}>
-                {analytics.outOfStockCount}
-              </Title>
-            </Card.Content>
-          </Card>
-        )}
-        {(gallonsUsedThisWeek > 0 || gallonsUsedThisMonth > 0) && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-            ]}
-            onPress={() => setGalPeriodWeek((prev) => !prev)}
-          >
-            <Card.Content
-              style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
-              ]}
-            >
-              <Text style={styles.analyticsLabelMobile}>
-                Gal this {galPeriodWeek ? "week" : "month"}
-              </Text>
-              <Title style={styles.analyticsValueMobile}>
-                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
-              </Title>
-              <Text style={styles.analyticsSubtextMobile}>
-                Tap for {galPeriodWeek ? "month" : "week"}
-              </Text>
-            </Card.Content>
-          </Card>
-        )}
-        {mostUsedColor && mostUsedColor.totalGal > 0 && (
-          <Card
-            style={[
-              styles.analyticsCardMobile,
-              isMobileLandscape && styles.analyticsCardMobileLandscape,
-              styles.analyticsCardFilter,
-            ]}
-            onPress={() => setMostUsedByWeek((prev) => !prev)}
-          >
-            <Card.Content
-              style={[
-                styles.analyticsCardMobileContent,
-                isMobileLandscape && styles.analyticsCardMobileContentLandscape,
-              ]}
-            >
-              <Text style={styles.analyticsLabelMobile}>Most checked out</Text>
-              <Title
-                style={[styles.analyticsValueMobile, { fontSize: 14 }]}
-                numberOfLines={1}
-              >
-                {mostUsedColor.name}
-              </Title>
-              <Text style={styles.analyticsSubtextMobile}>
-                {mostUsedColor.totalGal} gal
-              </Text>
-            </Card.Content>
-          </Card>
-        )}
-          </View>
+              {analytics.totalGallons > 0 && (
+                <Card
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                  ]}
+                >
+                  <Card.Content
+                    style={[
+                      styles.analyticsCardMobileContent,
+                      isMobileLandscape &&
+                        styles.analyticsCardMobileContentLandscape,
+                    ]}
+                  >
+                    <Text style={styles.analyticsLabelMobile}>
+                      Total Gallons
+                    </Text>
+                    <Title style={styles.analyticsValueMobile}>
+                      {analytics.totalGallons.toLocaleString()}
+                    </Title>
+                  </Card.Content>
+                </Card>
+              )}
+              {analytics.lowStockCount > 0 && (
+                <Card
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                    stockFilter === "lowStock" &&
+                      styles.analyticsCardFilterActive,
+                  ]}
+                  onPress={() =>
+                    setStockFilter((f) =>
+                      f === "lowStock" ? null : "lowStock",
+                    )
+                  }
+                >
+                  <Card.Content
+                    style={[
+                      styles.analyticsCardMobileContent,
+                      isMobileLandscape &&
+                        styles.analyticsCardMobileContentLandscape,
+                    ]}
+                  >
+                    <Text style={styles.analyticsLabelMobile}>Low Stock</Text>
+                    <Title
+                      style={[
+                        styles.analyticsValueMobile,
+                        { color: "#ff9800" },
+                      ]}
+                    >
+                      {analytics.lowStockCount}
+                    </Title>
+                  </Card.Content>
+                </Card>
+              )}
+              {analytics.outOfStockCount > 0 && (
+                <Card
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                    stockFilter === "outOfStock" &&
+                      styles.analyticsCardFilterActive,
+                  ]}
+                  onPress={() =>
+                    setStockFilter((f) =>
+                      f === "outOfStock" ? null : "outOfStock",
+                    )
+                  }
+                >
+                  <Card.Content
+                    style={[
+                      styles.analyticsCardMobileContent,
+                      isMobileLandscape &&
+                        styles.analyticsCardMobileContentLandscape,
+                    ]}
+                  >
+                    <Text style={styles.analyticsLabelMobile}>
+                      Out of Stock
+                    </Text>
+                    <Title
+                      style={[
+                        styles.analyticsValueMobile,
+                        { color: "#f44336" },
+                      ]}
+                    >
+                      {analytics.outOfStockCount}
+                    </Title>
+                  </Card.Content>
+                </Card>
+              )}
+              {(gallonsUsedThisWeek > 0 || gallonsUsedThisMonth > 0) && (
+                <Card
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                  ]}
+                  onPress={() => setGalPeriodWeek((prev) => !prev)}
+                >
+                  <Card.Content
+                    style={[
+                      styles.analyticsCardMobileContent,
+                      isMobileLandscape &&
+                        styles.analyticsCardMobileContentLandscape,
+                    ]}
+                  >
+                    <Text style={styles.analyticsLabelMobile}>
+                      Gal this {galPeriodWeek ? "week" : "month"}
+                    </Text>
+                    <Title style={styles.analyticsValueMobile}>
+                      {galPeriodWeek
+                        ? gallonsUsedThisWeek
+                        : gallonsUsedThisMonth}
+                    </Title>
+                    <Text style={styles.analyticsSubtextMobile}>
+                      Tap for {galPeriodWeek ? "month" : "week"}
+                    </Text>
+                  </Card.Content>
+                </Card>
+              )}
+              {mostUsedColor && mostUsedColor.totalGal > 0 && (
+                <Card
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                  ]}
+                  onPress={() => setMostUsedByWeek((prev) => !prev)}
+                >
+                  <Card.Content
+                    style={[
+                      styles.analyticsCardMobileContent,
+                      isMobileLandscape &&
+                        styles.analyticsCardMobileContentLandscape,
+                    ]}
+                  >
+                    <Text style={styles.analyticsLabelMobile}>
+                      Most checked out
+                    </Text>
+                    <Title
+                      style={[styles.analyticsValueMobile, { fontSize: 14 }]}
+                      numberOfLines={1}
+                    >
+                      {mostUsedColor.name}
+                    </Title>
+                    <Text style={styles.analyticsSubtextMobile}>
+                      {mostUsedColor.totalGal} gal
+                    </Text>
+                  </Card.Content>
+                </Card>
+              )}
+            </View>
+          )}
 
-          {filteredAndSortedInventory.length === 0 ? (
+          {viewMode === "inventory" ? (
+            filteredAndSortedInventory.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>
+                  {searchQuery ? "No items found" : "No items in inventory"}
+                </Text>
+                <Text style={styles.emptySubtext}>
+                  {searchQuery
+                    ? "Try a different search term"
+                    : "Scan a QR Code to add your first item"}
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.list, styles.listLandscape]}>
+                {filteredAndSortedInventory.map((item) => (
+                  <View key={item.id?.toString() || Math.random().toString()}>
+                    {renderItem({ item })}
+                  </View>
+                ))}
+              </View>
+            )
+          ) : colorBookItems.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                {searchQuery ? "No items found" : "No items in inventory"}
+                {searchQuery
+                  ? "No paint colors found"
+                  : "No paint colors with hex in inventory"}
               </Text>
               <Text style={styles.emptySubtext}>
                 {searchQuery
-                  ? "Try a different search term"
-                  : "Scan a QR Code to add your first item"}
+                  ? "Try a different search"
+                  : "Add paint items with a color (hex) to see them here"}
               </Text>
             </View>
           ) : (
-            <View style={[styles.list, styles.listLandscape]}>
-              {filteredAndSortedInventory.map((item) => (
-                <View key={item.id?.toString() || Math.random().toString()}>
-                  {renderItem({ item })}
-                </View>
+            <View
+              style={[styles.list, styles.listLandscape, styles.colorBookGrid]}
+            >
+              {colorBookItems.map((item) => (
+                <React.Fragment
+                  key={item.id?.toString() || String(Math.random())}
+                >
+                  {renderColorCard({ item })}
+                </React.Fragment>
               ))}
             </View>
           )}
-      </ScrollView>
+        </ScrollView>
+        <ColorPreviewModal />
+      </>
     );
   }
 
@@ -1086,8 +1485,21 @@ export default function InventoryListScreen({
         <Button icon="arrow-left" onPress={onBack} mode="text">
           Back
         </Button>
-        <Text style={styles.headerTitle}>Inventory</Text>
+        <Text style={styles.headerTitle}>
+          {viewMode === "colorBook" ? "Color book" : "Inventory"}
+        </Text>
         <View style={styles.refreshContainer}>
+          <Button
+            mode={viewMode === "colorBook" ? "contained" : "outlined"}
+            compact
+            onPress={() =>
+              setViewMode(viewMode === "colorBook" ? "inventory" : "colorBook")
+            }
+            style={styles.viewModeButtonMobile}
+            icon="palette-outline"
+          >
+            {viewMode === "colorBook" ? "List" : "Colors"}
+          </Button>
           <IconButton
             icon="refresh"
             size={24}
@@ -1105,25 +1517,20 @@ export default function InventoryListScreen({
         </View>
       </View>
 
-      <Searchbar
-        placeholder="Search by name, ID, location, or type..."
-        onChangeText={setSearchQuery}
-        value={searchQuery}
-        style={styles.searchbar}
-      />
-      <View style={styles.orderToggleRow}>
-        <Button
-          mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
-          compact
-          onPress={() =>
-            setListOrderMode((m) => (m === "alphabetical" ? "trueOrder" : "alphabetical"))
+      <View style={styles.searchbarWrap}>
+        <Searchbar
+          placeholder={
+            viewMode === "colorBook"
+              ? "Search colors by name or ID..."
+              : "Search by name, ID, location, or type..."
           }
-          style={styles.orderToggleButtonMobile}
-        >
-          {listOrderMode === "alphabetical" ? "Alphabetical" : "True order"}
-        </Button>
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+          style={styles.searchbar}
+        />
       </View>
-      {filteredAndSortedInventory.length === 0 ? (
+      <View style={styles.listContent}>
+      {viewMode === "inventory" && filteredAndSortedInventory.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>
             {searchQuery ? "No items found" : "No items in inventory"}
@@ -1134,14 +1541,29 @@ export default function InventoryListScreen({
               : "Scan a QR Code to add your first item"}
           </Text>
         </View>
+      ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>
+            {searchQuery
+              ? "No paint colors found"
+              : "No paint colors with hex in inventory"}
+          </Text>
+          <Text style={styles.emptySubtext}>
+            {searchQuery
+              ? "Try a different search"
+              : "Add paint items with a color (hex) to see them here"}
+          </Text>
+        </View>
       ) : (
         <FlatList
-          data={filteredAndSortedInventory}
-          renderItem={renderItem}
-          keyExtractor={(item) =>
-            item.id?.toString() || Math.random().toString()
-          }
-          contentContainerStyle={styles.list}
+          key={viewMode}
+          data={viewMode === "inventory" ? filteredAndSortedInventory : colorBookItems}
+          renderItem={viewMode === "inventory" ? renderItem : renderColorCard}
+          keyExtractor={(item) => item.id?.toString() || String(Math.random())}
+          numColumns={viewMode === "colorBook" ? 2 : 1}
+          columnWrapperStyle={viewMode === "colorBook" ? styles.colorBookRow : undefined}
+          style={styles.listFlex}
+          contentContainerStyle={viewMode === "colorBook" ? styles.colorBookList : styles.list}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1151,6 +1573,8 @@ export default function InventoryListScreen({
           }
         />
       )}
+      </View>
+      <ColorPreviewModal />
     </View>
   );
 }
@@ -1160,12 +1584,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#f5f5f5",
   },
+  listContent: {
+    flex: 1,
+    minHeight: 0,
+  },
+  listFlex: {
+    flex: 1,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 8,
+    minHeight: 48,
   },
   headerTitle: {
     fontSize: 20,
@@ -1177,15 +1609,20 @@ const styles = StyleSheet.create({
   refreshContainer: {
     flexDirection: "row",
     alignItems: "center",
-    width: 80,
+    minWidth: 80,
     justifyContent: "flex-end",
   },
   refreshIndicator: {
     marginLeft: 4,
   },
+  searchbarWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 8,
+    maxHeight: 56,
+  },
   searchbar: {
-    margin: 16,
-    marginTop: 0,
+    margin: 0,
   },
   list: {
     padding: 16,
@@ -1201,6 +1638,28 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 2,
   },
+  itemCardContent: {
+    flexDirection: "column",
+  },
+  itemCardPressable: {
+    marginBottom: 0,
+  },
+  itemHeaderRight: {
+    alignItems: "flex-end",
+  },
+  cardBottomRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    minHeight: 32,
+  },
+  colorPreviewButton: {
+    margin: -4,
+  },
+  colorPreviewButtonBottom: {
+    margin: -4,
+    marginLeft: 8,
+  },
   nonClickableCard: {
     // Remove any visual indication that it's clickable
     opacity: 1,
@@ -1212,13 +1671,14 @@ const styles = StyleSheet.create({
   itemHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     marginBottom: 8,
   },
   itemName: {
     fontSize: 18,
     fontWeight: "bold",
     flex: 1,
+    marginRight: 8,
   },
   itemQuantity: {
     fontSize: 16,
@@ -1243,6 +1703,8 @@ const styles = StyleSheet.create({
   lastScanned: {
     fontSize: 12,
     color: "#999",
+    flex: 1,
+    minWidth: 0,
   },
   emptyContainer: {
     flex: 1,
@@ -1260,6 +1722,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#999",
     textAlign: "center",
+  },
+  colorModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  colorModalBox: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 12,
+    overflow: "hidden",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  colorModalSwatch: {
+    width: "100%",
+    aspectRatio: 1.1,
+    minHeight: 280,
+  },
+  colorModalNameRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingBottom: 12,
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  colorModalName: {
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  colorModalId: {
+    fontSize: 13,
+    fontFamily: "monospace",
+    marginTop: 4,
+  },
+  colorModalClose: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(255,255,255,0.9)",
+  },
+  colorColHeader: {
+    width: 56,
+  },
+  colorColCell: {
+    width: 56,
   },
   // Web/Dashboard Styles
   webDesktopRoot: {
@@ -1422,6 +1935,11 @@ const styles = StyleSheet.create({
     flex: 1,
     elevation: 0,
   },
+  colorBookSearchbar: {
+    marginBottom: 12,
+    elevation: 0,
+    maxHeight: 56,
+  },
   searchbarInput: {
     fontSize: 14,
   },
@@ -1511,5 +2029,59 @@ const styles = StyleSheet.create({
   emptyState: {
     padding: 40,
     alignItems: "center",
+  },
+  colorBookList: {
+    padding: 16,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
+  colorBookRow: {
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  colorBookCardWrap: {
+    width: "48%",
+    marginBottom: 4,
+  },
+  colorBookCard: {
+    width: "100%",
+    aspectRatio: 1.3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+  },
+  colorBookCardName: {
+    fontSize: 11,
+    marginTop: 4,
+    marginLeft: 2,
+    fontWeight: "500",
+  },
+  colorBookGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  viewModeButton: {
+    marginRight: 8,
+  },
+  viewModeButtonMobile: {
+    marginRight: 4,
+  },
+  colorBookScrollDesktop: {
+    flex: 1,
+    minHeight: 0,
+  },
+  colorBookGridDesktop: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    padding: 16,
+    paddingBottom: 24,
+  },
+  colorBookCardWrapDesktop: {
+    width: "24%",
+    marginBottom: 16,
   },
 });

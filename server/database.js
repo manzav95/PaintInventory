@@ -76,6 +76,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'hex_color') THEN
+          ALTER TABLE items ADD COLUMN hex_color TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     await client.query(`
@@ -146,9 +153,10 @@ class Database {
       ? String(item.type).toLowerCase()
       : null;
     const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
+    const hexColor = item.hex_color != null && String(item.hex_color).trim() !== "" ? String(item.hex_color).trim() : null;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
       [
         item.id,
         item.name,
@@ -163,9 +171,10 @@ class Database {
         price,
         type,
         displayOrder,
+        hexColor,
       ],
     );
-    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder } };
+    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder, hex_color: hexColor } };
   }
 
   async updateItem(itemId, updates) {
@@ -183,6 +192,7 @@ class Database {
       "price",
       "type",
       "display_order",
+      "hex_color",
     ];
     const fields = [];
     const values = [];
@@ -197,7 +207,8 @@ class Database {
           key === "updatedAt" ||
           key === "minQuantity" ||
           key === "type" ||
-          key === "display_order"
+          key === "display_order" ||
+          key === "hex_color"
             ? `"${key}"`
             : key;
         fields.push(`${col} = $${paramIndex}`);
@@ -211,6 +222,9 @@ class Database {
         } else if (key === "display_order") {
           const v = updates[key];
           values.push(v == null || v === "" ? 0 : (isNaN(Number(v)) ? 0 : Number(v)));
+        } else if (key === "hex_color") {
+          const v = updates[key];
+          values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else {
           values.push(updates[key]);
         }

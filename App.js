@@ -427,6 +427,7 @@ export default function App() {
         ...(item.hasOwnProperty('price') && { price: item.price }),
         ...(item.hasOwnProperty('type') && { type: item.type }),
         ...(item.hasOwnProperty('display_order') && { display_order: item.display_order }),
+        ...(item.hasOwnProperty('hex_color') && { hex_color: item.hex_color }),
       };
       result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
     } else {

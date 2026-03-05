@@ -61,8 +61,17 @@ export default function ItemDetailScreen({
   const [displayOrderInput, setDisplayOrderInput] = useState(
     item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
   );
+  const [hexColorInput, setHexColorInput] = useState(item?.hex_color ?? "");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+
+  const normalizeHex = (raw) => {
+    const s = String(raw).trim().replace(/^#/, "");
+    if (!s) return "";
+    if (/^[0-9A-Fa-f]{3}$/.test(s)) return "#" + s.split("").map((c) => c + c).join("");
+    if (/^[0-9A-Fa-f]{6}$/.test(s)) return "#" + s;
+    return raw.trim().startsWith("#") ? raw.trim() : "#" + raw.trim();
+  };
 
   useEffect(() => {
     setMinQuantityInput(
@@ -80,6 +89,9 @@ export default function ItemDetailScreen({
       item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
     );
   }, [item?.id, item?.display_order]);
+  useEffect(() => {
+    setHexColorInput(item?.hex_color ?? "");
+  }, [item?.id, item?.hex_color]);
 
   const handleSave = async () => {
     if (!isAdmin) {
@@ -128,6 +140,7 @@ export default function ItemDetailScreen({
 
     const priceVal = priceInput.trim() === "" ? null : parseFloat(priceInput);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
+    const hexVal = normalizeHex(hexColorInput);
     const updatedItem = {
       ...item,
       id: idInput.trim() || item?.id,
@@ -138,6 +151,7 @@ export default function ItemDetailScreen({
       ...(priceVal != null && !isNaN(priceVal) && priceVal >= 0 ? { price: priceVal } : { price: null }),
       type: typeVal,
       display_order: displayOrderVal,
+      hex_color: hexVal || null,
     };
 
     onSave(updatedItem);
@@ -426,6 +440,45 @@ export default function ItemDetailScreen({
               </>
             )}
 
+            <Text style={styles.label}>Paint color (optional)</Text>
+            {isAdmin ? (
+              <View style={styles.colorRow}>
+                <TextInput
+                  label="Hex code"
+                  value={hexColorInput}
+                  onChangeText={setHexColorInput}
+                  mode="outlined"
+                  style={[styles.input, styles.colorInput]}
+                  placeholder="#aabbcc or aabbcc"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {isWeb && isDesktop && (
+                  <View style={styles.colorPickerWrap}>
+                    <input
+                      type="color"
+                      value={hexColorInput && /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim()) ? (hexColorInput.trim().startsWith("#") ? hexColorInput.trim() : "#" + hexColorInput.trim()) : "#808080"}
+                      onChange={(e) => e?.target?.value && setHexColorInput(e.target.value)}
+                      style={styles.nativeColorInput}
+                      title="Pick color"
+                    />
+                    <Text style={[styles.colorPickerLabel, { color: theme.colors.onSurfaceVariant }]}>Pick</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.colorPreviewReadOnly}>
+                {hexColorInput ? (
+                  <>
+                    <View style={[styles.colorSwatch, { backgroundColor: /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim().replace(/^#/, "")) ? (hexColorInput.trim().startsWith("#") ? hexColorInput.trim() : "#" + hexColorInput.trim()) : "#e0e0e0" }]} />
+                    <Text style={styles.itemId}>{hexColorInput.trim()}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.itemId}>—</Text>
+                )}
+              </View>
+            )}
+
             {item?.lastScanned && (
               <Text style={styles.lastScanned}>
                 Last scanned:{" "}
@@ -569,5 +622,45 @@ const styles = StyleSheet.create({
   },
   webCard: {
     width: "100%",
+  },
+  colorRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 12,
+    marginBottom: 16,
+  },
+  colorInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  colorPickerWrap: {
+    alignItems: "center",
+    paddingBottom: 8,
+  },
+  nativeColorInput: {
+    width: 44,
+    height: 44,
+    padding: 0,
+    border: "none",
+    borderRadius: 4,
+    cursor: "pointer",
+    backgroundColor: "transparent",
+  },
+  colorPickerLabel: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  colorPreviewReadOnly: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  colorSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.15)",
   },
 });

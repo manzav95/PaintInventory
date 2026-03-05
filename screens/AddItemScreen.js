@@ -45,8 +45,26 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const [itemId, setItemId] = useState("");
   const [minQuantity, setMinQuantity] = useState("");
   const [price, setPrice] = useState("");
+  const [hexColor, setHexColor] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+
+  const normalizeHex = (raw) => {
+    const s = String(raw).trim().replace(/^#/, "");
+    if (!s) return "";
+    if (/^[0-9A-Fa-f]{3}$/.test(s)) return "#" + s.split("").map((c) => c + c).join("");
+    if (/^[0-9A-Fa-f]{6}$/.test(s)) return "#" + s;
+    return raw.trim().startsWith("#") ? raw.trim() : "#" + raw.trim();
+  };
+
+  const handleHexChange = (text) => {
+    setHexColor(text);
+  };
+
+  const handleColorPickerChange = (e) => {
+    const hex = e?.target?.value;
+    if (hex) setHexColor(hex);
+  };
 
   const handleSave = () => {
     if (!name.trim()) {
@@ -62,6 +80,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
 
     const priceNum = price.trim() === "" ? undefined : parseFloat(price);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
+    const hexVal = normalizeHex(hexColor);
     const item = {
       ...(itemId.trim() && { id: itemId.trim() }),
       name: name.trim(),
@@ -71,6 +90,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
       ...(priceNum != null && !isNaN(priceNum) && priceNum >= 0 && { price: priceNum }),
       ...(typeVal && { type: typeVal }),
+      ...(hexVal && { hex_color: hexVal }),
     };
 
     onSave(item);
@@ -252,6 +272,32 @@ export default function AddItemScreen({ onSave, onCancel }) {
               left={<TextInput.Affix text="$" />}
             />
 
+            <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Paint color (optional)</Text>
+            <View style={styles.colorRow}>
+              <TextInput
+                label="Hex code"
+                value={hexColor}
+                onChangeText={handleHexChange}
+                mode="outlined"
+                style={[styles.input, styles.colorInput]}
+                placeholder="#aabbcc or aabbcc"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {isWeb && (
+                <View style={styles.colorPickerWrap}>
+                  <input
+                    type="color"
+                    value={hexColor && /^#?[0-9A-Fa-f]{6}$/.test(hexColor.trim()) ? (hexColor.trim().startsWith("#") ? hexColor.trim() : "#" + hexColor.trim()) : "#808080"}
+                    onChange={handleColorPickerChange}
+                    style={styles.nativeColorInput}
+                    title="Pick color"
+                  />
+                  <Text style={[styles.colorPickerLabel, { color: theme.colors.onSurfaceVariant }]}>Pick</Text>
+                </View>
+              )}
+            </View>
+
             <View style={styles.buttonContainer}>
               <Button
                 mode="contained"
@@ -328,5 +374,32 @@ const styles = StyleSheet.create({
   },
   webCard: {
     width: "100%",
+  },
+  colorRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 12,
+    marginBottom: 15,
+  },
+  colorInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  colorPickerWrap: {
+    alignItems: "center",
+    paddingBottom: 8,
+  },
+  nativeColorInput: {
+    width: 44,
+    height: 44,
+    padding: 0,
+    border: "none",
+    borderRadius: 4,
+    cursor: "pointer",
+    backgroundColor: "transparent",
+  },
+  colorPickerLabel: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });

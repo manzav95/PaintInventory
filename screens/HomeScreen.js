@@ -84,6 +84,7 @@ export default function HomeScreen({
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 1024;
   const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsLoading, setAuditLogsLoading] = useState(!isDesktop);
 
   const lowStockItems = useMemo(
     () =>
@@ -95,11 +96,14 @@ export default function HomeScreen({
   );
 
   const loadAuditLogs = async () => {
+    if (!isDesktop) setAuditLogsLoading(true);
     try {
       const logs = await AuditService.list(200);
       setAuditLogs(Array.isArray(logs) ? logs : []);
     } catch (e) {
       console.error("HomeScreen audit load:", e);
+    } finally {
+      if (!isDesktop) setAuditLogsLoading(false);
     }
   };
 
@@ -301,7 +305,29 @@ export default function HomeScreen({
               <Card style={styles.card}>
                 <Card.Content>
                   <Text style={styles.sectionTitle}>Today's transactions</Text>
-                  {mobileTransactionLogs.length === 0 ? (
+                  {auditLogsLoading ? (
+                    [0, 1, 2, 3].map((i) => (
+                      <View
+                        key={`placeholder-${i}`}
+                        style={[
+                          styles.transactionRow,
+                          i < 3 && styles.transactionRowBorder,
+                        ]}
+                      >
+                        <View style={styles.transactionLeftCol}>
+                          <Text style={[styles.transactionDateTime, styles.placeholderText]}>—</Text>
+                          <Text style={[styles.transactionUser, styles.placeholderText]}>—</Text>
+                        </View>
+                        <View style={[styles.transactionActionCol, styles.placeholderAction]}>
+                          <Text style={[styles.transactionActionText, styles.placeholderText]}>—</Text>
+                        </View>
+                        <View style={styles.transactionQtyCol}>
+                          <Text style={[styles.transactionQty, styles.placeholderText]}>—</Text>
+                        </View>
+                        <Text style={[styles.transactionColor, styles.placeholderText]} numberOfLines={2}>—</Text>
+                      </View>
+                    ))
+                  ) : mobileTransactionLogs.length === 0 ? (
                     <Text style={styles.emptyLogs}>No transactions today</Text>
                   ) : (
                     mobileTransactionLogs.map((log, index) => {
@@ -512,6 +538,15 @@ const styles = StyleSheet.create({
     color: "#999",
     textAlign: "center",
     paddingVertical: 16,
+  },
+  placeholderText: {
+    color: "transparent",
+    backgroundColor: "rgba(0,0,0,0.06)",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  placeholderAction: {
+    backgroundColor: "rgba(0,0,0,0.06)",
   },
   transactionRow: {
     flexDirection: "row",

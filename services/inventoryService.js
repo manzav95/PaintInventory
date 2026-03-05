@@ -172,6 +172,10 @@ class InventoryService {
         createdAt: item.createdAt || new Date().toISOString(),
         userName: item.userName || null,
         minQuantity: item.minQuantity != null ? item.minQuantity : undefined,
+        ...(item.price != null && { price: item.price }),
+        ...(item.type && { type: item.type }),
+        ...(item.display_order != null && { display_order: item.display_order }),
+        ...(item.hex_color && { hex_color: item.hex_color }),
       };
 
       const result = await _fetch('/api/items', {
