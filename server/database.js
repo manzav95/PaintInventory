@@ -153,6 +153,33 @@ class Database {
       END $$
     `);
     console.log("Orders tables ready");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS material_usage (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        entry_date TEXT NOT NULL,
+        entry_time TEXT NOT NULL,
+        job_name TEXT NOT NULL DEFAULT '',
+        item_id TEXT NOT NULL,
+        color_name TEXT NOT NULL DEFAULT '',
+        qty_gallons REAL NOT NULL,
+        catalyst_gallons REAL NOT NULL,
+        catalyst_oz REAL,
+        catalyzed_confirmed BOOLEAN DEFAULT FALSE,
+        catalyzed_confirmed_at TIMESTAMPTZ,
+        booth TEXT NOT NULL,
+        user_name TEXT NOT NULL DEFAULT ''
+      )
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'material_usage' AND column_name = 'catalyst_oz') THEN
+          ALTER TABLE material_usage ADD COLUMN catalyst_oz REAL;
+        END IF;
+      END $$
+    `);
+    console.log("Material usage table ready");
   }
 
   async getAllItems() {
@@ -567,6 +594,53 @@ class Database {
       updated.status = "open";
     }
     return { success: true, order: await this.getOrderById(id) };
+  }
+
+  async addMaterialUsage(entry) {
+    const qtyGallons = Number(entry.qty_gallons) || 0;
+    const catalystOz = entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz)) ? Number(entry.catalyst_oz) : (qtyGallons * 0.04 * 128);
+    const catalystGallons = catalystOz / 128;
+    const result = await this.pool.query(
+      `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, created_at`,
+      [
+        entry.entry_date || null,
+        entry.entry_time || null,
+        entry.job_name != null ? String(entry.job_name).trim() : "",
+        entry.item_id != null ? String(entry.item_id).trim() : "",
+        entry.color_name != null ? String(entry.color_name).trim() : "",
+        qtyGallons,
+        catalystGallons,
+        catalystOz,
+        entry.catalyzed_confirmed === true,
+        entry.booth != null ? String(entry.booth).trim() : "",
+        entry.user_name != null ? String(entry.user_name).trim() : "",
+      ],
+    );
+    const row = result.rows[0];
+    return { success: true, id: row.id, created_at: row.created_at };
+  }
+
+  async getMaterialUsage(boothFilter = null, limit = 500) {
+    let query = "SELECT * FROM material_usage ORDER BY created_at DESC LIMIT $1";
+    const params = [limit];
+    if (boothFilter && boothFilter.trim() !== "" && boothFilter.toLowerCase() !== "all") {
+      query = "SELECT * FROM material_usage WHERE booth = $1 ORDER BY created_at DESC LIMIT $2";
+      params.length = 0;
+      params.push(boothFilter.trim(), limit);
+    }
+    const result = await this.pool.query(query, params);
+    return result.rows;
+  }
+
+  async updateMaterialUsageCatalyzed(id, confirmed) {
+    const confirmedAt = confirmed ? new Date().toISOString() : null;
+    const result = await this.pool.query(
+      `UPDATE material_usage SET catalyzed_confirmed = $1, catalyzed_confirmed_at = $2 WHERE id = $3`,
+      [Boolean(confirmed), confirmedAt, id],
+    );
+    if (result.rowCount === 0) return { success: false, error: "Not found" };
+    return { success: true };
   }
 
   close() {

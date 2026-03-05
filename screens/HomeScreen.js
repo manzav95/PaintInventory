@@ -89,6 +89,7 @@ export default function HomeScreen({
   onViewInventory,
   onOpenRecycleDue,
   inventory,
+  inventoryLoaded = true,
   minQuantity = 30,
   userName,
   isAdmin,
@@ -103,6 +104,7 @@ export default function HomeScreen({
   onOpenUpcomingOrders,
   onOpenBackOrders,
   onOpenLateOrders,
+  onOpenMaterialUsage,
   isWeb = false,
 }) {
   const theme = useTheme();
@@ -110,6 +112,7 @@ export default function HomeScreen({
   const isDesktop = isWeb && width > 1024;
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditLogsLoading, setAuditLogsLoading] = useState(!isDesktop);
+  const [auditLogsLoaded, setAuditLogsLoaded] = useState(false);
   const [backOrderCount, setBackOrderCount] = useState(0);
   const [lateOrderCount, setLateOrderCount] = useState(0);
 
@@ -135,7 +138,10 @@ export default function HomeScreen({
     } catch (e) {
       console.error("HomeScreen audit load:", e);
     } finally {
-      if (!isDesktop) setAuditLogsLoading(false);
+      if (!isDesktop) {
+        setAuditLogsLoading(false);
+        setAuditLogsLoaded(true);
+      }
     }
   };
 
@@ -258,6 +264,16 @@ export default function HomeScreen({
           Upcoming orders
         </Button>
       )}
+      {isAdmin && onOpenMaterialUsage && (
+        <Button
+          mode="outlined"
+          onPress={onOpenMaterialUsage}
+          style={styles.button}
+          icon="chart-box"
+        >
+          Material usage
+        </Button>
+      )}
     </>
   );
 
@@ -335,107 +351,192 @@ export default function HomeScreen({
         <View style={styles.content}>
           {isDesktop ? (
             <>
-              {recycleDueCount > 0 && onOpenRecycleDue && (
-                <Card style={styles.card} onPress={onOpenRecycleDue}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Paint Need to Recycle</Text>
-                    <Title style={[styles.statValue, { color: "#e65100" }]}>
-                      {recycleDueCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View List</Text>
-                  </Card.Content>
-                </Card>
-              )}
-              {backOrderCount > 0 && onOpenBackOrders && (
-                <Card style={styles.card} onPress={onOpenBackOrders}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Back Orders</Text>
-                    <Title style={[styles.statValue, { color: "#ff9800" }]}>
-                      {backOrderCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View</Text>
-                  </Card.Content>
-                </Card>
-              )}
-              {lateOrderCount > 0 && onOpenLateOrders && (
-                <Card style={styles.card} onPress={onOpenLateOrders}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Late Orders</Text>
-                    <Title style={[styles.statValue, { color: "#d32f2f" }]}>
-                      {lateOrderCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View</Text>
-                  </Card.Content>
-                </Card>
-              )}
-              {lowStockItems.length > 0 ? (
-                <Card style={styles.card}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>
-                      Low Stock ({"< 30"} gallons)
-                    </Text>
-                    {lowStockItems.map((item) => (
-                      <View key={item.id} style={styles.lowStockItem}>
-                        <Text style={styles.lowStockName}>
-                          {item.name || "Unnamed"}
-                        </Text>
-                        <Text style={styles.lowStockQty}>
-                          {item.quantity || 0} gal
-                        </Text>
+              {!inventoryLoaded ? (
+                <>
+                  <Card style={styles.card}>
+                    <Card.Content>
+                      <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                      <View style={styles.statValueSkeleton}>
+                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <Text style={styles.statLoadingText}>Loading…</Text>
                       </View>
-                    ))}
-                  </Card.Content>
-                </Card>
+                    </Card.Content>
+                  </Card>
+                  {onOpenBackOrders && (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Back Orders</Text>
+                        <View style={styles.statValueSkeleton}>
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <Text style={styles.statLoadingText}>Loading…</Text>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {onOpenLateOrders && (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Late Orders</Text>
+                        <View style={styles.statValueSkeleton}>
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <Text style={styles.statLoadingText}>Loading…</Text>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  <Card style={styles.card}>
+                    <Card.Content>
+                      <Text style={styles.statLabel}>Low Stock</Text>
+                      <View style={styles.statValueSkeleton}>
+                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <Text style={styles.statLoadingText}>Loading…</Text>
+                      </View>
+                    </Card.Content>
+                  </Card>
+                </>
               ) : (
-                <Card style={styles.card}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>All paints in stock</Text>
-                    <Text style={styles.statValue}>✓</Text>
-                  </Card.Content>
-                </Card>
+                <>
+                  {recycleDueCount > 0 && onOpenRecycleDue && (
+                    <Card style={styles.card} onPress={onOpenRecycleDue}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                        <Title style={[styles.statValue, { color: "#e65100" }]}>
+                          {recycleDueCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View List</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {backOrderCount > 0 && onOpenBackOrders && (
+                    <Card style={styles.card} onPress={onOpenBackOrders}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Back Orders</Text>
+                        <Title style={[styles.statValue, { color: "#ff9800" }]}>
+                          {backOrderCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {lateOrderCount > 0 && onOpenLateOrders && (
+                    <Card style={styles.card} onPress={onOpenLateOrders}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Late Orders</Text>
+                        <Title style={[styles.statValue, { color: "#d32f2f" }]}>
+                          {lateOrderCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {lowStockItems.length > 0 ? (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>
+                          Low Stock ({"< 30"} gallons)
+                        </Text>
+                        {lowStockItems.map((item) => (
+                          <View key={item.id} style={styles.lowStockItem}>
+                            <Text style={styles.lowStockName}>
+                              {item.name || "Unnamed"}
+                            </Text>
+                            <Text style={styles.lowStockQty}>
+                              {item.quantity || 0} gal
+                            </Text>
+                          </View>
+                        ))}
+                      </Card.Content>
+                    </Card>
+                  ) : (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>All paints in stock</Text>
+                        <Text style={styles.statValue}>✓</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                </>
               )}
               {actionButtons}
             </>
           ) : (
             <>
-              {recycleDueCount > 0 && onOpenRecycleDue && (
-                <Card style={styles.card} onPress={onOpenRecycleDue}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Paint Need to Recycle</Text>
-                    <Title style={[styles.statValue, { color: "#e65100" }]}>
-                      {recycleDueCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View List</Text>
-                  </Card.Content>
-                </Card>
-              )}
-              {backOrderCount > 0 && onOpenBackOrders && (
-                <Card style={styles.card} onPress={onOpenBackOrders}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Back Orders</Text>
-                    <Title style={[styles.statValue, { color: "#ff9800" }]}>
-                      {backOrderCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View</Text>
-                  </Card.Content>
-                </Card>
-              )}
-              {lateOrderCount > 0 && onOpenLateOrders && (
-                <Card style={styles.card} onPress={onOpenLateOrders}>
-                  <Card.Content>
-                    <Text style={styles.statLabel}>Late Orders</Text>
-                    <Title style={[styles.statValue, { color: "#d32f2f" }]}>
-                      {lateOrderCount}
-                    </Title>
-                    <Text style={styles.statHint}>Tap to View</Text>
-                  </Card.Content>
-                </Card>
+              {!inventoryLoaded ? (
+                <>
+                  <Card style={styles.card}>
+                    <Card.Content>
+                      <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                      <View style={styles.statValueSkeleton}>
+                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <Text style={styles.statLoadingText}>Loading…</Text>
+                      </View>
+                    </Card.Content>
+                  </Card>
+                  {onOpenBackOrders && (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Back Orders</Text>
+                        <View style={styles.statValueSkeleton}>
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <Text style={styles.statLoadingText}>Loading…</Text>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {onOpenLateOrders && (
+                    <Card style={styles.card}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Late Orders</Text>
+                        <View style={styles.statValueSkeleton}>
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <Text style={styles.statLoadingText}>Loading…</Text>
+                        </View>
+                      </Card.Content>
+                    </Card>
+                  )}
+                </>
+              ) : (
+                <>
+                  {recycleDueCount > 0 && onOpenRecycleDue && (
+                    <Card style={styles.card} onPress={onOpenRecycleDue}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                        <Title style={[styles.statValue, { color: "#e65100" }]}>
+                          {recycleDueCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View List</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {backOrderCount > 0 && onOpenBackOrders && (
+                    <Card style={styles.card} onPress={onOpenBackOrders}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Back Orders</Text>
+                        <Title style={[styles.statValue, { color: "#ff9800" }]}>
+                          {backOrderCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                  {lateOrderCount > 0 && onOpenLateOrders && (
+                    <Card style={styles.card} onPress={onOpenLateOrders}>
+                      <Card.Content>
+                        <Text style={styles.statLabel}>Late Orders</Text>
+                        <Title style={[styles.statValue, { color: "#d32f2f" }]}>
+                          {lateOrderCount}
+                        </Title>
+                        <Text style={styles.statHint}>Tap to View</Text>
+                      </Card.Content>
+                    </Card>
+                  )}
+                </>
               )}
               {actionButtons}
               <Card style={styles.card}>
                 <Card.Content>
                   <Text style={styles.sectionTitle}>Today's transactions</Text>
-                  {auditLogsLoading ? (
+                  {!auditLogsLoaded || auditLogsLoading ? (
                     [0, 1, 2, 3].map((i) => (
                       <View
                         key={`placeholder-${i}`}
@@ -593,6 +694,16 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 30,
     elevation: 4,
+  },
+  statValueSkeleton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  statLoadingText: {
+    fontSize: 14,
+    color: "#888",
   },
   statLabel: {
     fontSize: 14,

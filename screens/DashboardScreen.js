@@ -15,6 +15,7 @@ import {
   useTheme,
   DataTable,
   Chip,
+  ActivityIndicator,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 
@@ -35,6 +36,7 @@ function isRecycleDue(item) {
 
 export default function DashboardScreen({
   inventory,
+  inventoryLoaded = true,
   minQuantity = 30,
   onRefresh,
   isRefreshing = false,
@@ -45,6 +47,7 @@ export default function DashboardScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsLoaded, setAuditLogsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true);
@@ -60,6 +63,8 @@ export default function DashboardScreen({
       setAuditLogs(logs);
     } catch (error) {
       console.error("Error loading audit logs:", error);
+    } finally {
+      setAuditLogsLoaded(true);
     }
   };
 
@@ -444,9 +449,16 @@ export default function DashboardScreen({
           <Card style={styles.statCard}>
             <Card.Content>
               <Text style={styles.statLabel}>Total value</Text>
-              <Title style={styles.statValue}>
-                ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </Title>
+              {inventoryLoaded ? (
+                <Title style={styles.statValue}>
+                  ${totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Title>
+              ) : (
+                <View style={styles.statLoadingRow}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.statLoadingLabel}>Loading…</Text>
+                </View>
+              )}
             </Card.Content>
           </Card>
           )}
@@ -454,9 +466,16 @@ export default function DashboardScreen({
           <Card style={styles.statCard}>
             <Card.Content>
               <Text style={styles.statLabel}>Total Gallons</Text>
-              <Title style={styles.statValue}>
-                {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
-              </Title>
+              {inventoryLoaded ? (
+                <Title style={styles.statValue}>
+                  {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
+                </Title>
+              ) : (
+                <View style={styles.statLoadingRow}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.statLoadingLabel}>Loading…</Text>
+                </View>
+              )}
             </Card.Content>
           </Card>
 
@@ -464,10 +483,19 @@ export default function DashboardScreen({
           <Card style={styles.statCard}>
             <Card.Content>
               <Text style={styles.statLabel}>Total items</Text>
-              <Title style={styles.statValue}>{inventory.length}</Title>
-              <Text style={styles.statSubtext}>
-                {inventory.filter((i) => (i.type || "").toLowerCase() === "paint").length} paint
-              </Text>
+              {inventoryLoaded ? (
+                <>
+                  <Title style={styles.statValue}>{inventory.length}</Title>
+                  <Text style={styles.statSubtext}>
+                    {inventory.filter((i) => (i.type || "").toLowerCase() === "paint").length} paint
+                  </Text>
+                </>
+              ) : (
+                <View style={styles.statLoadingRow}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.statLoadingLabel}>Loading…</Text>
+                </View>
+              )}
             </Card.Content>
           </Card>
           )}
@@ -480,16 +508,25 @@ export default function DashboardScreen({
               <Text style={styles.statLabel}>
                 Checked out this {galPeriodWeek ? "week" : "month"}
               </Text>
-              <Title style={styles.statValue}>
-                {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
-                <Text style={styles.statValueUnit}> gal</Text>
-              </Title>
-              <Text style={styles.statSubtext}>
-                {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
-              </Text>
-              <Text style={styles.statSubtextHint}>
-                Tap for {galPeriodWeek ? "month" : "week"}
-              </Text>
+              {auditLogsLoaded ? (
+                <>
+                  <Title style={styles.statValue}>
+                    {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
+                    <Text style={styles.statValueUnit}> gal</Text>
+                  </Title>
+                  <Text style={styles.statSubtext}>
+                    {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
+                  </Text>
+                  <Text style={styles.statSubtextHint}>
+                    Tap for {galPeriodWeek ? "month" : "week"}
+                  </Text>
+                </>
+              ) : (
+                <View style={styles.statLoadingRow}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.statLoadingLabel}>Loading…</Text>
+                </View>
+              )}
             </Card.Content>
           </Card>
 
@@ -523,25 +560,34 @@ export default function DashboardScreen({
             </Card>
           )}
 
-          {mostUsedColor && (
+          {(!auditLogsLoaded || mostUsedColor) && (
             <Card
               style={[styles.statCard, styles.statCardClickable]}
-              onPress={() => setMostUsedByWeek((prev) => !prev)}
+              onPress={auditLogsLoaded ? () => setMostUsedByWeek((prev) => !prev) : undefined}
             >
               <Card.Content>
                 <Text style={styles.statLabel}>Color most checked out</Text>
-                <Title
-                  style={[styles.statValue, { fontSize: 18 }]}
-                  numberOfLines={1}
-                >
-                  {mostUsedColor.name}
-                </Title>
-                <Text style={styles.statSubtext}>
-                  {mostUsedColor.totalGal} gal — {mostUsedColor.isWeek ? `week of ${mostUsedColor.periodLabel}` : mostUsedColor.periodLabel}
-                </Text>
-                <Text style={styles.statSubtextHint}>
-                  Tap for {mostUsedByWeek ? "month" : "week"}
-                </Text>
+                {auditLogsLoaded && mostUsedColor ? (
+                  <>
+                    <Title
+                      style={[styles.statValue, { fontSize: 18 }]}
+                      numberOfLines={1}
+                    >
+                      {mostUsedColor.name}
+                    </Title>
+                    <Text style={styles.statSubtext}>
+                      {mostUsedColor.totalGal} gal — {mostUsedColor.isWeek ? `week of ${mostUsedColor.periodLabel}` : mostUsedColor.periodLabel}
+                    </Text>
+                    <Text style={styles.statSubtextHint}>
+                      Tap for {mostUsedByWeek ? "month" : "week"}
+                    </Text>
+                  </>
+                ) : (
+                  <View style={styles.statLoadingRow}>
+                    <ActivityIndicator size="small" />
+                    <Text style={styles.statLoadingLabel}>Loading…</Text>
+                  </View>
+                )}
               </Card.Content>
             </Card>
           )}
@@ -563,7 +609,12 @@ export default function DashboardScreen({
                 />
               </View>
 
-              {filteredLogs.length === 0 ? (
+              {!auditLogsLoaded ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="small" style={styles.transactionsLoadingSpinner} />
+                  <Text style={styles.transactionsLoadingText}>Loading transactions…</Text>
+                </View>
+              ) : filteredLogs.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyText}>No transactions found</Text>
                 </View>
@@ -785,6 +836,15 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
+  statLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statLoadingLabel: {
+    fontSize: 14,
+    color: "#888",
+  },
   statValue: {
     fontSize: 32,
     fontWeight: "bold",
@@ -842,6 +902,13 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: "#999",
+    fontSize: 14,
+  },
+  transactionsLoadingSpinner: {
+    marginBottom: 8,
+  },
+  transactionsLoadingText: {
+    color: "#888",
     fontSize: 14,
   },
   tableScrollOuter: {

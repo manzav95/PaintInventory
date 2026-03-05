@@ -21,6 +21,7 @@ import InventoryListScreen from './screens/InventoryListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
+import MaterialUsageScreen from './screens/MaterialUsageScreen';
 
 const lightTheme = {
   ...MD3LightTheme,
@@ -51,6 +52,7 @@ export default function App() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [scannedItem, setScannedItem] = useState(null); // Item found from QR scan
   const [inventory, setInventory] = useState([]);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [nextIdNumber, setNextIdNumber] = useState(1);
   const [nextIdFormatted, setNextIdFormatted] = useState('H66AAA00001');
   const [minQuantity, setMinQuantity] = useState(30);
@@ -79,6 +81,35 @@ export default function App() {
       document.title = 'Paint Inventory';
     }
   }, []);
+
+  // Hash routing: #/material-usage opens Material Usage (admin only)
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const applyHash = () => {
+      const hash = (window.location.hash || '').replace(/^#/, '') || '/';
+      const path = hash.startsWith('/') ? hash : `/${hash}`;
+      if (path === '/material-usage') {
+        if (userName === 'admin123') {
+          setCurrentScreen('materialUsage');
+        } else if (userName != null) {
+          setCurrentScreen('home');
+          window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
+        }
+      }
+    };
+    applyHash();
+    const onHashChange = () => {
+      const h = (window.location.hash || '').replace(/^#/, '') || '/';
+      const p = h.startsWith('/') ? h : `/${h}`;
+      if (p === '/material-usage' && userName === 'admin123') {
+        setCurrentScreen('materialUsage');
+      } else if (p !== '/material-usage') {
+        setCurrentScreen('home');
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [userName]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -229,6 +260,7 @@ export default function App() {
       console.error('Error loading inventory:', error);
       Alert.alert('Error', `Failed to load inventory: ${error.message}`);
     } finally {
+      setInventoryLoaded(true);
       if (showLoading) {
         setIsRefreshing(false);
       }
@@ -668,6 +700,7 @@ export default function App() {
                     setCurrentScreen('list');
                   }}
                   inventory={inventory}
+                  inventoryLoaded={inventoryLoaded}
                   minQuantity={minQuantity}
                   userName={isAdmin ? 'Admin' : userName}
                   isAdmin={isAdmin}
@@ -697,12 +730,17 @@ export default function App() {
                     setPreviousScreen('home');
                     setCurrentScreen('orders');
                   } : undefined}
+                  onOpenMaterialUsage={isAdmin ? () => {
+                    if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
+                    setCurrentScreen('materialUsage');
+                  } : undefined}
                   isWeb={true}
                 />
               </View>
               <View style={[styles.webMain, isNarrowDesktop && styles.webMainNarrow]}>
                 <DashboardScreen
                   inventory={inventory}
+                  inventoryLoaded={inventoryLoaded}
                   minQuantity={minQuantity}
                   onRefresh={handleRefresh}
                   isRefreshing={isRefreshing}
@@ -727,6 +765,7 @@ export default function App() {
               setCurrentScreen('list');
             }}
             inventory={inventory}
+            inventoryLoaded={inventoryLoaded}
             minQuantity={minQuantity}
             nfcEnabled={nfcStatus.isEnabled}
             userName={userName}
@@ -756,6 +795,10 @@ export default function App() {
               setOrdersInitialFilter('late_orders');
               setPreviousScreen('home');
               setCurrentScreen('orders');
+            } : undefined}
+            onOpenMaterialUsage={isAdmin ? () => {
+              if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
+              setCurrentScreen('materialUsage');
             } : undefined}
           />
         );
@@ -852,6 +895,19 @@ export default function App() {
               if (isAdmin) OrderService.getBackOrderCount().then((c) => {}); // HomeScreen will refresh on return
             }}
             initialFilter={ordersInitialFilter}
+          />
+        );
+      case 'materialUsage':
+        return (
+          <MaterialUsageScreen
+            inventory={inventory}
+            userName={actorName}
+            onBack={() => {
+              setCurrentScreen('home');
+              if (isWeb && typeof window !== 'undefined') {
+                window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
+              }
+            }}
           />
         );
       case 'settings':

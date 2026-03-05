@@ -316,6 +316,58 @@ app.get('/api/audit', async (req, res) => {
   }
 });
 
+// --- Material usage (admin, air quality reporting) ---
+app.get('/api/material-usage', async (req, res) => {
+  try {
+    const booth = req.query.booth || null;
+    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
+    const rows = await db.getMaterialUsage(booth, limit);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching material usage:', error);
+    res.status(500).json({ error: 'Failed to fetch material usage' });
+  }
+});
+
+app.post('/api/material-usage', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await db.addMaterialUsage({
+      entry_date: body.entry_date,
+      entry_time: body.entry_time,
+      job_name: body.job_name,
+      item_id: body.item_id,
+      color_name: body.color_name,
+      qty_gallons: body.qty_gallons,
+      catalyst_gallons: body.catalyst_gallons,
+      catalyst_oz: body.catalyst_oz,
+      catalyzed_confirmed: body.catalyzed_confirmed === true,
+      booth: body.booth,
+      user_name: body.user_name || 'unknown',
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('Error creating material usage:', error);
+    res.status(500).json({ error: 'Failed to create material usage' });
+  }
+});
+
+app.patch('/api/material-usage/:id/catalyzed', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const confirmed = Boolean(req.body && req.body.catalyzed);
+    const result = await db.updateMaterialUsageCatalyzed(id, confirmed);
+    if (!result.success) return res.status(404).json(result);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating material usage catalyzed:', error);
+    res.status(500).json({ error: 'Failed to update' });
+  }
+});
+
 // --- Upcoming orders (admin use) ---
 app.get('/api/orders', async (req, res) => {
   try {
