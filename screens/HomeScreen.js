@@ -18,6 +18,7 @@ import {
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 import OrderService from "../services/orderService";
+import version from "../version";
 
 function formatAction(action, details) {
   if (action === "update" && details?._actionType === "check_in") return "Checked In";
@@ -538,6 +539,7 @@ export default function HomeScreen({
               Logged in as{" "}
               <Text style={styles.mono}>{isAdmin ? "Admin" : userName}</Text>
             </Text>
+            <Text style={styles.footerVersion}>v{version?.build ?? "?"}</Text>
           </View>
         </View>
       </ScrollView>
@@ -647,7 +649,12 @@ const styles = StyleSheet.create({
   },
   footerText: {
     color: "#666",
-    marginBottom: 6,
+    marginBottom: 4,
+  },
+  footerVersion: {
+    fontSize: 12,
+    color: "#666",
+    opacity: 0.85,
   },
   toggleRow: {
     flexDirection: "row",

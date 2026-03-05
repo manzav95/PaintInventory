@@ -18,6 +18,7 @@ import {
   TextInput,
 } from "react-native-paper";
 import { IconButton } from "react-native-paper";
+import version from "../version";
 
 export default function SettingsScreen({
   onBack,
@@ -123,7 +124,7 @@ export default function SettingsScreen({
                       { color: theme.colors.onSurfaceVariant },
                     ]}
                   >
-                    Logged in as: {userName || "Unknown"}
+                    Logged in as: {" "}{userName || "Unknown"}
                   </Text>
                 </View>
               </View>
@@ -256,6 +257,14 @@ export default function SettingsScreen({
               </Card.Content>
             </Card>
           )}
+          <View style={styles.footer}>
+            <Text style={[styles.footerSignedIn, { color: theme.colors.onSurfaceVariant }]}>
+              Signed in as {userName || "Unknown"}
+            </Text>
+            <Text style={[styles.footerVersion, { color: theme.colors.onSurfaceVariant }]}>
+              v{version?.build ?? "?"}
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -342,5 +351,18 @@ const styles = StyleSheet.create({
   },
   webScrollContent: {
     alignItems: "center",
+  },
+  footer: {
+    marginTop: 24,
+    marginBottom: 16,
+    alignItems: "center",
+  },
+  footerSignedIn: {
+    fontSize: 14,
+  },
+  footerVersion: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
   },
 });
