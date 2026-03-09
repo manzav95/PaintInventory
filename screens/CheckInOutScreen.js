@@ -281,7 +281,7 @@ export default function CheckInOutScreen({
                       isSelected && { backgroundColor: theme.colors.surfaceVariant },
                     ]}
                   >
-                    <Text style={[styles.poNumber, { color: theme.colors.onSurface }]}>PO #{order.po_number}</Text>
+                    <Text style={[styles.poNumber, { color: theme.colors.onSurface }]}>{order.po_number && String(order.po_number).trim() ? `PO #${order.po_number}` : "No PO"}</Text>
                     <Text style={[styles.poMeta, { color: theme.colors.onSurfaceVariant }]}>
                       {remaining} of {ordered} gal remaining
                     </Text>

@@ -74,6 +74,10 @@ export default function AddItemScreen({ onSave, onCancel }) {
   };
 
   const handleSave = () => {
+    if (!itemId.trim()) {
+      Alert.alert("Required Field", "ID is required.");
+      return;
+    }
     if (!name.trim()) {
       Alert.alert("Required Field", "Paint name is required.");
       return;
@@ -90,7 +94,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
     const hexVal = normalizeHex(hexColor);
     // Recycle date for custom types is set on first check-in (4 months from that date), not on add
     const item = {
-      ...(itemId.trim() && { id: itemId.trim() }),
+      id: itemId.trim(),
       name: name.trim(),
       quantity: parseInt(quantity) || 0,
       location: location.trim(),
@@ -115,9 +119,10 @@ export default function AddItemScreen({ onSave, onCancel }) {
             <Title style={styles.title}>Add New Paint</Title>
 
             <TextInput
-              label="Paint ID (optional - leave blank to auto-generate)"
+              label="Paint ID"
               value={itemId}
               onChangeText={setItemId}
+              placeholder="Required – enter a custom ID"
               mode="outlined"
               style={styles.input}
               placeholder="Any format (optional)"

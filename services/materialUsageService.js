@@ -26,11 +26,24 @@ export const BOOTH_OPTIONS = [
 
 export const CATALYST_PERCENT = 4;
 
+function todayYYYYMMDD() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 class MaterialUsageService {
-  async list(boothFilter = null, limit = 500) {
+  async list(boothFilter = null, limit = 500, options = {}) {
     const params = new URLSearchParams({ limit: String(limit) });
     if (boothFilter && boothFilter.trim() !== '' && boothFilter.toLowerCase() !== 'all') {
       params.set('booth', boothFilter.trim());
+    }
+    if (options.restrictToToday) {
+      const today = todayYYYYMMDD();
+      params.set('from', today);
+      params.set('to', today);
     }
     const data = await _fetch(`/api/material-usage?${params.toString()}`);
     return Array.isArray(data) ? data : [];
@@ -48,6 +61,28 @@ class MaterialUsageService {
       method: 'PATCH',
       body: JSON.stringify({ catalyzed: !!catalyzed }),
     });
+  }
+
+  async getOvertime() {
+    try {
+      const data = await _fetch('/api/settings/overtime');
+      return data.overtime === true;
+    } catch (e) {
+      console.error('Material usage get overtime:', e);
+      return false;
+    }
+  }
+
+  async setOvertime(enabled) {
+    return _fetch('/api/settings/overtime', {
+      method: 'POST',
+      body: JSON.stringify({ overtime: !!enabled }),
+    });
+  }
+
+  getExportExcelUrl(fromDate, toDate) {
+    const params = new URLSearchParams({ from: fromDate, to: toDate });
+    return `${API_URL}/api/export/material-usage/excel?${params.toString()}`;
   }
 }
 

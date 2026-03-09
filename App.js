@@ -8,6 +8,7 @@ import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
 import AuditService from './services/auditService';
 import OrderService from './services/orderService';
+import MaterialUsageService from './services/materialUsageService';
 import config from './config';
 import HomeScreen from './screens/HomeScreen';
 import DashboardScreen from './screens/DashboardScreen';
@@ -53,9 +54,7 @@ export default function App() {
   const [scannedItem, setScannedItem] = useState(null); // Item found from QR scan
   const [inventory, setInventory] = useState([]);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
-  const [nextIdNumber, setNextIdNumber] = useState(1);
-  const [nextIdFormatted, setNextIdFormatted] = useState('H66AAA00001');
-  const [minQuantity, setMinQuantity] = useState(30);
+  const [materialUsageOvertime, setMaterialUsageOvertime] = useState(false);
   const [userName, setUserName] = useState(null);
   const isAdmin = userName === 'admin123';
   const actorName = isAdmin ? 'Admin' : (userName || 'unknown');
@@ -78,33 +77,31 @@ export default function App() {
 
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      document.title = 'Paint Inventory';
+      const titles = {
+        materialUsage: 'Material Usage',
+        orders: 'Upcoming Deliveries',
+        list: 'Inventory',
+      };
+      document.title = titles[currentScreen] || 'Paint Inventory';
     }
-  }, []);
+  }, [currentScreen]);
 
-  // Hash routing: #/material-usage opens Material Usage (admin only)
+  // Hash routing: #/material-usage opens Material Usage (all users)
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const applyHash = () => {
       const hash = (window.location.hash || '').replace(/^#/, '') || '/';
       const path = hash.startsWith('/') ? hash : `/${hash}`;
-      if (path === '/material-usage') {
-        if (userName === 'admin123') {
-          setCurrentScreen('materialUsage');
-        } else if (userName != null) {
-          setCurrentScreen('home');
-          window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
-        }
+      if (path === '/material-usage' && userName != null) {
+        setCurrentScreen('materialUsage');
       }
     };
     applyHash();
     const onHashChange = () => {
       const h = (window.location.hash || '').replace(/^#/, '') || '/';
       const p = h.startsWith('/') ? h : `/${h}`;
-      if (p === '/material-usage' && userName === 'admin123') {
+      if (p === '/material-usage' && userName != null) {
         setCurrentScreen('materialUsage');
-      } else if (p !== '/material-usage') {
-        setCurrentScreen('home');
       }
     };
     window.addEventListener('hashchange', onHashChange);
@@ -242,13 +239,12 @@ export default function App() {
       const items = await InventoryService.getAllItems();
       setInventory(items);
 
-      const next = await InventoryService.getNextIdNumber();
-      setNextIdNumber(next);
-      const formatted = await InventoryService.getNextIdFormatted();
-      setNextIdFormatted(formatted);
-      const minQ = await InventoryService.getMinQuantity();
-      setMinQuantity(minQ);
-
+      try {
+        const ot = await MaterialUsageService.getOvertime();
+        setMaterialUsageOvertime(ot);
+      } catch (e) {
+        console.error('Error loading overtime setting:', e);
+      }
       try {
         const summary = await OrderService.getOnOrderSummary();
         setOnOrderSummary(summary || {});
@@ -564,36 +560,14 @@ export default function App() {
     );
   };
 
-  const handleSetNextIdNumber = async (newNextIdNumber) => {
-    if (!isAdmin) {
-      Alert.alert('Not Allowed', 'Only admin can change the next ID.');
-      return;
-    }
-    const result = await InventoryService.setNextIdNumber(newNextIdNumber, actorName);
-    if (result.success) {
-      const next = await InventoryService.getNextIdNumber();
-      setNextIdNumber(next);
-      const nextFormatted = await InventoryService.getNextIdFormatted();
-      setNextIdFormatted(nextFormatted);
-      Alert.alert('Saved', `Next paint ID set to ${nextFormatted}.`);
-      await AuditService.log({
-        type: 'set_next_id',
-        user: actorName,
-        nextIdNumber: next,
-      });
-    } else {
-      Alert.alert('Admin', result.error || 'Failed to set next ID.');
-    }
-  };
-
-  const handleSetMinQuantity = async (value) => {
+  const handleSetMaterialUsageOvertime = async (enabled) => {
     if (!isAdmin) return;
-    const result = await InventoryService.setMinQuantity(value, actorName);
-    if (result.success) {
-      setMinQuantity(value);
-      Alert.alert('Saved', `Minimum quantity (low stock threshold) set to ${value}.`);
-    } else {
-      Alert.alert('Error', result.error || 'Failed to set minimum quantity.');
+    try {
+      await MaterialUsageService.setOvertime(enabled);
+      setMaterialUsageOvertime(enabled);
+      Alert.alert('Saved', `Overtime is now ${enabled ? 'on' : 'off'} for Material Usage shift times.`);
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to save overtime setting.');
     }
   };
 
@@ -602,27 +576,35 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can export Excel files.');
       return;
     }
-    
     try {
       const API_URL = config.API_URL;
       const url = `${API_URL}/api/export/excel`;
-      
-      // For web, open in new tab
       if (Platform.OS === 'web') {
         window.open(url, '_blank');
         Alert.alert('Success', 'Excel file download started.');
       } else {
-        // For mobile, we'd need to use a library like expo-file-system
-        // For now, show the URL
-        Alert.alert(
-          'Export Excel',
-          `Please visit this URL to download:\n${url}`,
-          [{ text: 'OK' }]
-        );
+        Alert.alert('Export Excel', `Please visit this URL to download:\n${url}`, [{ text: 'OK' }]);
       }
     } catch (error) {
       console.error('Error exporting Excel:', error);
       Alert.alert('Error', 'Failed to export Excel file.');
+    }
+  };
+
+  const handleExportMaterialUsageExcel = (fromDate, toDate) => {
+    if (!isAdmin) return;
+    const from = (fromDate || '').trim();
+    const to = (toDate || '').trim();
+    if (!from || !to) {
+      Alert.alert('Required', 'Please enter both From and To dates (YYYY-MM-DD).');
+      return;
+    }
+    const url = MaterialUsageService.getExportExcelUrl(from, to);
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.open) {
+      window.open(url, '_blank');
+      Alert.alert('Success', 'Material usage Excel download started.');
+    } else {
+      Alert.alert('Export', `Open this URL to download:\n${url}`);
     }
   };
 
@@ -701,12 +683,10 @@ export default function App() {
                   }}
                   inventory={inventory}
                   inventoryLoaded={inventoryLoaded}
-                  minQuantity={minQuantity}
+                  minQuantity={30}
                   userName={isAdmin ? 'Admin' : userName}
                   isAdmin={isAdmin}
                   onSwitchUser={handleSwitchUser}
-                  nextIdNumber={nextIdNumber}
-                  onSetNextIdNumber={handleSetNextIdNumber}
                   isDarkMode={isDarkMode}
                   onRefresh={handleRefresh}
                   isRefreshing={isRefreshing}
@@ -730,10 +710,10 @@ export default function App() {
                     setPreviousScreen('home');
                     setCurrentScreen('orders');
                   } : undefined}
-                  onOpenMaterialUsage={isAdmin ? () => {
+                  onOpenMaterialUsage={() => {
                     if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
                     setCurrentScreen('materialUsage');
-                  } : undefined}
+                  }}
                   isWeb={true}
                 />
               </View>
@@ -741,7 +721,7 @@ export default function App() {
                 <DashboardScreen
                   inventory={inventory}
                   inventoryLoaded={inventoryLoaded}
-                  minQuantity={minQuantity}
+                  minQuantity={30}
                   onRefresh={handleRefresh}
                   isRefreshing={isRefreshing}
                   showTransactionTable={!isNarrowDesktop}
@@ -766,13 +746,11 @@ export default function App() {
             }}
             inventory={inventory}
             inventoryLoaded={inventoryLoaded}
-            minQuantity={minQuantity}
+            minQuantity={30}
             nfcEnabled={nfcStatus.isEnabled}
             userName={userName}
             isAdmin={isAdmin}
             onSwitchUser={handleSwitchUser}
-            nextIdNumber={nextIdNumber}
-            onSetNextIdNumber={handleSetNextIdNumber}
             isDarkMode={isDarkMode}
             onRefresh={handleRefresh}
             isRefreshing={isRefreshing}
@@ -796,10 +774,10 @@ export default function App() {
               setPreviousScreen('home');
               setCurrentScreen('orders');
             } : undefined}
-            onOpenMaterialUsage={isAdmin ? () => {
+            onOpenMaterialUsage={() => {
               if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
               setCurrentScreen('materialUsage');
-            } : undefined}
+            }}
           />
         );
       case 'scan':
@@ -857,7 +835,7 @@ export default function App() {
             onRefresh={handleRefresh}
             isRefreshing={isRefreshing}
             inventory={inventory}
-            minQuantity={minQuantity}
+            minQuantity={30}
             isAdmin={isAdmin}
             onOrderSummary={onOrderSummary}
             recycleDueFilter={recycleDueFilter}
@@ -902,6 +880,8 @@ export default function App() {
           <MaterialUsageScreen
             inventory={inventory}
             userName={actorName}
+            isAdmin={isAdmin}
+            materialUsageOvertime={materialUsageOvertime}
             onBack={() => {
               setCurrentScreen('home');
               if (isWeb && typeof window !== 'undefined') {
@@ -919,12 +899,10 @@ export default function App() {
             onToggleDarkMode={toggleDarkMode}
             onSwitchUser={handleSwitchUser}
             isAdmin={isAdmin}
-            nextIdNumber={nextIdNumber}
-            nextIdFormatted={nextIdFormatted}
-            onSetNextIdNumber={handleSetNextIdNumber}
-            minQuantity={minQuantity}
-            onSetMinQuantity={handleSetMinQuantity}
+            materialUsageOvertime={materialUsageOvertime}
+            onSetMaterialUsageOvertime={handleSetMaterialUsageOvertime}
             onExportExcel={handleExportExcel}
+            onExportMaterialUsageExcel={handleExportMaterialUsageExcel}
           />
         );
       default:

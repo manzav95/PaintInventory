@@ -242,7 +242,7 @@ export default function ItemDetailScreen({
                     borderRadius: 4,
                     border: `1px solid ${theme.colors.outline}`,
                     backgroundColor: theme.colors.surface,
-                    color: theme.colors.onSurface,
+                    color: type === "catalyst" ? "#9a7b00" : theme.colors.onSurface,
                   }}
                 >
                   <option value="">Select type</option>
@@ -264,7 +264,7 @@ export default function ItemDetailScreen({
                         onPress={() => isAdmin && setTypeMenuOpen(true)}
                         style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
                       >
-                        <Text style={{ color: type ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
+                        <Text style={{ color: type === "catalyst" ? "#9a7b00" : type ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
                           {type ? TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type : "Select type"}
                         </Text>
                       </Pressable>
@@ -283,7 +283,7 @@ export default function ItemDetailScreen({
                   </Menu>
                 ) : (
                   <View style={{ marginBottom: 16 }}>
-                    <Text style={styles.itemId}>
+                    <Text style={[styles.itemId, type === "catalyst" && { color: "#9a7b00" }]}>
                       {type ? (TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type) : "—"}
                     </Text>
                   </View>

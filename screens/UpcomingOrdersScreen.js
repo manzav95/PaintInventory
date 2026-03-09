@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -29,7 +29,9 @@ const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst", "stain"];
 const LEAD_TIME_7_DAY_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
 
 function getDefaultLeadTimeDays(lines, inventory) {
-  const itemIds = (lines || []).map((l) => (l.itemId || "").trim()).filter(Boolean);
+  const itemIds = (lines || [])
+    .map((l) => (l.itemId || "").trim())
+    .filter(Boolean);
   if (itemIds.length === 0) return 5;
   let has7Day = false;
   let all3Day = true;
@@ -46,15 +48,82 @@ function getDefaultLeadTimeDays(lines, inventory) {
 
 function expectedDate(placedAt, leadTimeDays) {
   const d = new Date(placedAt);
-  d.setDate(d.getDate() + (parseInt(leadTimeDays, 10) || 5));
+  d.setDate(d.getDate() + (parseInt(leadTimeDays, 10) || 7));
   return d;
+}
+
+function getWeekStart(d) {
+  const date = new Date(d);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay();
+  const daysToMonday = (day + 6) % 7;
+  date.setDate(date.getDate() - daysToMonday);
+  return date;
+}
+
+function getWeekEnd(d) {
+  const start = getWeekStart(d);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return end;
+}
+
+function getMonthStart(d) {
+  const date = new Date(d);
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function getMonthEnd(d) {
+  const date = new Date(d);
+  date.setMonth(date.getMonth() + 1);
+  date.setDate(0);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function formatDateWithWeekday(d) {
+  if (!d || !(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatShortDate(d) {
+  if (!d || !(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatWeekRange(weekStart) {
+  const end = getWeekEnd(weekStart);
+  return `${formatShortDate(weekStart)} – ${formatShortDate(end)}`;
+}
+
+function formatMonthRange(monthStart) {
+  const end = getMonthEnd(monthStart);
+  return `${formatShortDate(monthStart)} – ${formatShortDate(end)}`;
 }
 
 function isBackOrder(order) {
   if (order.status !== "open") return false;
   const lines = order.lines || [];
-  const someReceived = lines.some((l) => (parseInt(l.received_quantity, 10) || 0) > 0);
-  const someRemaining = lines.some((l) => (parseInt(l.received_quantity, 10) || 0) < (parseInt(l.quantity, 10) || 0));
+  const someReceived = lines.some(
+    (l) => (parseInt(l.received_quantity, 10) || 0) > 0,
+  );
+  const someRemaining = lines.some(
+    (l) =>
+      (parseInt(l.received_quantity, 10) || 0) <
+      (parseInt(l.quantity, 10) || 0),
+  );
   return someReceived && someRemaining;
 }
 
@@ -68,7 +137,7 @@ function isLateOrder(order) {
   if (order.status !== "open") return false;
   const placed = order.placed_at ? new Date(order.placed_at) : null;
   if (!placed || Number.isNaN(placed.getTime())) return false;
-  const days = parseInt(order.lead_time_days, 10) || 5;
+  const days = parseInt(order.lead_time_days, 10) || 7;
   const expected = new Date(placed);
   expected.setDate(expected.getDate() + days);
   const dayAfterExpected = new Date(expected);
@@ -95,12 +164,15 @@ export default function UpcomingOrdersScreen({
   const [editingOrder, setEditingOrder] = useState(null);
   const [poNumber, setPoNumber] = useState("");
   const [placedDate, setPlacedDate] = useState("");
-  const [leadTimeDays, setLeadTimeDays] = useState("5");
-  const [lines, setLines] = useState([{ itemId: "", quantity: "", searchQuery: "" }]);
+  const [leadTimeDays, setLeadTimeDays] = useState("7");
+  const [lines, setLines] = useState([
+    { itemId: "", quantity: "", searchQuery: "" },
+  ]);
   const [focusedLineIndex, setFocusedLineIndex] = useState(null);
   const [saving, setSaving] = useState(false);
   const [markingId, setMarkingId] = useState(null);
   const [orderFilter, setOrderFilter] = useState(initialFilter || "existing");
+  const [dateViewMode, setDateViewMode] = useState(null); // null | "week" | "month"
   const [editingReceivedOrder, setEditingReceivedOrder] = useState(null);
   const [receivedLineQtys, setReceivedLineQtys] = useState({});
 
@@ -132,13 +204,17 @@ export default function UpcomingOrdersScreen({
   }, []);
 
   const addLine = () => {
-    setLines((prev) => [...prev, { itemId: "", quantity: "", searchQuery: "" }]);
+    setLines((prev) => [
+      ...prev,
+      { itemId: "", quantity: "", searchQuery: "" },
+    ]);
   };
 
   const removeLine = (index) => {
     setLines((prev) => prev.filter((_, i) => i !== index));
     if (focusedLineIndex === index) setFocusedLineIndex(null);
-    else if (focusedLineIndex != null && focusedLineIndex > index) setFocusedLineIndex(focusedLineIndex - 1);
+    else if (focusedLineIndex != null && focusedLineIndex > index)
+      setFocusedLineIndex(focusedLineIndex - 1);
   };
 
   const updateLine = (index, field, value) => {
@@ -154,17 +230,17 @@ export default function UpcomingOrdersScreen({
   const setLineItemSelection = (index, item) => {
     setLines((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], itemId: item.id, searchQuery: item.name || item.id };
+      next[index] = {
+        ...next[index],
+        itemId: item.id,
+        searchQuery: item.name || item.id,
+      };
       return next;
     });
   };
 
   const handleSaveOrder = async () => {
     const po = (poNumber || "").trim();
-    if (!po) {
-      Alert.alert("Invalid", "PO number is required.");
-      return;
-    }
     const days = parseInt(leadTimeDays, 10);
     if (isNaN(days) || days < 0) {
       Alert.alert("Invalid", "Lead time days must be 0 or greater.");
@@ -174,7 +250,10 @@ export default function UpcomingOrdersScreen({
     if (placedDate.trim()) {
       const d = new Date(placedDate.trim());
       if (Number.isNaN(d.getTime())) {
-        Alert.alert("Invalid", "Placed date must be a valid date (e.g. YYYY-MM-DD).");
+        Alert.alert(
+          "Invalid",
+          "Placed date must be a valid date (e.g. YYYY-MM-DD).",
+        );
         return;
       }
       placedAt = d.toISOString();
@@ -199,7 +278,13 @@ export default function UpcomingOrdersScreen({
         }
         await OrderService.updateOrder(orderId, po, days, validLines, placedAt);
       } else {
-        const created = await OrderService.createOrder(po, days, validLines, userName, placedAt);
+        const created = await OrderService.createOrder(
+          po,
+          days,
+          validLines,
+          userName,
+          placedAt,
+        );
         // Optimistically show the new order so it appears even if the next load fails
         if (created && (created.id != null || created.po_number != null)) {
           setOrders((prev) => [created, ...prev]);
@@ -207,7 +292,7 @@ export default function UpcomingOrdersScreen({
       }
       setPoNumber("");
       setPlacedDate("");
-      setLeadTimeDays("5");
+      setLeadTimeDays("7");
       setLines([{ itemId: "", quantity: "", searchQuery: "" }]);
       setEditingOrder(null);
       setShowForm(false);
@@ -254,18 +339,27 @@ export default function UpcomingOrdersScreen({
     const lines = orderLines.map((l) => {
       const itemId = String(l.itemId);
       const ordered = parseInt(l.quantity, 10) || 0;
-      const received = Math.max(0, Math.min(ordered, parseInt(receivedLineQtys[itemId], 10) || 0));
+      const received = Math.max(
+        0,
+        Math.min(ordered, parseInt(receivedLineQtys[itemId], 10) || 0),
+      );
       return { itemId: l.itemId, received_quantity: received };
     });
     setSaving(true);
     try {
-      await OrderService.updateOrderReceivedLines(editingReceivedOrder.id, lines);
+      await OrderService.updateOrderReceivedLines(
+        editingReceivedOrder.id,
+        lines,
+      );
       setEditingReceivedOrder(null);
       setReceivedLineQtys({});
       await loadOrders();
       onOrdersChanged?.();
     } catch (e) {
-      Alert.alert("Error", e.message || "Failed to update received quantities.");
+      Alert.alert(
+        "Error",
+        e.message || "Failed to update received quantities.",
+      );
     } finally {
       setSaving(false);
     }
@@ -278,6 +372,7 @@ export default function UpcomingOrdersScreen({
 
   const filteredOrders = (orders || []).filter((order) => {
     if (!order) return false;
+    if (orderFilter === "all") return true;
     if (orderFilter === "existing") return isExistingOrder(order);
     if (orderFilter === "back_orders") return isBackOrder(order);
     if (orderFilter === "late_orders") return isLateOrder(order);
@@ -285,11 +380,273 @@ export default function UpcomingOrdersScreen({
     return true;
   });
 
+  const getTotalsByType = (orderList) => {
+    const byType = {};
+    for (const order of orderList) {
+      for (const line of order.lines || []) {
+        const itemId = line.itemId;
+        const item = (inventory || []).find(
+          (i) => String(i.id) === String(itemId),
+        );
+        const type =
+          item && item.type ? String(item.type).toLowerCase() : "other";
+        const qty = parseInt(line.quantity, 10) || 0;
+        byType[type] = (byType[type] || 0) + qty;
+      }
+    }
+    return byType;
+  };
+
+  const formatTotalsByType = (totalsByType) => {
+    if (!totalsByType || Object.keys(totalsByType).length === 0)
+      return "No line items";
+    const parts = Object.entries(totalsByType)
+      .filter(([, qty]) => qty > 0)
+      .map(([type, qty]) => {
+        const label =
+          type === "other"
+            ? "Other"
+            : type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, " ");
+        return `${label}: ${qty} gal`;
+      });
+    return parts.join(" · ");
+  };
+
+  const ordersSortedByPlaced = useMemo(() => {
+    const list = dateViewMode != null ? orders || [] : filteredOrders;
+    return [...list].sort((a, b) => {
+      const pa = a.placed_at ? new Date(a.placed_at).getTime() : 0;
+      const pb = b.placed_at ? new Date(b.placed_at).getTime() : 0;
+      return pb - pa;
+    });
+  }, [dateViewMode, orders, filteredOrders]);
+
+  const groupedByWeek = useMemo(() => {
+    if (dateViewMode !== "week") return [];
+    const groups = new Map();
+    for (const order of ordersSortedByPlaced) {
+      const placed = order.placed_at ? new Date(order.placed_at) : null;
+      if (!placed || Number.isNaN(placed.getTime())) continue;
+      const weekStart = getWeekStart(placed);
+      const key = weekStart.getTime();
+      if (!groups.has(key)) {
+        groups.set(key, { weekStart, orders: [] });
+      }
+      groups.get(key).orders.push(order);
+    }
+    const arr = Array.from(groups.entries())
+      .map(([_, v]) => v)
+      .sort((a, b) => b.weekStart.getTime() - a.weekStart.getTime());
+    arr.forEach((g) => {
+      g.totalsByType = getTotalsByType(g.orders);
+    });
+    return arr;
+  }, [dateViewMode, ordersSortedByPlaced, inventory]);
+
+  const groupedByMonth = useMemo(() => {
+    if (dateViewMode !== "month") return [];
+    const groups = new Map();
+    for (const order of ordersSortedByPlaced) {
+      const placed = order.placed_at ? new Date(order.placed_at) : null;
+      if (!placed || Number.isNaN(placed.getTime())) continue;
+      const monthStart = getMonthStart(placed);
+      const key = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
+      if (!groups.has(key)) {
+        groups.set(key, { monthStart, orders: [] });
+      }
+      groups.get(key).orders.push(order);
+    }
+    const arr = Array.from(groups.entries())
+      .map(([_, v]) => v)
+      .sort((a, b) => b.monthStart.getTime() - a.monthStart.getTime());
+    arr.forEach((g) => {
+      g.totalsByType = getTotalsByType(g.orders);
+    });
+    return arr;
+  }, [dateViewMode, ordersSortedByPlaced, inventory]);
+
+  const renderOrderCard = (order) => {
+    const placed = order.placed_at ? new Date(order.placed_at) : null;
+    const expected = placed
+      ? expectedDate(order.placed_at, order.lead_time_days)
+      : null;
+    const isOpen = order.status === "open";
+    const orderIsLate = isLateOrder(order);
+    const orderIsBackOrder = isBackOrder(order);
+    const singleReceivedDate = getSingleReceivedDate(order);
+    return (
+      <Card
+        key={order.id}
+        style={[
+          styles.card,
+          styles.orderCard,
+          { backgroundColor: theme.colors.surface },
+        ]}
+      >
+        <Card.Content>
+          <View style={styles.orderHeader}>
+            <View style={styles.orderHeaderLeft}>
+              <Text
+                style={[styles.poNumber, { color: theme.colors.onSurface }]}
+              >
+                {order.po_number && String(order.po_number).trim()
+                  ? `PO #${order.po_number}`
+                  : "No PO (add in edit)"}
+              </Text>
+              <View style={styles.orderMetaBlock}>
+                <Text
+                  style={[
+                    styles.orderMeta,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Placed on {placed ? formatDateWithWeekday(placed) : "—"} ·
+                  Lead time {order.lead_time_days ?? 7} days
+                </Text>
+                {expected && isOpen && (
+                  <Text
+                    style={[
+                      styles.orderMetaExpected,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Expected {formatDateWithWeekday(expected)}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <View style={styles.orderBadgeRow}>
+              {!isOpen ? (
+                <View style={styles.orderBadge}>
+                  <Text style={[styles.badgeText, { color: "#2e7d32" }]}>
+                    Received
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.orderBadge}>
+                    <Text style={[styles.badgeText, { color: "#1976d2" }]}>
+                      Open
+                    </Text>
+                  </View>
+                  {orderIsLate && (
+                    <View style={[styles.orderBadge, styles.orderBadgeLate]}>
+                      <Text style={[styles.badgeText, { color: "#c62828" }]}>
+                        Late
+                      </Text>
+                    </View>
+                  )}
+                  {orderIsBackOrder && (
+                    <View
+                      style={[styles.orderBadge, styles.orderBadgeBackOrder]}
+                    >
+                      <Text style={[styles.badgeText, { color: "#e65100" }]}>
+                        Back ordered
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+          </View>
+          {(order.lines || []).length > 0 && (
+            <View style={styles.linesList}>
+              {(order.lines || []).map((line, idx) => {
+                const received = parseInt(line.received_quantity, 10) || 0;
+                const ordered = parseInt(line.quantity, 10) || 0;
+                const lineReceivedDate = formatReceivedDate(line);
+                const showLineDate = !singleReceivedDate && lineReceivedDate;
+                return (
+                  <View key={idx} style={styles.lineItem}>
+                    <View style={styles.lineItemLeft}>
+                      <Text
+                        style={[
+                          styles.lineItemName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {getItemName(line.itemId)}
+                      </Text>
+                      {showLineDate && (
+                        <Text
+                          style={[
+                            styles.lineItemReceived,
+                            {
+                              color: theme.colors.onSurfaceVariant,
+                            },
+                          ]}
+                        >
+                          Received {lineReceivedDate}
+                        </Text>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.lineItemQty,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      {received > 0 ? `${received}/${ordered}` : ordered} gal
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+          {isOpen && (
+            <View style={styles.orderActions}>
+              <Button
+                mode="outlined"
+                onPress={() => openEditOrder(order)}
+                style={styles.editOrderBtn}
+                icon="pencil"
+              >
+                Edit
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={() => handleMarkReceived(order.id)}
+                disabled={markingId === order.id}
+                loading={markingId === order.id}
+                style={styles.markReceivedBtn}
+              >
+                Mark Received
+              </Button>
+            </View>
+          )}
+          {!isOpen && (
+            <View style={styles.orderActions}>
+              <Button
+                mode="outlined"
+                onPress={() => openEditReceived(order)}
+                style={styles.editOrderBtn}
+                icon="pencil"
+              >
+                Edit
+              </Button>
+              {getReceivedDateLine(order) ? (
+                <Text
+                  style={[
+                    styles.receivedDateInline,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {getReceivedDateLine(order)}
+                </Text>
+              ) : null}
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+    );
+  };
+
   const formatReceivedDate = (line) => {
     const at = line.received_at;
     if (!at) return null;
     try {
-      return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      return formatDateWithWeekday(new Date(at));
     } catch (e) {
       return at;
     }
@@ -300,10 +657,21 @@ export default function UpcomingOrdersScreen({
     const dates = [...new Set(lines.map((l) => l.received_at).filter(Boolean))];
     if (dates.length !== 1) return null;
     try {
-      return new Date(dates[0]).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      return formatDateWithWeekday(new Date(dates[0]));
     } catch (e) {
       return dates[0];
     }
+  };
+
+  const getReceivedDateLine = (order) => {
+    const single = getSingleReceivedDate(order);
+    if (single) return `Received ${single}`;
+    const lines = order.lines || [];
+    const parts = [
+      ...new Set(lines.map((l) => formatReceivedDate(l)).filter(Boolean)),
+    ];
+    if (parts.length === 0) return null;
+    return `Received: ${parts.join(", ")}`;
   };
 
   const formatPlacedForInput = (placedAt) => {
@@ -321,7 +689,7 @@ export default function UpcomingOrdersScreen({
     setEditingOrder(null);
     setPoNumber("");
     setPlacedDate(formatPlacedForInput(new Date().toISOString()));
-    setLeadTimeDays("5");
+    setLeadTimeDays("7");
     setLines([{ itemId: "", quantity: "", searchQuery: "" }]);
     setFocusedLineIndex(null);
     setShowForm(true);
@@ -331,7 +699,7 @@ export default function UpcomingOrdersScreen({
     setEditingOrder(order);
     setPoNumber(order.po_number || "");
     setPlacedDate(formatPlacedForInput(order.placed_at));
-    setLeadTimeDays(String(order.lead_time_days ?? 5));
+    setLeadTimeDays(String(order.lead_time_days ?? 7));
     setLines(
       (order.lines || []).map((l) => ({
         itemId: l.itemId || "",
@@ -356,7 +724,9 @@ export default function UpcomingOrdersScreen({
       .filter(
         (i) =>
           (i.name || "").toLowerCase().includes(q) ||
-          String(i.id || "").toLowerCase().includes(q),
+          String(i.id || "")
+            .toLowerCase()
+            .includes(q),
       )
       .slice(0, MAX_AUTOCOMPLETE);
   };
@@ -389,21 +759,26 @@ export default function UpcomingOrdersScreen({
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, isDesktop && styles.scrollContentWeb]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          isDesktop && styles.scrollContentWeb,
+        ]}
       >
         {showForm && (
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+          <Card
+            style={[styles.card, { backgroundColor: theme.colors.surface }]}
+          >
             <Card.Content>
               <Title style={styles.cardTitle}>
                 {editingOrder ? "Edit Order" : "New Order"}
               </Title>
               <TextInput
-                label="PO number"
+                label="PO number (optional)"
                 value={poNumber}
                 onChangeText={setPoNumber}
                 mode="outlined"
                 style={styles.input}
-                placeholder="e.g. PO-2024-001"
+                placeholder="Add when you have it – e.g. PO-2024-001"
               />
               <TextInput
                 label="Date placed (optional)"
@@ -420,7 +795,7 @@ export default function UpcomingOrdersScreen({
                 mode="outlined"
                 keyboardType="number-pad"
                 style={styles.input}
-                placeholder="5 (default)"
+                placeholder="7 (default)"
               />
               <Text style={[styles.label, { color: theme.colors.onSurface }]}>
                 Line items
@@ -439,7 +814,9 @@ export default function UpcomingOrdersScreen({
                       value={line.searchQuery}
                       onChangeText={(v) => updateLine(index, "searchQuery", v)}
                       onFocus={() => setFocusedLineIndex(index)}
-                      onBlur={() => setTimeout(() => setFocusedLineIndex(null), 180)}
+                      onBlur={() =>
+                        setTimeout(() => setFocusedLineIndex(null), 180)
+                      }
                       mode="outlined"
                       style={[styles.input, styles.lineItemId]}
                       placeholder="Type to search..."
@@ -450,8 +827,9 @@ export default function UpcomingOrdersScreen({
                         style={[
                           styles.dropdown,
                           {
-                            backgroundColor: (theme && theme.dark) ? "#2d2d2d" : "#ffffff",
-                            borderColor: (theme && theme.dark) ? "#444" : "#ccc",
+                            backgroundColor:
+                              theme && theme.dark ? "#2d2d2d" : "#ffffff",
+                            borderColor: theme && theme.dark ? "#444" : "#ccc",
                           },
                         ]}
                         collapsable={false}
@@ -461,35 +839,57 @@ export default function UpcomingOrdersScreen({
                           nestedScrollEnabled
                           style={styles.dropdownScroll}
                         >
-                          {getFilteredInventory(line.searchQuery).length === 0 ? (
-                            <Text style={[styles.dropdownItem, { color: theme.colors.onSurfaceVariant }]}>
+                          {getFilteredInventory(line.searchQuery).length ===
+                          0 ? (
+                            <Text
+                              style={[
+                                styles.dropdownItem,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                            >
                               No matches
                             </Text>
                           ) : (
-                            getFilteredInventory(line.searchQuery).map((invItem) => (
-                              <Pressable
-                                key={invItem.id}
-                                onPress={() => {
-                                  setLineItemSelection(index, invItem);
-                                  setFocusedLineIndex(null);
-                                  Keyboard.dismiss();
-                                }}
-                                style={({ pressed }) => [
-                                  styles.dropdownItemWrap,
-                                  { backgroundColor: pressed ? ((theme && theme.dark) ? "#3d3d3d" : "#eee") : "transparent" },
-                                ]}
-                              >
-                                <Text
-                                  style={[styles.dropdownItem, { color: theme.colors.onSurface }]}
-                                  numberOfLines={1}
+                            getFilteredInventory(line.searchQuery).map(
+                              (invItem) => (
+                                <Pressable
+                                  key={invItem.id}
+                                  onPress={() => {
+                                    setLineItemSelection(index, invItem);
+                                    setFocusedLineIndex(null);
+                                    Keyboard.dismiss();
+                                  }}
+                                  style={({ pressed }) => [
+                                    styles.dropdownItemWrap,
+                                    {
+                                      backgroundColor: pressed
+                                        ? theme && theme.dark
+                                          ? "#3d3d3d"
+                                          : "#eee"
+                                        : "transparent",
+                                    },
+                                  ]}
                                 >
-                                  {invItem.name || invItem.id}
-                                </Text>
-                                <Text style={[styles.dropdownItemId, { color: theme.colors.onSurfaceVariant }]}>
-                                  {invItem.id}
-                                </Text>
-                              </Pressable>
-                            ))
+                                  <Text
+                                    style={[
+                                      styles.dropdownItem,
+                                      { color: theme.colors.onSurface },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {invItem.name || invItem.id}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.dropdownItemId,
+                                      { color: theme.colors.onSurfaceVariant },
+                                    ]}
+                                  >
+                                    {invItem.id}
+                                  </Text>
+                                </Pressable>
+                              ),
+                            )
                           )}
                         </ScrollView>
                       </View>
@@ -513,7 +913,11 @@ export default function UpcomingOrdersScreen({
                   ) : null}
                 </View>
               ))}
-              <Button mode="outlined" onPress={addLine} style={styles.addLineBtn}>
+              <Button
+                mode="outlined"
+                onPress={addLine}
+                style={styles.addLineBtn}
+              >
                 Add Line
               </Button>
               <Button
@@ -536,20 +940,71 @@ export default function UpcomingOrdersScreen({
           </View>
         ) : !showForm ? (
           <>
+            <Text
+              style={[
+                styles.dateViewLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              By date
+            </Text>
             <View style={styles.filterRow}>
+              <Button
+                mode={dateViewMode === null ? "contained" : "outlined"}
+                compact
+                onPress={() => setDateViewMode(null)}
+                style={styles.filterBtn}
+              >
+                List
+              </Button>
+              <Button
+                mode={dateViewMode === "week" ? "contained" : "outlined"}
+                compact
+                onPress={() => {
+                  setDateViewMode("week");
+                  setOrderFilter("all");
+                }}
+                style={styles.filterBtn}
+              >
+                Week
+              </Button>
+              <Button
+                mode={dateViewMode === "month" ? "contained" : "outlined"}
+                compact
+                onPress={() => {
+                  setDateViewMode("month");
+                  setOrderFilter("all");
+                }}
+                style={styles.filterBtn}
+              >
+                Month
+              </Button>
+            </View>
+            <View style={styles.filterRow}>
+              <Button
+                mode={orderFilter === "all" ? "contained" : "outlined"}
+                compact
+                onPress={() => setOrderFilter("all")}
+                style={styles.filterBtn}
+                disabled={dateViewMode === "week" || dateViewMode === "month"}
+              >
+                All
+              </Button>
               <Button
                 mode={orderFilter === "existing" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("existing")}
                 style={styles.filterBtn}
+                disabled={dateViewMode === "week" || dateViewMode === "month"}
               >
-                Existing POs
+                Open POs
               </Button>
               <Button
                 mode={orderFilter === "back_orders" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("back_orders")}
                 style={styles.filterBtn}
+                disabled={dateViewMode === "week" || dateViewMode === "month"}
               >
                 Back Orders
               </Button>
@@ -558,6 +1013,7 @@ export default function UpcomingOrdersScreen({
                 compact
                 onPress={() => setOrderFilter("late_orders")}
                 style={styles.filterBtn}
+                disabled={dateViewMode === "week" || dateViewMode === "month"}
               >
                 Late Orders
               </Button>
@@ -566,135 +1022,131 @@ export default function UpcomingOrdersScreen({
                 compact
                 onPress={() => setOrderFilter("completed")}
                 style={styles.filterBtn}
+                disabled={dateViewMode === "week" || dateViewMode === "month"}
               >
                 Completed POs
               </Button>
             </View>
-            {filteredOrders.length === 0 ? (
-              <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
-                <Card.Content>
-                  <Text style={[styles.emptyText, { color: theme.colors.onSurfaceVariant }]}>
-                    {orderFilter === "existing" && "No open POs with no deliveries yet."}
-                    {orderFilter === "back_orders" && "No back orders (partial deliveries)."}
-                    {orderFilter === "completed" && "No completed POs yet."}
-                  </Text>
-                </Card.Content>
-              </Card>
-            ) : (
-              filteredOrders.map((order) => {
-            const placed = order.placed_at ? new Date(order.placed_at) : null;
-            const expected = placed
-              ? expectedDate(order.placed_at, order.lead_time_days)
-              : null;
-            const isOpen = order.status === "open";
-            const singleReceivedDate = getSingleReceivedDate(order);
-            return (
-              <Card
-                key={order.id}
-                style={[styles.card, styles.orderCard, { backgroundColor: theme.colors.surface }]}
-              >
-                <Card.Content>
-                  {singleReceivedDate && !isOpen && (
-                    <Text style={[styles.receivedDateBanner, { color: theme.colors.onSurfaceVariant }]}>
-                      Received {singleReceivedDate}
-                    </Text>
-                  )}
-                  <View style={styles.orderHeader}>
-                    <View>
-                      <Text style={[styles.poNumber, { color: theme.colors.onSurface }]}>
-                        PO #{order.po_number}
-                      </Text>
-                      <Text style={[styles.orderMeta, { color: theme.colors.onSurfaceVariant }]}>
-                        Placed {placed ? placed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"} · Lead time {order.lead_time_days ?? 5} days
-                        {expected && isOpen
-                          ? ` · Expected ~${expected.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                          : ""}
-                      </Text>
-                    </View>
-                    <View style={styles.orderBadge}>
+            {(() => {
+              const emptyCount =
+                dateViewMode === "week"
+                  ? groupedByWeek.length
+                  : dateViewMode === "month"
+                    ? groupedByMonth.length
+                    : ordersSortedByPlaced.length;
+              const isEmpty = emptyCount === 0;
+              if (isEmpty) {
+                return (
+                  <Card
+                    style={[
+                      styles.card,
+                      { backgroundColor: theme.colors.surface },
+                    ]}
+                  >
+                    <Card.Content>
                       <Text
                         style={[
-                          styles.badgeText,
-                          { color: isOpen ? "#1976d2" : "#2e7d32" },
+                          styles.emptyText,
+                          { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        {isOpen ? "Open" : "Received"}
+                        {dateViewMode != null && "No POs yet."}
+                        {dateViewMode === null &&
+                          orderFilter === "all" &&
+                          "No POs yet."}
+                        {dateViewMode === null &&
+                          orderFilter === "existing" &&
+                          "No open POs yet."}
+                        {dateViewMode === null &&
+                          orderFilter === "back_orders" &&
+                          "No back orders (partial deliveries)."}
+                        {dateViewMode === null &&
+                          orderFilter === "late_orders" &&
+                          "No late orders."}
+                        {dateViewMode === null &&
+                          orderFilter === "completed" &&
+                          "No completed POs yet."}
+                      </Text>
+                    </Card.Content>
+                  </Card>
+                );
+              }
+              if (dateViewMode === "week") {
+                return groupedByWeek.map((group) => (
+                  <View
+                    key={group.weekStart.getTime()}
+                    style={styles.dateGroupBlock}
+                  >
+                    <View
+                      style={[
+                        styles.dateGroupHeader,
+                        {
+                          backgroundColor:
+                            theme.colors.surfaceVariant || "#e0e0e0",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dateGroupTitle,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {formatWeekRange(group.weekStart)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.dateGroupTotals,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        {formatTotalsByType(group.totalsByType)}
                       </Text>
                     </View>
+                    {group.orders.map((order) => renderOrderCard(order))}
                   </View>
-                  {(order.lines || []).length > 0 && (
-                    <View style={styles.linesList}>
-                      {order.lines.map((line, idx) => {
-                        const received = parseInt(line.received_quantity, 10) || 0;
-                        const ordered = parseInt(line.quantity, 10) || 0;
-                        const lineReceivedDate = formatReceivedDate(line);
-                        const showLineDate = !singleReceivedDate && lineReceivedDate;
-                        return (
-                          <View key={idx} style={styles.lineItem}>
-                            <View style={styles.lineItemLeft}>
-                              <Text
-                                style={[styles.lineItemName, { color: theme.colors.onSurface }]}
-                                numberOfLines={1}
-                              >
-                                {getItemName(line.itemId)}
-                              </Text>
-                              {showLineDate && (
-                                <Text style={[styles.lineItemReceived, { color: theme.colors.onSurfaceVariant }]}>
-                                  Received {lineReceivedDate}
-                                </Text>
-                              )}
-                            </View>
-                            <Text style={[styles.lineItemQty, { color: theme.colors.onSurfaceVariant }]}>
-                              {received > 0 ? `${received}/${ordered}` : ordered} gal
-                            </Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                  {!singleReceivedDate && (order.lines || []).some((l) => formatReceivedDate(l)) && (
-                    <Text style={[styles.receivedDateFooter, { color: theme.colors.onSurfaceVariant }]}>
-                      Received: {(order.lines || []).map((l) => formatReceivedDate(l)).filter(Boolean).join(", ")}
-                    </Text>
-                  )}
-                  {isOpen && (
-                    <View style={styles.orderActions}>
-                      <Button
-                        mode="outlined"
-                        onPress={() => openEditOrder(order)}
-                        style={styles.editOrderBtn}
-                        icon="pencil"
+                ));
+              }
+              if (dateViewMode === "month") {
+                return groupedByMonth.map((group) => (
+                  <View
+                    key={group.monthStart.getTime()}
+                    style={styles.dateGroupBlock}
+                  >
+                    <View
+                      style={[
+                        styles.dateGroupHeader,
+                        {
+                          backgroundColor:
+                            theme.colors.surfaceVariant || "#e0e0e0",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dateGroupTitle,
+                          { color: theme.colors.onSurface },
+                        ]}
                       >
-                        Edit
-                      </Button>
-                      <Button
-                        mode="outlined"
-                        onPress={() => handleMarkReceived(order.id)}
-                        disabled={markingId === order.id}
-                        loading={markingId === order.id}
-                        style={styles.markReceivedBtn}
+                        {formatMonthRange(group.monthStart)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.dateGroupTotals,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
                       >
-                        Mark Received
-                      </Button>
+                        {formatTotalsByType(group.totalsByType)}
+                      </Text>
                     </View>
-                  )}
-                  {!isOpen && (
-                    <View style={styles.orderActions}>
-                      <Button
-                        mode="outlined"
-                        onPress={() => openEditReceived(order)}
-                        style={styles.editOrderBtn}
-                        icon="pencil"
-                      >
-                        Edit / Bring items back to expecting
-                      </Button>
-                    </View>
-                  )}
-                </Card.Content>
-              </Card>
-            );
-              })
-            )}
+                    {group.orders.map((order) => renderOrderCard(order))}
+                  </View>
+                ));
+              }
+              return ordersSortedByPlaced.map((order) =>
+                renderOrderCard(order),
+              );
+            })()}
           </>
         ) : null}
       </ScrollView>
@@ -710,42 +1162,78 @@ export default function UpcomingOrdersScreen({
           onPress={() => setEditingReceivedOrder(null)}
         >
           <Pressable
-            style={[styles.receivedModalBox, { backgroundColor: theme.colors.surface }]}
+            style={[
+              styles.receivedModalBox,
+              { backgroundColor: theme.colors.surface },
+            ]}
             onPress={(e) => e?.stopPropagation?.()}
           >
-            <Title style={[styles.receivedModalTitle, { color: theme.colors.onSurface }]}>
+            <Title
+              style={[
+                styles.receivedModalTitle,
+                { color: theme.colors.onSurface },
+              ]}
+            >
               Adjust received quantities
             </Title>
-            <Text style={[styles.receivedModalSubtitle, { color: theme.colors.onSurfaceVariant }]}>
-              Reduce received to bring items back to expecting. Save reopens the PO if any line has remaining.
+            <Text
+              style={[
+                styles.receivedModalSubtitle,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Reduce received to bring items back to expecting. Save reopens the
+              PO if any line has remaining.
             </Text>
-            <ScrollView style={styles.receivedModalScroll} keyboardShouldPersistTaps="handled">
-            {editingReceivedOrder && (editingReceivedOrder.lines || []).map((line, idx) => {
-              const itemId = String(line.itemId);
-              const ordered = parseInt(line.quantity, 10) || 0;
-              const receivedVal = receivedLineQtys[itemId] ?? String(parseInt(line.received_quantity, 10) || 0);
-              return (
-                <View key={idx} style={styles.receivedModalRow}>
-                  <Text style={[styles.receivedModalRowName, { color: theme.colors.onSurface }]} numberOfLines={1}>
-                    {getItemName(line.itemId)}
-                  </Text>
-                  <Text style={[styles.receivedModalRowOrdered, { color: theme.colors.onSurfaceVariant }]}>
-                    Ordered: {ordered} gal
-                  </Text>
-                  <TextInput
-                    label="Received (gal)"
-                    value={receivedVal}
-                    onChangeText={(v) => setReceivedQtyForLine(line.itemId, v)}
-                    mode="outlined"
-                    keyboardType="number-pad"
-                    style={styles.receivedModalInput}
-                  />
-                </View>
-              );
-            })}
+            <ScrollView
+              style={styles.receivedModalScroll}
+              keyboardShouldPersistTaps="handled"
+            >
+              {editingReceivedOrder &&
+                (editingReceivedOrder.lines || []).map((line, idx) => {
+                  const itemId = String(line.itemId);
+                  const ordered = parseInt(line.quantity, 10) || 0;
+                  const receivedVal =
+                    receivedLineQtys[itemId] ??
+                    String(parseInt(line.received_quantity, 10) || 0);
+                  return (
+                    <View key={idx} style={styles.receivedModalRow}>
+                      <Text
+                        style={[
+                          styles.receivedModalRowName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {getItemName(line.itemId)}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.receivedModalRowOrdered,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Ordered: {ordered} gal
+                      </Text>
+                      <TextInput
+                        label="Received (gal)"
+                        value={receivedVal}
+                        onChangeText={(v) =>
+                          setReceivedQtyForLine(line.itemId, v)
+                        }
+                        mode="outlined"
+                        keyboardType="number-pad"
+                        style={styles.receivedModalInput}
+                      />
+                    </View>
+                  );
+                })}
             </ScrollView>
             <View style={styles.receivedModalActions}>
-              <Button mode="outlined" onPress={() => setEditingReceivedOrder(null)}>
+              <Button
+                mode="outlined"
+                onPress={() => setEditingReceivedOrder(null)}
+              >
                 Cancel
               </Button>
               <Button
@@ -870,6 +1358,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
+    alignItems: "center",
   },
   editOrderBtn: {
     alignSelf: "flex-start",
@@ -890,13 +1379,39 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  dateViewLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
   filterRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     marginBottom: 16,
   },
-  filterBtn: {},
+  filterBtn: {
+    minWidth: 108,
+  },
+  dateGroupBlock: {
+    marginBottom: 24,
+  },
+  dateGroupHeader: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: "#1976d2",
+  },
+  dateGroupTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  dateGroupTotals: {
+    fontSize: 13,
+  },
   orderCard: {
     marginBottom: 12,
   },
@@ -907,6 +1422,13 @@ const styles = StyleSheet.create({
   receivedDateFooter: {
     fontSize: 12,
     marginTop: 8,
+    alignSelf: "flex-end",
+    textAlign: "right",
+  },
+  receivedDateInline: {
+    fontSize: 12,
+    marginLeft: "auto",
+    alignSelf: "center",
   },
   orderHeader: {
     flexDirection: "row",
@@ -914,19 +1436,45 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 12,
   },
+  orderHeaderLeft: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
   poNumber: {
     fontSize: 17,
     fontWeight: "700",
+    marginBottom: 6,
+  },
+  orderMetaBlock: {
+    marginBottom: 4,
   },
   orderMeta: {
     fontSize: 13,
+  },
+  orderMetaExpected: {
+    fontSize: 13,
     marginTop: 2,
+  },
+  orderBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    alignItems: "center",
+    flexShrink: 0,
+    justifyContent: "flex-end",
   },
   orderBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     backgroundColor: "rgba(0,0,0,0.06)",
+  },
+  orderBadgeLate: {
+    backgroundColor: "rgba(198, 40, 40, 0.12)",
+  },
+  orderBadgeBackOrder: {
+    backgroundColor: "rgba(230, 81, 0, 0.12)",
   },
   badgeText: {
     fontSize: 12,

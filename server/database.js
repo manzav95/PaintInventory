@@ -179,6 +179,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'material_usage' AND column_name = 'material_type') THEN
+          ALTER TABLE material_usage ADD COLUMN material_type TEXT;
+        END IF;
+      END $$
+    `);
     console.log("Material usage table ready");
   }
 
@@ -600,9 +607,10 @@ class Database {
     const qtyGallons = Number(entry.qty_gallons) || 0;
     const catalystOz = entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz)) ? Number(entry.catalyst_oz) : (qtyGallons * 0.04 * 128);
     const catalystGallons = catalystOz / 128;
+    const materialType = entry.material_type != null ? String(entry.material_type).trim() : null;
     const result = await this.pool.query(
-      `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, created_at`,
+      `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name, material_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at`,
       [
         entry.entry_date || null,
         entry.entry_time || null,
@@ -615,20 +623,37 @@ class Database {
         entry.catalyzed_confirmed === true,
         entry.booth != null ? String(entry.booth).trim() : "",
         entry.user_name != null ? String(entry.user_name).trim() : "",
+        materialType || null,
       ],
     );
     const row = result.rows[0];
     return { success: true, id: row.id, created_at: row.created_at };
   }
 
-  async getMaterialUsage(boothFilter = null, limit = 500) {
-    let query = "SELECT * FROM material_usage ORDER BY created_at DESC LIMIT $1";
-    const params = [limit];
+  async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null) {
+    const conditions = [];
+    const params = [];
+    let paramIndex = 1;
+    // Exclude entries by admin account (do not show in list or exports)
+    conditions.push(`(user_name IS NULL OR LOWER(TRIM(user_name)) NOT IN ('admin123', 'admin'))`);
     if (boothFilter && boothFilter.trim() !== "" && boothFilter.toLowerCase() !== "all") {
-      query = "SELECT * FROM material_usage WHERE booth = $1 ORDER BY created_at DESC LIMIT $2";
-      params.length = 0;
-      params.push(boothFilter.trim(), limit);
+      conditions.push(`booth = $${paramIndex}`);
+      params.push(boothFilter.trim());
+      paramIndex++;
     }
+    if (fromDate && String(fromDate).trim() !== "") {
+      conditions.push(`entry_date >= $${paramIndex}`);
+      params.push(String(fromDate).trim());
+      paramIndex++;
+    }
+    if (toDate && String(toDate).trim() !== "") {
+      conditions.push(`entry_date <= $${paramIndex}`);
+      params.push(String(toDate).trim());
+      paramIndex++;
+    }
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+    params.push(limit);
+    const query = `SELECT * FROM material_usage ${whereClause} ORDER BY created_at DESC LIMIT $${paramIndex}`;
     const result = await this.pool.query(query, params);
     return result.rows;
   }

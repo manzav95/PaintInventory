@@ -61,6 +61,10 @@ app.get('/api/items/:id', async (req, res) => {
 // Add item
 app.post('/api/items', async (req, res) => {
   try {
+    const id = req.body && req.body.id != null ? String(req.body.id).trim() : '';
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'ID is required.' });
+    }
     const auditUserName = (req.body && req.body.userName && String(req.body.userName).trim()) || 'unknown';
     const result = await db.addItem(req.body);
     if (result.success) {
@@ -304,6 +308,30 @@ app.post('/api/settings/min-quantity', async (req, res) => {
   }
 });
 
+// Get material usage overtime setting (applies to day/swing shift times)
+app.get('/api/settings/overtime', async (req, res) => {
+  try {
+    const value = await db.getSetting('material_usage_overtime');
+    res.json({ overtime: value === 'true' });
+  } catch (error) {
+    console.error('Error fetching overtime setting:', error);
+    res.status(500).json({ error: 'Failed to fetch overtime setting' });
+  }
+});
+
+// Set material usage overtime (admin; applies to all users)
+app.post('/api/settings/overtime', async (req, res) => {
+  try {
+    const { overtime } = req.body;
+    const enabled = overtime === true || String(overtime).toLowerCase() === 'true';
+    await db.setSetting('material_usage_overtime', enabled ? 'true' : 'false');
+    res.json({ success: true, overtime: enabled });
+  } catch (error) {
+    console.error('Error setting overtime:', error);
+    res.status(500).json({ error: 'Failed to set overtime' });
+  }
+});
+
 // Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {
@@ -321,7 +349,9 @@ app.get('/api/material-usage', async (req, res) => {
   try {
     const booth = req.query.booth || null;
     const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
-    const rows = await db.getMaterialUsage(booth, limit);
+    const fromDate = (req.query.from && String(req.query.from).trim()) || null;
+    const toDate = (req.query.to && String(req.query.to).trim()) || null;
+    const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching material usage:', error);
@@ -338,6 +368,7 @@ app.post('/api/material-usage', async (req, res) => {
       job_name: body.job_name,
       item_id: body.item_id,
       color_name: body.color_name,
+      material_type: body.material_type,
       qty_gallons: body.qty_gallons,
       catalyst_gallons: body.catalyst_gallons,
       catalyst_oz: body.catalyst_oz,
@@ -414,16 +445,13 @@ app.post('/api/orders', async (req, res) => {
   const body = req.body || {};
   console.log('[Orders] POST /api/orders received. Body keys:', Object.keys(body), 'po_number:', body.po_number, 'lines count:', Array.isArray(body.lines) ? body.lines.length : 0);
   try {
-    const po_number = body.po_number;
+    const po_number = (body.po_number != null ? String(body.po_number).trim() : '') || '';
     const lead_time_days = body.lead_time_days;
     const lines = Array.isArray(body.lines) ? body.lines : [];
     const userName = body.userName || null;
-    if (!po_number || !String(po_number).trim()) {
-      return res.status(400).json({ success: false, error: 'PO number is required.' });
-    }
     const placed_at = body.placed_at || null;
     const order = await db.createOrder(
-      String(po_number).trim(),
+      po_number,
       lead_time_days,
       lines,
       userName,
@@ -443,12 +471,9 @@ app.put('/api/orders/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id) || id < 1) return res.status(400).json({ success: false, error: 'Invalid order ID' });
-    const po_number = body.po_number;
+    const po_number = (body.po_number != null ? String(body.po_number).trim() : '') || '';
     const lead_time_days = body.lead_time_days;
     const lines = Array.isArray(body.lines) ? body.lines : [];
-    if (!po_number || !String(po_number).trim()) {
-      return res.status(400).json({ success: false, error: 'PO number is required.' });
-    }
     const placed_at = body.placed_at || null;
     const result = await db.updateOrder(id, po_number, lead_time_days, lines, placed_at);
     if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
@@ -586,6 +611,42 @@ async function generateExcelExport() {
   }
 }
 
+// Material usage Excel export (date range required)
+async function generateMaterialUsageExcel(fromDate, toDate) {
+  if (!XLSX) {
+    throw new Error('Excel export library not installed. Please run: cd server && npm install');
+  }
+  if (!fromDate || !toDate || String(fromDate).trim() === '' || String(toDate).trim() === '') {
+    throw new Error('from and to date parameters are required (YYYY-MM-DD)');
+  }
+  const rows = await db.getMaterialUsage(null, 50000, String(fromDate).trim(), String(toDate).trim());
+  const excelData = rows.map((row) => ({
+    Date: row.entry_date || '',
+    Time: row.entry_time || '',
+    Job: row.job_name || '',
+    'Material Type': row.material_type || '',
+    'Paint ID': row.item_id || '',
+    Color: row.color_name || '',
+    'Qty (gal)': row.qty_gallons != null ? row.qty_gallons : '',
+    'Catalyst (oz)': row.catalyst_oz != null ? row.catalyst_oz : '',
+    Booth: row.booth || '',
+    User: row.user_name || '',
+  }));
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(excelData);
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 16 },
+  ];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let col = range.s.c; col <= range.e.c; col++) {
+    const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
+    if (!ws[cellAddress]) continue;
+    ws[cellAddress].s = { font: { bold: true } };
+  }
+  XLSX.utils.book_append_sheet(wb, ws, 'Material Usage');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
 // Export Excel file endpoint (download)
 app.get('/api/export/excel', async (req, res) => {
   try {
@@ -598,6 +659,25 @@ app.get('/api/export/excel', async (req, res) => {
   } catch (error) {
     console.error('Error exporting Excel:', error);
     res.status(500).json({ error: 'Failed to export Excel file', details: error.message });
+  }
+});
+
+// Material usage Excel export (admin; date range required)
+app.get('/api/export/material-usage/excel', async (req, res) => {
+  try {
+    const fromDate = req.query.from && String(req.query.from).trim();
+    const toDate = req.query.to && String(req.query.to).trim();
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ error: 'Query parameters from and to (YYYY-MM-DD) are required' });
+    }
+    const buffer = await generateMaterialUsageExcel(fromDate, toDate);
+    const filename = `material-usage-${fromDate}-to-${toDate}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error exporting material usage Excel:', error);
+    res.status(500).json({ error: 'Failed to export material usage Excel', details: error.message });
   }
 });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   StyleSheet,
@@ -20,6 +20,14 @@ import {
 import { IconButton } from "react-native-paper";
 import version from "../version";
 
+function formatDateForInput(d) {
+  const date = d instanceof Date ? d : new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export default function SettingsScreen({
   onBack,
   userName,
@@ -27,29 +35,18 @@ export default function SettingsScreen({
   onToggleDarkMode,
   onSwitchUser,
   isAdmin,
-  nextIdNumber,
-  nextIdFormatted,
-  onSetNextIdNumber,
-  minQuantity = 30,
-  onSetMinQuantity,
+  materialUsageOvertime = false,
+  onSetMaterialUsageOvertime,
   onExportExcel,
+  onExportMaterialUsageExcel,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const desktopBreakpoint = 700;
   const isDesktop = isWeb && width >= desktopBreakpoint;
-  const [nextIdInput, setNextIdInput] = useState(nextIdFormatted || "");
-  const [minQuantityInput, setMinQuantityInput] = useState(
-    String(minQuantity ?? 30),
-  );
-
-  useEffect(() => {
-    setNextIdInput(nextIdFormatted || "");
-  }, [nextIdFormatted]);
-  useEffect(() => {
-    setMinQuantityInput(String(minQuantity ?? 30));
-  }, [minQuantity]);
+  const [exportFromDate, setExportFromDate] = useState(() => formatDateForInput(new Date()));
+  const [exportToDate, setExportToDate] = useState(() => formatDateForInput(new Date()));
 
   return (
     <View
@@ -154,7 +151,7 @@ export default function SettingsScreen({
                         { color: theme.colors.onSurface },
                       ]}
                     >
-                      Minimum quantity (low stock)
+                      Overtime
                     </Text>
                     <Text
                       style={[
@@ -162,86 +159,20 @@ export default function SettingsScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Items below this count are shown as low stock. Current: {minQuantity}
+                      When on, Material Usage log day/swing shift times use OT boundaries (day 6am–4:25pm, swing 4:26pm–2:30am). When off, standard times (day 6am–3:25pm, swing 3:26pm–12:30am). Applies to all users.
                     </Text>
                   </View>
+                  <Switch
+                    value={materialUsageOvertime}
+                    onValueChange={(v) => onSetMaterialUsageOvertime?.(v)}
+                    color={theme.colors.primary}
+                  />
                 </View>
-                <TextInput
-                  label="Minimum quantity"
-                  value={minQuantityInput}
-                  onChangeText={setMinQuantityInput}
-                  keyboardType="number-pad"
-                  mode="outlined"
-                  style={styles.adminInput}
-                />
-                <Button
-                  mode="contained"
-                  onPress={() => {
-                    const num = parseInt(minQuantityInput, 10);
-                    if (isNaN(num) || num < 0) {
-                      Alert.alert(
-                        "Invalid",
-                        "Minimum quantity must be 0 or greater.",
-                      );
-                      return;
-                    }
-                    onSetMinQuantity?.(num);
-                  }}
-                  style={styles.adminButton}
-                  icon="content-save"
-                >
-                  Save minimum level
-                </Button>
-                <Divider style={styles.divider} />
-                <View style={styles.settingRow}>
-                  <View style={styles.settingInfo}>
-                    <Text
-                      style={[
-                        styles.settingLabel,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    >
-                      Next Paint ID
-                    </Text>
-                    <Text
-                      style={[
-                        styles.settingDescription,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Current: {nextIdFormatted || "(auto)"}
-                    </Text>
-                  </View>
-                </View>
-                <Divider style={styles.divider} />
-                <TextInput
-                  label="Set next paint ID (any format)"
-                  value={nextIdInput}
-                  onChangeText={setNextIdInput}
-                  mode="outlined"
-                  placeholder="e.g. H66ABC12345 or CUSTOM-001"
-                  style={styles.adminInput}
-                />
-                <Button
-                  mode="contained"
-                  onPress={() => {
-                    const trimmed = nextIdInput.trim();
-                    if (!trimmed) {
-                      Alert.alert("Invalid", "Next paint ID cannot be empty.");
-                      return;
-                    }
-                    onSetNextIdNumber(trimmed);
-                  }}
-                  style={styles.adminButton}
-                  icon="content-save"
-                >
-                  Save Next ID
-                </Button>
                 <Divider style={styles.divider} />
                 <Text
                   style={[
                     styles.settingDescription,
-                    { color: theme.colors.onSurfaceVariant, marginBottom: 12 },
+                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
                   ]}
                 >
                   Export current inventory to Excel file
@@ -252,7 +183,40 @@ export default function SettingsScreen({
                   style={styles.adminButton}
                   icon="file-excel"
                 >
-                  Export to Excel
+                  Export inventory to Excel
+                </Button>
+                <Divider style={styles.divider} />
+                <Text
+                  style={[
+                    styles.settingDescription,
+                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
+                  ]}
+                >
+                  Export Material Usage log to Excel (choose date range)
+                </Text>
+                <TextInput
+                  label="From date"
+                  value={exportFromDate}
+                  onChangeText={setExportFromDate}
+                  mode="outlined"
+                  placeholder="YYYY-MM-DD"
+                  style={styles.adminInput}
+                />
+                <TextInput
+                  label="To date"
+                  value={exportToDate}
+                  onChangeText={setExportToDate}
+                  mode="outlined"
+                  placeholder="YYYY-MM-DD"
+                  style={styles.adminInput}
+                />
+                <Button
+                  mode="outlined"
+                  onPress={() => onExportMaterialUsageExcel?.(exportFromDate, exportToDate)}
+                  style={styles.adminButton}
+                  icon="file-excel"
+                >
+                  Export Material Usage to Excel
                 </Button>
               </Card.Content>
             </Card>

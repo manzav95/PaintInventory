@@ -94,8 +94,6 @@ export default function HomeScreen({
   userName,
   isAdmin,
   onSwitchUser,
-  nextIdNumber,
-  onSetNextIdNumber,
   isDarkMode,
   onToggleDarkMode,
   onRefresh,
@@ -261,17 +259,17 @@ export default function HomeScreen({
           style={styles.button}
           icon="truck-delivery"
         >
-          Upcoming orders
+          Upcoming Deliveries
         </Button>
       )}
-      {isAdmin && onOpenMaterialUsage && (
+      {onOpenMaterialUsage && (
         <Button
           mode="outlined"
           onPress={onOpenMaterialUsage}
           style={styles.button}
           icon="chart-box"
         >
-          Material usage
+          Material Usage
         </Button>
       )}
     </>
@@ -289,6 +287,21 @@ export default function HomeScreen({
         <View style={styles.headerBar}>
           <Title style={styles.title}>Paint Inventory</Title>
           <View style={styles.headerButtons}>
+            {onOpenMaterialUsage && (
+              <IconButton
+                icon="chart-box"
+                size={24}
+                onPress={onOpenMaterialUsage}
+                iconColor={theme.colors.primary}
+                style={styles.headerMaterialUsageIcon}
+              />
+            )}
+            <IconButton
+              icon="cog"
+              size={24}
+              onPress={onOpenSettings}
+              iconColor={theme.colors.primary}
+            />
             <IconButton
               icon="refresh"
               size={24}
@@ -303,12 +316,6 @@ export default function HomeScreen({
                 style={styles.refreshIndicator}
               />
             )}
-            <IconButton
-              icon="cog"
-              size={24}
-              onPress={onOpenSettings}
-              iconColor={theme.colors.primary}
-            />
           </View>
         </View>
       )}
@@ -316,17 +323,26 @@ export default function HomeScreen({
         <View style={styles.webHeader}>
           <Title style={styles.webTitle}>Paint Inventory</Title>
           <View style={styles.webHeaderButtons}>
+            {onOpenMaterialUsage && (
+              <IconButton
+                icon="chart-box"
+                size={20}
+                onPress={onOpenMaterialUsage}
+                iconColor={theme.colors.primary}
+                style={styles.headerMaterialUsageIcon}
+              />
+            )}
+            <IconButton
+              icon="cog"
+              size={20}
+              onPress={onOpenSettings}
+              iconColor={theme.colors.primary}
+            />
             <IconButton
               icon="refresh"
               size={20}
               onPress={handleRefresh}
               disabled={isRefreshing}
-              iconColor={theme.colors.primary}
-            />
-            <IconButton
-              icon="cog"
-              size={20}
-              onPress={onOpenSettings}
               iconColor={theme.colors.primary}
             />
           </View>
@@ -669,6 +685,9 @@ const styles = StyleSheet.create({
   headerButtons: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  headerMaterialUsageIcon: {
+    marginLeft: 12,
   },
   header: {
     marginTop: 30,

@@ -514,22 +514,36 @@ export default function InventoryListScreen({
               const orderInfo =
                 onOrderSummary[item.id] || onOrderSummary[itemId];
               if (orderInfo && orderInfo.quantity > 0) {
-                const exp = orderInfo.expectedDate
-                  ? new Date(orderInfo.expectedDate).toLocaleDateString(
-                      "en-US",
-                      { month: "short", day: "numeric", year: "numeric" },
-                    )
+                const expDate = orderInfo.expectedDate
+                  ? new Date(orderInfo.expectedDate)
+                  : null;
+                const exp = expDate
+                  ? expDate.toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })
                   : "";
+                const isLate = expDate && expDate.getTime() < Date.now();
+                const textColor = isLate ? "#c62828" : theme.colors.primary;
                 return (
-                  <Text
-                    style={[
-                      styles.onOrderText,
-                      { color: theme.colors.primary },
-                    ]}
-                  >
-                    On order: {orderInfo.quantity} gal
-                    {exp ? ` · Expected ~${exp}` : ""}
-                  </Text>
+                  <View style={styles.onOrderBlock}>
+                    <Text
+                      style={[styles.onOrderText, { color: textColor }]}
+                    >
+                      On order: {orderInfo.quantity} gal
+                    </Text>
+                    {exp ? (
+                      <Text
+                        style={[
+                          styles.onOrderDateText,
+                          { color: textColor },
+                        ]}
+                      >
+                        {exp}
+                      </Text>
+                    ) : null}
+                  </View>
                 );
               }
               return null;
@@ -558,9 +572,11 @@ export default function InventoryListScreen({
                           : "#5d4037"
                         : t === "dye"
                           ? "#7e57c2"
-                          : theme.dark
-                            ? "#fff"
-                            : "#666";
+                          : t === "catalyst"
+                            ? "#9a7b00"
+                            : theme.dark
+                              ? "#fff"
+                              : "#666";
               if (!label) return null;
               return (
                 <Text
@@ -935,7 +951,7 @@ export default function InventoryListScreen({
                                   }
                                   onPress={() => handleSort("name")}
                                 >
-                                  Paint Name {getSortIcon("name")}
+                                  Paint Name
                                 </DataTable.Title>
                                 <DataTable.Title
                                   style={styles.tableCell}
@@ -948,7 +964,7 @@ export default function InventoryListScreen({
                                   }
                                   onPress={() => handleSort("quantity")}
                                 >
-                                  Quantity {getSortIcon("quantity")}
+                                  Quantity
                                 </DataTable.Title>
                                 <DataTable.Title style={styles.tableCell}>
                                   ID
@@ -981,7 +997,7 @@ export default function InventoryListScreen({
                                   }
                                   onPress={() => handleSort("lastScanned")}
                                 >
-                                  Last Action {getSortIcon("lastScanned")}
+                                  Last Action
                                 </DataTable.Title>
                               </DataTable.Header>
 
@@ -1084,9 +1100,11 @@ export default function InventoryListScreen({
                                                     : "#5d4037"
                                                   : t === "dye"
                                                     ? "#7e57c2"
-                                                    : theme.dark
-                                                      ? "#fff"
-                                                      : "#666";
+                                                    : t === "catalyst"
+                                                      ? "#9a7b00"
+                                                      : theme.dark
+                                                        ? "#fff"
+                                                        : "#666";
                                         return (
                                           <Text
                                             style={[
@@ -1126,20 +1144,7 @@ export default function InventoryListScreen({
                                           }
                                           iconColor={theme.colors.primary}
                                         />
-                                      ) : (
-                                        <Text
-                                          style={[
-                                            styles.idText,
-                                            {
-                                              color: theme.dark
-                                                ? "#999"
-                                                : "#999",
-                                            },
-                                          ]}
-                                        >
-                                          —
-                                        </Text>
-                                      )}
+                                      ) : null}
                                     </DataTable.Cell>
                                     <DataTable.Cell style={styles.tableCell}>
                                       {(() => {
@@ -1150,41 +1155,43 @@ export default function InventoryListScreen({
                                           orderInfo &&
                                           orderInfo.quantity > 0
                                         ) {
-                                          const exp = orderInfo.expectedDate
-                                            ? new Date(
-                                                orderInfo.expectedDate,
-                                              ).toLocaleDateString("en-US", {
+                                          const expDate = orderInfo.expectedDate
+                                            ? new Date(orderInfo.expectedDate)
+                                            : null;
+                                          const exp = expDate
+                                            ? expDate.toLocaleDateString("en-US", {
                                                 month: "short",
                                                 day: "numeric",
                                                 year: "numeric",
                                               })
                                             : "";
+                                          const isLate = expDate && expDate.getTime() < Date.now();
+                                          const textColor = isLate ? "#c62828" : theme.colors.primary;
                                           return (
-                                            <Text
-                                              style={{
-                                                fontSize: 12,
-                                                color: theme.colors.primary,
-                                              }}
-                                            >
-                                              {orderInfo.quantity} gal
-                                              {exp ? ` ~${exp}` : ""}
-                                            </Text>
+                                            <View>
+                                              <Text
+                                                style={{
+                                                  fontSize: 12,
+                                                  color: textColor,
+                                                }}
+                                              >
+                                                {orderInfo.quantity} gal
+                                              </Text>
+                                              {exp ? (
+                                                <Text
+                                                  style={{
+                                                    fontSize: 11,
+                                                    color: textColor,
+                                                    marginTop: 2,
+                                                  }}
+                                                >
+                                                  {exp}
+                                                </Text>
+                                              ) : null}
+                                            </View>
                                           );
                                         }
-                                        return (
-                                          <Text
-                                            style={[
-                                              styles.idText,
-                                              {
-                                                color: theme.dark
-                                                  ? "#999"
-                                                  : "#999",
-                                              },
-                                            ]}
-                                          >
-                                            —
-                                          </Text>
-                                        );
+                                        return null;
                                       })()}
                                     </DataTable.Cell>
                                     <DataTable.Cell
@@ -1906,7 +1913,14 @@ const styles = StyleSheet.create({
   },
   onOrderText: {
     fontSize: 12,
+    marginBottom: 2,
+  },
+  onOrderBlock: {
     marginBottom: 4,
+  },
+  onOrderDateText: {
+    fontSize: 11,
+    marginTop: 0,
   },
   lastScanned: {
     fontSize: 12,
