@@ -44,6 +44,11 @@ export default function BarcodeScanScreen({ onScanResult, onCancel }) {
   const [permissionError, setPermissionError] = useState(null);
   const theme = useTheme();
 
+  const sanitizeBarcode = (value) =>
+    (value || "")
+      .toString()
+      .replace(/[^0-9A-Za-z-]/g, "");
+
   const requestCameraPermission = async () => {
     try {
       setPermissionError(null);
@@ -72,8 +77,9 @@ export default function BarcodeScanScreen({ onScanResult, onCancel }) {
   const handleBarCodeScanned = ({ type, data }) => {
     if (scanned) return;
     setScanned(true);
-    if (data) {
-      onScanResult(data);
+    const cleaned = sanitizeBarcode(data);
+    if (cleaned) {
+      onScanResult(cleaned);
     } else {
       Alert.alert("Scan Failed", "Could not read barcode.");
       setScanned(false);
@@ -81,7 +87,7 @@ export default function BarcodeScanScreen({ onScanResult, onCancel }) {
   };
 
   const handleManualSubmit = () => {
-    const trimmed = manualInput.trim();
+    const trimmed = sanitizeBarcode(manualInput).trim();
     if (!trimmed) {
       Alert.alert("Invalid Input", "Please enter a barcode value.");
       return;
@@ -123,7 +129,9 @@ export default function BarcodeScanScreen({ onScanResult, onCancel }) {
                 <TextInput
                   label="Barcode Value"
                   value={manualInput}
-                  onChangeText={setManualInput}
+                  onChangeText={(text) =>
+                    setManualInput(sanitizeBarcode(text))
+                  }
                   mode="outlined"
                   style={styles.input}
                   autoCapitalize="none"
@@ -177,7 +185,9 @@ export default function BarcodeScanScreen({ onScanResult, onCancel }) {
               <TextInput
                 label="Barcode Value"
                 value={manualInput}
-                onChangeText={setManualInput}
+                onChangeText={(text) =>
+                  setManualInput(sanitizeBarcode(text))
+                }
                 mode="outlined"
                 style={styles.input}
                 autoCapitalize="none"
