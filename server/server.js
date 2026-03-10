@@ -351,7 +351,8 @@ app.get('/api/material-usage', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
     const fromDate = (req.query.from && String(req.query.from).trim()) || null;
     const toDate = (req.query.to && String(req.query.to).trim()) || null;
-    const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate);
+    const excludeAdmin = req.query.excludeAdmin === 'true' || req.query.excludeAdmin === '1';
+    const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate, excludeAdmin);
     res.json(rows);
   } catch (error) {
     console.error('Error fetching material usage:', error);
@@ -375,6 +376,7 @@ app.post('/api/material-usage', async (req, res) => {
       catalyzed_confirmed: body.catalyzed_confirmed === true,
       booth: body.booth,
       user_name: body.user_name || 'unknown',
+      cup_gun: body.cup_gun === true,
     });
     res.json(result);
   } catch (error) {
@@ -619,7 +621,7 @@ async function generateMaterialUsageExcel(fromDate, toDate) {
   if (!fromDate || !toDate || String(fromDate).trim() === '' || String(toDate).trim() === '') {
     throw new Error('from and to date parameters are required (YYYY-MM-DD)');
   }
-  const rows = await db.getMaterialUsage(null, 50000, String(fromDate).trim(), String(toDate).trim());
+  const rows = await db.getMaterialUsage(null, 50000, String(fromDate).trim(), String(toDate).trim(), true);
   const excelData = rows.map((row) => ({
     Date: row.entry_date || '',
     Time: row.entry_time || '',

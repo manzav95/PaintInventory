@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -53,6 +53,34 @@ function formatTimeForInput(d) {
   return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
+/** Parse "3:00 PM" into { timePart: "3:00", ampm: "PM" }. Used so AM/PM is not editable in the time field. */
+function parseEntryTime(entryTime) {
+  const s = (entryTime || "").trim();
+  const match = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match) return { timePart: `${match[1]}:${match[2]}`, ampm: match[3].toUpperCase() };
+  const parts = s.split(/\s+/);
+  if (parts.length >= 2) {
+    const ampmPart = (parts[parts.length - 1] || "").toUpperCase();
+    if (ampmPart === "AM" || ampmPart === "PM") {
+      const timePart = parts.slice(0, -1).join(" ").trim();
+      if (/^\d{1,2}:\d{2}$/.test(timePart)) return { timePart, ampm: ampmPart };
+    }
+  }
+  if (/^\d{1,2}:\d{2}$/.test(s)) return { timePart: s, ampm: "PM" };
+  return { timePart: "12:00", ampm: "PM" };
+}
+
+/** Restrict time input to digits and one colon (H:MM or HH:MM). Strips other characters, max 5 chars. */
+function sanitizeTimePart(input) {
+  let s = input.replace(/[^\d:]/g, "");
+  const firstColon = s.indexOf(":");
+  if (firstColon === -1) return s.slice(0, 2);
+  const before = s.slice(0, firstColon).slice(0, 2);
+  const after = s.slice(firstColon + 1).replace(/:/g, "").slice(0, 2);
+  s = after.length ? `${before}:${after}` : `${before}:`;
+  return s.slice(0, 5);
+}
+
 function formatTimeDisplay(t) {
   if (!t || typeof t !== "string") return t || "—";
   const s = t.trim();
@@ -88,14 +116,28 @@ function formatLogDate(entryDate) {
   return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
 }
 
-const MATERIAL_USAGE_COLOR_TYPES = ["paint", "clear", "primer"];
+const MATERIAL_USAGE_COLOR_TYPES = [
+  "paint",
+  "custom_paint",
+  "clear",
+  "primer",
+  "custom_stain",
+];
 
-/** Parse custom material input: exactly one of dye/stain/toner required. toner → clear. */
+/** Parse custom material input:
+ * - If user types a paint ID (e.g. "1234" or "#1234"), treat as paint.
+ * - Otherwise, exactly one of dye/stain/toner required. toner → clear.
+ */
 function parseCustomMaterialInput(text) {
   if (!text || typeof text !== "string") {
     return { ok: false, error: "no_keyword" };
   }
-  const t = text.toLowerCase();
+  const raw = text.trim();
+  const t = raw.toLowerCase();
+  // Paint ID shortcut: 4 digits or # followed by digits
+  if (/^\d{4}$/.test(raw) || /^#\d+$/.test(raw)) {
+    return { ok: true, type: "paint" };
+  }
   const hasDye = t.includes("dye");
   const hasStain = t.includes("stain");
   const hasToner = t.includes("toner");
@@ -136,6 +178,28 @@ function formatMaterialTypeLabel(type) {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
 }
 
+/** Material type colors (match inventory list): paint blue, clear orange, stain green, primer brown, dye purple, catalyst yellow. */
+function getMaterialTypeColor(type, theme) {
+  if (!type || typeof type !== "string") return theme?.colors?.onSurfaceVariant ?? "#666";
+  const t = (type || "").toLowerCase().trim();
+  if (t === "paint" || t === "custom_paint") return "#1565c0";
+  if (t === "clear") return "#e65100";
+  if (t === "stain" || t === "custom_stain") return "#2e7d32";
+  if (t === "primer") return theme?.dark ? "#f5f5dc" : "#5d4037";
+  if (t === "dye") return "#7e57c2";
+  if (t === "catalyst") return "#9a7b00";
+  return theme?.colors?.onSurfaceVariant ?? "#666";
+}
+
+function formatQtyDisplay(row) {
+  const gal = Number(row.qty_gallons) || 0;
+  if (row.cup_gun) {
+    const oz = Math.round(gal * 128 * 10) / 10;
+    return `${oz} oz`;
+  }
+  return `${gal} gal`;
+}
+
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** Parse entry_time (e.g. "3:25 PM", "15:25", "12:30 AM") to minutes since midnight. Returns NaN if unparseable. */
@@ -174,6 +238,25 @@ function getShift(entryTime, isOvertime) {
   return null;
 }
 
+/** Date key for grouping/stats: swing entries after midnight (e.g. 12:01am–12:30am) count as the previous calendar day. */
+function getLogDate(row, isOvertime) {
+  const dateStr = row.entry_date || "";
+  if (!dateStr) return dateStr;
+  const shift = getShift(row.entry_time, isOvertime);
+  if (shift !== "swing") return dateStr;
+  const M = parseTimeToMinutes(row.entry_time);
+  if (Number.isNaN(M)) return dateStr;
+  const overnightEnd = isOvertime ? 150 : 30;
+  if (M > overnightEnd) return dateStr;
+  try {
+    const d = new Date(dateStr + "T12:00:00.000Z");
+    d.setUTCDate(d.getUTCDate() - 1);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
 export default function MaterialUsageScreen({
   inventory = [],
   userName,
@@ -206,6 +289,7 @@ export default function MaterialUsageScreen({
   const [shiftFilter, setShiftFilterState] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const lastAmpmTapRef = useRef(0);
 
   const setBooth = (value) => {
     setBoothState(value);
@@ -264,7 +348,7 @@ export default function MaterialUsageScreen({
   const needsCatalyst = useMemo(
     () =>
       effectiveMaterialType &&
-      ["paint", "clear", "primer"].includes(effectiveMaterialType),
+      ["paint", "custom_paint", "clear", "primer"].includes(effectiveMaterialType),
     [effectiveMaterialType],
   );
 
@@ -287,7 +371,58 @@ export default function MaterialUsageScreen({
       MATERIAL_USAGE_COLOR_TYPES.includes(String(i.type || "").toLowerCase()),
     );
     const q = (colorQuery || "").trim().toLowerCase();
-    if (!q) return paintClearPrimer.slice(0, 50);
+    if (!q) {
+      // Sort by: most recently used today → most used last 30 days → name/id
+      const todayKey = formatDateForInput(new Date());
+      const monthCutoff = new Date();
+      monthCutoff.setDate(monthCutoff.getDate() - 30);
+      monthCutoff.setHours(0, 0, 0, 0);
+
+      const lastUsedTodayById = new Map();
+      const monthCountById = new Map();
+
+      for (const row of logs || []) {
+        const id = row.item_id != null ? String(row.item_id).trim() : "";
+        if (!id) continue;
+
+        // Month usage count (based on entry_date)
+        if (row.entry_date) {
+          const d = new Date(String(row.entry_date).trim() + "T12:00:00.000Z");
+          if (!Number.isNaN(d.getTime()) && d >= monthCutoff) {
+            monthCountById.set(id, (monthCountById.get(id) || 0) + 1);
+          }
+        }
+
+        // Today's recency (based on "log day" so swing after midnight counts to prior day)
+        const logDay = getLogDate(row, materialUsageOvertime);
+        if (logDay !== todayKey) continue;
+        const minutes = parseTimeToMinutes(row.entry_time);
+        const base = Date.parse(todayKey + "T00:00:00.000Z");
+        const ts =
+          !Number.isNaN(minutes) && !Number.isNaN(base)
+            ? base + minutes * 60 * 1000
+            : Date.now();
+        const prev = lastUsedTodayById.get(id) || 0;
+        if (ts > prev) lastUsedTodayById.set(id, ts);
+      }
+
+      return [...paintClearPrimer]
+        .sort((a, b) => {
+          const aId = a?.id != null ? String(a.id) : "";
+          const bId = b?.id != null ? String(b.id) : "";
+          const aToday = lastUsedTodayById.get(aId) || 0;
+          const bToday = lastUsedTodayById.get(bId) || 0;
+          if (bToday !== aToday) return bToday - aToday;
+          const aCount = monthCountById.get(aId) || 0;
+          const bCount = monthCountById.get(bId) || 0;
+          if (bCount !== aCount) return bCount - aCount;
+          const aName = (a.name || "").toLowerCase();
+          const bName = (b.name || "").toLowerCase();
+          if (aName !== bName) return aName.localeCompare(bName);
+          return String(aId).localeCompare(String(bId));
+        })
+        .slice(0, 50);
+    }
     return paintClearPrimer
       .filter(
         (i) =>
@@ -295,7 +430,7 @@ export default function MaterialUsageScreen({
           (i.id || "").toLowerCase().includes(q),
       )
       .slice(0, 50);
-  }, [inventory, colorQuery]);
+  }, [inventory, colorQuery, logs, materialUsageOvertime]);
 
   const filteredLogs = useMemo(() => {
     let list = logs;
@@ -321,14 +456,14 @@ export default function MaterialUsageScreen({
   const logsByDay = useMemo(() => {
     const byDay = {};
     filteredLogs.forEach((row) => {
-      const key = row.entry_date || "";
+      const key = getLogDate(row, materialUsageOvertime) || "";
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(row);
     });
     return Object.keys(byDay)
       .sort((a, b) => (b || "").localeCompare(a || ""))
       .map((date) => ({ date, rows: byDay[date] }));
-  }, [filteredLogs]);
+  }, [filteredLogs, materialUsageOvertime]);
 
   const totalsFilterLabel = (() => {
     const boothPart =
@@ -360,7 +495,7 @@ export default function MaterialUsageScreen({
     try {
       const boothParam = boothFilter === "all" ? null : boothFilter;
       const limit = isAdmin ? 2000 : 500;
-      const list = await MaterialUsageService.list(boothParam, limit, isAdmin ? {} : { restrictToToday: true });
+      const list = await MaterialUsageService.list(boothParam, limit, isAdmin ? {} : { restrictToToday: true, excludeAdmin: true });
       setLogs(list);
     } catch (e) {
       console.error("Material usage list:", e);
@@ -469,6 +604,7 @@ export default function MaterialUsageScreen({
       booth,
       user_name: userName || "unknown",
       catalyzed_confirmed: true,
+      cup_gun: cupGun,
     };
     if (!needsCatalyst) {
       submitEntry(entry);
@@ -500,6 +636,22 @@ export default function MaterialUsageScreen({
     booth;
 
   return (
+    <>
+      <Modal
+        visible={submitting}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={[styles.savingOverlay, { backgroundColor: "rgba(0,0,0,0.4)" }]}>
+          <View style={[styles.savingBox, { backgroundColor: theme.colors.surface }]}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.savingText, { color: theme.colors.onSurface }]}>
+              Saving entry...
+            </Text>
+          </View>
+        </View>
+      </Modal>
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
@@ -552,14 +704,37 @@ export default function MaterialUsageScreen({
                 style={styles.halfInput}
                 placeholder="YYYY-MM-DD"
               />
-              <TextInput
-                label="Time"
-                value={entryTime}
-                onChangeText={setEntryTime}
-                mode="outlined"
-                style={styles.halfInput}
-                placeholder="e.g. 3:00 PM"
-              />
+              <View style={styles.timeInputRow}>
+                <TextInput
+                  label="Time"
+                  value={parseEntryTime(entryTime).timePart}
+                  onChangeText={(t) => {
+                    const sanitized = sanitizeTimePart(t);
+                    if (sanitized !== undefined) setEntryTime(sanitized + " " + parseEntryTime(entryTime).ampm);
+                  }}
+                  mode="outlined"
+                  style={styles.timePartInput}
+                  placeholder="3:00"
+                  keyboardType="numbers-and-punctuation"
+                />
+                <Button
+                  mode="outlined"
+                  onPress={() => {
+                    const now = Date.now();
+                    if (now - lastAmpmTapRef.current < 600) {
+                      const { timePart, ampm } = parseEntryTime(entryTime);
+                      setEntryTime(timePart + " " + (ampm === "AM" ? "PM" : "AM"));
+                      lastAmpmTapRef.current = 0;
+                    } else {
+                      lastAmpmTapRef.current = now;
+                    }
+                  }}
+                  style={styles.ampmButton}
+                  compact
+                >
+                  {parseEntryTime(entryTime).ampm}
+                </Button>
+              </View>
             </View>
             <TextInput
               label="Job Number"
@@ -798,6 +973,65 @@ export default function MaterialUsageScreen({
                 </Button>
               ))}
             </View>
+            {logsLoaded && filteredLogs.length > 0 && (
+              <View style={styles.totalsSection}>
+                <Text
+                  style={[
+                    styles.totalsTitle,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  Totals ({totalsFilterLabel})
+                </Text>
+                <View style={styles.totalsGrid}>
+                  <Text
+                    style={[
+                      styles.totalsRow,
+                      styles.totalsChip,
+                      { color: "#1565c0", backgroundColor: "rgba(21, 101, 192, 0.12)" },
+                    ]}
+                  >
+                    Paint: {logTotals.paint.toFixed(2)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.totalsRow,
+                      styles.totalsChip,
+                      { color: "#e65100", backgroundColor: "rgba(230, 81, 0, 0.12)" },
+                    ]}
+                  >
+                    Clear: {logTotals.clear.toFixed(2)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.totalsRow,
+                      styles.totalsChip,
+                      { color: theme.dark ? "#f5f5dc" : "#5d4037", backgroundColor: theme.dark ? "rgba(245, 245, 220, 0.2)" : "rgba(93, 64, 55, 0.12)" },
+                    ]}
+                  >
+                    Primer: {logTotals.primer.toFixed(2)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.totalsRow,
+                      styles.totalsChip,
+                      { color: "#2e7d32", backgroundColor: "rgba(46, 125, 50, 0.12)" },
+                    ]}
+                  >
+                    Stain: {logTotals.stain.toFixed(2)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.totalsRow,
+                      styles.totalsChip,
+                      { color: "#7e57c2", backgroundColor: "rgba(126, 87, 194, 0.12)" },
+                    ]}
+                  >
+                    Dye: {logTotals.dye.toFixed(2)} gal
+                  </Text>
+                </View>
+              </View>
+            )}
             {!logsLoaded ? (
               <View style={styles.loadingRow}>
                 <ActivityIndicator size="small" />
@@ -809,10 +1043,10 @@ export default function MaterialUsageScreen({
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator
-                style={styles.tableWrap}
+                style={styles.tableHorizontalWrap}
               >
-                <View style={styles.table}>
-                  <View style={styles.tableHeader}>
+                <View style={styles.tableContainer}>
+                  <View style={[styles.tableHeader, styles.tableHeaderSticky]}>
                     <Text style={[styles.th, styles.thDate]}>Date / Time</Text>
                     <Text style={[styles.th, styles.thUser]}>User</Text>
                     <Text style={[styles.th, styles.thJob]}>Job</Text>
@@ -822,97 +1056,117 @@ export default function MaterialUsageScreen({
                     <Text style={[styles.th, styles.thCat]}>Cat (oz)</Text>
                     <Text style={[styles.th, styles.thBooth]}>Booth</Text>
                   </View>
-                  {logsByDay.map(({ date, rows }) => (
-                    <React.Fragment key={date}>
-                      <View
-                        style={[
-                          styles.dayHeaderRow,
-                          {
-                            backgroundColor:
-                              theme.colors.surfaceVariant || "#eee",
-                          },
-                        ]}
-                      >
-                        <Text
+                  <ScrollView
+                    style={styles.tableWrap}
+                    showsVerticalScrollIndicator
+                    nestedScrollEnabled
+                  >
+                    <View style={styles.table}>
+                      {logsByDay.map(({ date, rows }) => (
+                      <React.Fragment key={date}>
+                        <View
                           style={[
-                            styles.dayHeaderText,
-                            { color: theme.colors.onSurface },
+                            styles.dayHeaderRow,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceVariant || "#eee",
+                              borderLeftWidth: 4,
+                              borderLeftColor: theme.colors.primary || "#6f95ab",
+                            },
                           ]}
                         >
-                          {formatLogDate(date)}
-                        </Text>
-                      </View>
-                      {rows.map((row) => (
-                        <View key={row.id} style={styles.tableRow}>
-                          <View style={[styles.td, styles.thDate]}>
-                            <Text
-                              style={[
-                                styles.timeOnly,
-                                { color: theme.colors.onSurface },
-                              ]}
-                            >
-                              {formatTimeDisplay(row.entry_time)}
-                            </Text>
-                          </View>
                           <Text
-                            style={[styles.td, styles.thUser]}
-                            numberOfLines={1}
+                            style={[
+                              styles.dayHeaderText,
+                              { color: theme.colors.onSurface },
+                            ]}
                           >
-                            {row.user_name || "—"}
-                          </Text>
-                          <Text
-                            style={[styles.td, styles.thJob]}
-                            numberOfLines={1}
-                          >
-                            {row.job_name || "—"}
-                          </Text>
-                          <Text
-                            style={[styles.td, styles.thMaterialType]}
-                            numberOfLines={1}
-                          >
-                            {formatMaterialTypeLabel(
-                              getResolvedMaterialType(row, inventory),
-                            )}
-                          </Text>
-                          <Text
-                            style={[styles.td, styles.thColor]}
-                            numberOfLines={1}
-                          >
-                            {row.color_name || "—"}
-                          </Text>
-                          <Text style={[styles.td, styles.thQty]}>
-                            {row.qty_gallons}
-                          </Text>
-                          <Text style={[styles.td, styles.thCat]}>
-                            {(() => {
-                              const resolvedType = getResolvedMaterialType(
-                                row,
-                                inventory,
-                              );
-                              if (
-                                resolvedType === "dye" ||
-                                resolvedType === "stain"
-                              )
-                                return "—";
-                              return row.catalyst_oz != null
-                                ? Number(row.catalyst_oz).toFixed(2)
-                                : row.catalyst_gallons != null
-                                  ? (
-                                      Number(row.catalyst_gallons) * 128
-                                    ).toFixed(2)
-                                  : "—";
-                            })()}
-                          </Text>
-                          <Text
-                            style={[styles.td, styles.thBooth]}
-                            numberOfLines={1}
-                          >
-                            {row.booth}
+                            {formatLogDate(date)}
                           </Text>
                         </View>
-                      ))}
-                    </React.Fragment>
-                  ))}
+                        {rows.map((row) => (
+                          <View key={row.id} style={styles.tableRow}>
+                            <View style={[styles.td, styles.thDate]}>
+                              <Text
+                                style={[
+                                  styles.timeOnly,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                {formatTimeDisplay(row.entry_time)}
+                              </Text>
+                            </View>
+                            <Text
+                              style={[styles.td, styles.thUser]}
+                              numberOfLines={1}
+                            >
+                              {row.user_name || "—"}
+                            </Text>
+                            <Text
+                              style={[styles.td, styles.thJob]}
+                              numberOfLines={1}
+                            >
+                              {row.job_name || "—"}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.td,
+                                styles.thMaterialType,
+                                {
+                                  color: getMaterialTypeColor(
+                                    getResolvedMaterialType(row, inventory),
+                                    theme,
+                                  ),
+                                  fontWeight: "600",
+                                },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {formatMaterialTypeLabel(
+                                getResolvedMaterialType(row, inventory),
+                              )}
+                            </Text>
+                            <Text
+                              style={[styles.td, styles.thColor]}
+                              numberOfLines={1}
+                            >
+                              {row.color_name || "—"}
+                            </Text>
+                            <Text style={[styles.td, styles.thQty]}>
+                              {formatQtyDisplay(row)}
+                            </Text>
+                            <Text style={[styles.td, styles.thCat]}>
+                              {(() => {
+                                const resolvedType = getResolvedMaterialType(
+                                  row,
+                                  inventory,
+                                );
+                                if (
+                                  resolvedType === "dye" ||
+                                  resolvedType === "stain"
+                                )
+                                  return "—";
+                                return row.catalyst_oz != null
+                                  ? Number(row.catalyst_oz).toFixed(2)
+                                  : row.catalyst_gallons != null
+                                    ? (
+                                        Number(row.catalyst_gallons) * 128
+                                      ).toFixed(2)
+                                    : "—";
+                              })()}
+                            </Text>
+                            <Text
+                              style={[styles.td, styles.thBooth]}
+                              numberOfLines={1}
+                            >
+                              {row.booth}
+                            </Text>
+                          </View>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                    </View>
+                  </ScrollView>
                 </View>
               </ScrollView>
             ) : (
@@ -925,6 +1179,7 @@ export default function MaterialUsageScreen({
                         {
                           backgroundColor:
                             theme.colors.surfaceVariant || "#eee",
+                          borderLeftColor: theme.colors.primary || "#6f95ab",
                         },
                       ]}
                     >
@@ -951,7 +1206,19 @@ export default function MaterialUsageScreen({
                             ? (Number(row.catalyst_gallons) * 128).toFixed(2)
                             : "—";
                       return (
-                        <View key={row.id} style={styles.logCard}>
+                        <View
+                          key={row.id}
+                          style={[
+                            styles.logCard,
+                            {
+                              borderLeftWidth: 4,
+                              borderLeftColor: getMaterialTypeColor(
+                                getResolvedMaterialType(row, inventory),
+                                theme,
+                              ),
+                            },
+                          ]}
+                        >
                           {/* Top row: time + user stacked on left */}
                           <View style={styles.logCardTopRow}>
                             <View style={styles.logCardTopLeft}>
@@ -976,7 +1243,16 @@ export default function MaterialUsageScreen({
                             <View style={styles.logCardInlineCol}>
                               <Text style={styles.logCardLabel}>Type</Text>
                               <Text
-                                style={styles.logCardValueInline}
+                                style={[
+                                  styles.logCardValueInline,
+                                  {
+                                    color: getMaterialTypeColor(
+                                      resolvedType,
+                                      theme,
+                                    ),
+                                    fontWeight: "600",
+                                  },
+                                ]}
                                 numberOfLines={1}
                               >
                                 {formatMaterialTypeLabel(resolvedType)}
@@ -996,9 +1272,11 @@ export default function MaterialUsageScreen({
                           {/* Third row: qty and catalyst inline */}
                           <View style={styles.logCardInlineRow}>
                             <View style={styles.logCardInlineCol}>
-                              <Text style={styles.logCardLabel}>Qty (gal)</Text>
+                              <Text style={styles.logCardLabel}>
+                                Qty ({row.cup_gun ? "oz" : "gal"})
+                              </Text>
                               <Text style={styles.logCardValueInline}>
-                                {row.qty_gallons}
+                                {formatQtyDisplay(row)}
                               </Text>
                             </View>
                             {showCatalyst && (
@@ -1036,60 +1314,6 @@ export default function MaterialUsageScreen({
                 ))}
               </View>
             )}
-            {logsLoaded && filteredLogs.length > 0 && (
-              <View style={styles.totalsSection}>
-                <Text
-                  style={[
-                    styles.totalsTitle,
-                    { color: theme.colors.onSurface },
-                  ]}
-                >
-                  Totals ({totalsFilterLabel})
-                </Text>
-                <View style={styles.totalsGrid}>
-                  <Text
-                    style={[
-                      styles.totalsRow,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Paint: {logTotals.paint.toFixed(2)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.totalsRow,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Clear: {logTotals.clear.toFixed(2)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.totalsRow,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Primer: {logTotals.primer.toFixed(2)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.totalsRow,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Stain: {logTotals.stain.toFixed(2)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.totalsRow,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Dye: {logTotals.dye.toFixed(2)} gal
-                  </Text>
-                </View>
-              </View>
-            )}
           </Card.Content>
         </Card>
       </ScrollView>
@@ -1124,12 +1348,29 @@ export default function MaterialUsageScreen({
         </Dialog>
       </Portal>
     </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  savingOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  savingBox: {
+    padding: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    minWidth: 160,
+  },
+  savingText: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "600",
   },
   headerRow: {
     flexDirection: "row",
@@ -1195,6 +1436,20 @@ const styles = StyleSheet.create({
   },
   halfInput: {
     flex: 1,
+  },
+  timeInputRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    minWidth: 0,
+  },
+  timePartInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  ampmButton: {
+    minWidth: 56,
   },
   input: {
     marginBottom: 12,
@@ -1320,8 +1575,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "rgba(0,0,0,0.08)",
     backgroundColor: "rgba(0,0,0,0.02)",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
   },
   logCardTopRow: {
     flexDirection: "row",
@@ -1388,17 +1648,29 @@ const styles = StyleSheet.create({
   logCardValueSecondary: {
     fontSize: 14,
   },
+  tableHorizontalWrap: {
+    marginTop: 4,
+  },
+  tableContainer: {
+    minWidth: 720,
+    flex: 1,
+  },
   tableWrap: {
-    maxHeight: 400,
+    maxHeight: 520,
   },
   table: {
     minWidth: 720,
   },
   tableHeader: {
     flexDirection: "row",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#ccc",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: 2,
+    borderBottomColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  tableHeaderSticky: {
+    zIndex: 1,
   },
   tableRow: {
     flexDirection: "row",
@@ -1453,10 +1725,12 @@ const styles = StyleSheet.create({
   thCat: { width: 58 },
   thBooth: { width: 75 },
   totalsSection: {
-    marginTop: 20,
-    paddingTop: 16,
+    marginTop: 16,
+    marginBottom: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "rgba(0,0,0,0.08)",
   },
   totalsTitle: {
     fontSize: 14,
@@ -1466,9 +1740,16 @@ const styles = StyleSheet.create({
   totalsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 10,
   },
   totalsRow: {
     fontSize: 14,
+  },
+  totalsChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    fontWeight: "600",
+    overflow: "hidden",
   },
 });

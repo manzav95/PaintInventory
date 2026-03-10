@@ -45,6 +45,9 @@ class MaterialUsageService {
       params.set('from', today);
       params.set('to', today);
     }
+    if (options.excludeAdmin) {
+      params.set('excludeAdmin', 'true');
+    }
     const data = await _fetch(`/api/material-usage?${params.toString()}`);
     return Array.isArray(data) ? data : [];
   }

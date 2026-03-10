@@ -669,28 +669,24 @@ export default function InventoryListScreen({
                   styles.headerFilterGroupSpacer,
                 ]}
               >
-                {isAdmin && (
-                  <>
-                    <Button
-                      mode={
-                        bookFilter === "standard" ? "contained" : "outlined"
-                      }
-                      compact
-                      onPress={() => setBookFilter("standard")}
-                      style={styles.viewModeButton}
-                    >
-                      Standard
-                    </Button>
-                    <Button
-                      mode={bookFilter === "custom" ? "contained" : "outlined"}
-                      compact
-                      onPress={() => setBookFilter("custom")}
-                      style={styles.viewModeButton}
-                    >
-                      Custom
-                    </Button>
-                  </>
-                )}
+                <Button
+                  mode={
+                    bookFilter === "standard" ? "contained" : "outlined"
+                  }
+                  compact
+                  onPress={() => setBookFilter("standard")}
+                  style={styles.viewModeButton}
+                >
+                  Standard
+                </Button>
+                <Button
+                  mode={bookFilter === "custom" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setBookFilter("custom")}
+                  style={styles.viewModeButton}
+                >
+                  Custom
+                </Button>
               </View>
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
@@ -1325,28 +1321,24 @@ export default function InventoryListScreen({
             </Text>
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
-                {isAdmin && (
-                  <>
-                    <Button
-                      mode={
-                        bookFilter === "standard" ? "contained" : "outlined"
-                      }
-                      compact
-                      onPress={() => setBookFilter("standard")}
-                      style={styles.viewModeButtonMobile}
-                    >
-                      Standard
-                    </Button>
-                    <Button
-                      mode={bookFilter === "custom" ? "contained" : "outlined"}
-                      compact
-                      onPress={() => setBookFilter("custom")}
-                      style={styles.viewModeButtonMobile}
-                    >
-                      Custom
-                    </Button>
-                  </>
-                )}
+                <Button
+                  mode={
+                    bookFilter === "standard" ? "contained" : "outlined"
+                  }
+                  compact
+                  onPress={() => setBookFilter("standard")}
+                  style={styles.viewModeButtonMobile}
+                >
+                  Standard
+                </Button>
+                <Button
+                  mode={bookFilter === "custom" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setBookFilter("custom")}
+                  style={styles.viewModeButtonMobile}
+                >
+                  Custom
+                </Button>
               </View>
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
@@ -1648,26 +1640,22 @@ export default function InventoryListScreen({
         </View>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
-            {isAdmin && (
-              <>
-                <Button
-                  mode={bookFilter === "standard" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setBookFilter("standard")}
-                  style={styles.viewModeButtonMobile}
-                >
-                  Standard
-                </Button>
-                <Button
-                  mode={bookFilter === "custom" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setBookFilter("custom")}
-                  style={styles.viewModeButtonMobile}
-                >
-                  Custom
-                </Button>
-              </>
-            )}
+            <Button
+              mode={bookFilter === "standard" ? "contained" : "outlined"}
+              compact
+              onPress={() => setBookFilter("standard")}
+              style={styles.viewModeButtonMobile}
+            >
+              Standard
+            </Button>
+            <Button
+              mode={bookFilter === "custom" ? "contained" : "outlined"}
+              compact
+              onPress={() => setBookFilter("custom")}
+              style={styles.viewModeButtonMobile}
+            >
+              Custom
+            </Button>
           </View>
           <Button
             mode={viewMode === "colorBook" ? "contained" : "outlined"}

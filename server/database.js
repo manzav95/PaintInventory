@@ -186,6 +186,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'material_usage' AND column_name = 'cup_gun') THEN
+          ALTER TABLE material_usage ADD COLUMN cup_gun BOOLEAN DEFAULT FALSE;
+        END IF;
+      END $$
+    `);
     console.log("Material usage table ready");
   }
 
@@ -396,9 +403,19 @@ class Database {
   }
 
   async createOrder(poNumber, leadTimeDays, lines, createdBy, placedAt = null) {
-    const placed = placedAt && !Number.isNaN(new Date(placedAt).getTime())
-      ? new Date(placedAt).toISOString()
-      : new Date().toISOString();
+    let placed;
+    if (placedAt && typeof placedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(placedAt.trim())) {
+      placed = placedAt.trim();
+    } else if (placedAt && !Number.isNaN(new Date(placedAt).getTime())) {
+      const d = new Date(placedAt);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      placed = `${y}-${m}-${day}`;
+    } else {
+      const d = new Date();
+      placed = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    }
     const result = await this.pool.query(
       `INSERT INTO orders (po_number, placed_at, lead_time_days, status, created_by)
        VALUES ($1, $2, $3, 'open', $4) RETURNING id`,
@@ -466,9 +483,15 @@ class Database {
     const order = await this.getOrderById(id);
     if (!order) return { success: false, error: "Order not found" };
     if (order.status !== "open") return { success: false, error: "Only open orders can be updated" };
-    const placed = placedAt && !Number.isNaN(new Date(placedAt).getTime())
-      ? new Date(placedAt).toISOString()
-      : null;
+    let placed = null;
+    if (placedAt) {
+      if (typeof placedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(placedAt.trim())) {
+        placed = placedAt.trim();
+      } else if (!Number.isNaN(new Date(placedAt).getTime())) {
+        const d = new Date(placedAt);
+        placed = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      }
+    }
     const updateResult = placed
       ? await this.pool.query(
           "UPDATE orders SET po_number = $1, lead_time_days = $2, placed_at = $3 WHERE id = $4",
@@ -608,9 +631,10 @@ class Database {
     const catalystOz = entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz)) ? Number(entry.catalyst_oz) : (qtyGallons * 0.04 * 128);
     const catalystGallons = catalystOz / 128;
     const materialType = entry.material_type != null ? String(entry.material_type).trim() : null;
+    const cupGun = entry.cup_gun === true;
     const result = await this.pool.query(
-      `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name, material_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at`,
+      `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name, material_type, cup_gun)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, created_at`,
       [
         entry.entry_date || null,
         entry.entry_time || null,
@@ -624,18 +648,20 @@ class Database {
         entry.booth != null ? String(entry.booth).trim() : "",
         entry.user_name != null ? String(entry.user_name).trim() : "",
         materialType || null,
+        cupGun,
       ],
     );
     const row = result.rows[0];
     return { success: true, id: row.id, created_at: row.created_at };
   }
 
-  async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null) {
+  async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null, excludeAdmin = false) {
     const conditions = [];
     const params = [];
     let paramIndex = 1;
-    // Exclude entries by admin account (do not show in list or exports)
-    conditions.push(`(user_name IS NULL OR LOWER(TRIM(user_name)) NOT IN ('admin123', 'admin'))`);
+    if (excludeAdmin) {
+      conditions.push(`(user_name IS NULL OR LOWER(TRIM(user_name)) NOT IN ('admin123', 'admin'))`);
+    }
     if (boothFilter && boothFilter.trim() !== "" && boothFilter.toLowerCase() !== "all") {
       conditions.push(`booth = $${paramIndex}`);
       params.push(boothFilter.trim());
@@ -651,7 +677,8 @@ class Database {
       params.push(String(toDate).trim());
       paramIndex++;
     }
-    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     params.push(limit);
     const query = `SELECT * FROM material_usage ${whereClause} ORDER BY created_at DESC LIMIT $${paramIndex}`;
     const result = await this.pool.query(query, params);

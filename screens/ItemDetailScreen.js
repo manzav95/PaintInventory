@@ -7,6 +7,7 @@ import {
   Platform,
   useWindowDimensions,
   Pressable,
+  Modal,
 } from "react-native";
 import {
   TextInput,
@@ -16,6 +17,7 @@ import {
   IconButton,
   useTheme,
   Menu,
+  ActivityIndicator,
 } from "react-native-paper";
 
 const TYPE_OPTIONS = [
@@ -72,6 +74,7 @@ export default function ItemDetailScreen({
   );
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const isCustomType = CUSTOM_TYPES.includes(type);
 
@@ -115,21 +118,6 @@ export default function ItemDetailScreen({
       return;
     }
 
-    // Handle ID change separately first (if changed)
-    if (
-      isAdmin &&
-      idInput.trim() &&
-      idInput.trim() !== (item?.id?.toString() || "").trim()
-    ) {
-      const newId = idInput.trim();
-      // Change the ID first
-      const idResult = await onChangeId?.(item?.id, newId);
-      if (!idResult || !idResult.success) {
-        Alert.alert("Error", idResult?.error || "Failed to change item ID.");
-        return;
-      }
-    }
-
     const minQ =
       minQuantityInput.trim() === ""
         ? null
@@ -169,7 +157,25 @@ export default function ItemDetailScreen({
       recycle_date: recycleVal,
     };
 
-    onSave(updatedItem);
+    setSaving(true);
+    try {
+      // Handle ID change separately first (if changed)
+      if (
+        isAdmin &&
+        idInput.trim() &&
+        idInput.trim() !== (item?.id?.toString() || "").trim()
+      ) {
+        const newId = idInput.trim();
+        const idResult = await onChangeId?.(item?.id, newId);
+        if (!idResult || !idResult.success) {
+          Alert.alert("Error", idResult?.error || "Failed to change item ID.");
+          return;
+        }
+      }
+      await Promise.resolve(onSave(updatedItem));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleQuantityAdjust = (change) => {
@@ -185,6 +191,22 @@ export default function ItemDetailScreen({
   };
 
   return (
+    <>
+      <Modal
+        visible={saving}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={[styles.savingOverlay, { backgroundColor: "rgba(0,0,0,0.4)" }]}>
+          <View style={[styles.savingBox, { backgroundColor: theme.colors.surface }]}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={[styles.savingText, { color: theme.colors.onSurface }]}>
+              Saving...
+            </Text>
+          </View>
+        </View>
+      </Modal>
     <ScrollView
       style={[styles.container, { backgroundColor: theme.colors.background }]}
       contentContainerStyle={isDesktop && styles.webContentContainer}
@@ -527,6 +549,8 @@ export default function ItemDetailScreen({
               onPress={handleSave}
               style={styles.button}
               icon="content-save"
+              disabled={saving}
+              loading={saving}
             >
               Save Changes
             </Button>
@@ -556,6 +580,7 @@ export default function ItemDetailScreen({
         </View>
       </View>
     </ScrollView>
+    </>
   );
 }
 
@@ -563,6 +588,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+  },
+  savingOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  savingBox: {
+    padding: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    minWidth: 160,
+  },
+  savingText: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "600",
   },
   header: {
     flexDirection: "row",

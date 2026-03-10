@@ -24,6 +24,15 @@ import OrderService from "../services/orderService";
 
 const MAX_AUTOCOMPLETE = 20;
 
+// Filter button colors (match order badge colors)
+const FILTER_COLORS = {
+  all: null,
+  existing: "#1976d2",
+  back_orders: "#e65100",
+  late_orders: "#c62828",
+  completed: "#2e7d32",
+};
+
 // Lead time defaults by item type: clear, primer, catalyst, wiping stain base = 3 days; paint, spray dye base (and custom) = 7 days
 const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst", "stain"];
 const LEAD_TIME_7_DAY_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
@@ -47,7 +56,8 @@ function getDefaultLeadTimeDays(lines, inventory) {
 }
 
 function expectedDate(placedAt, leadTimeDays) {
-  const d = new Date(placedAt);
+  const d = placedAtToDate(placedAt) || new Date(placedAt);
+  if (Number.isNaN(d.getTime())) return null;
   d.setDate(d.getDate() + (parseInt(leadTimeDays, 10) || 7));
   return d;
 }
@@ -82,6 +92,18 @@ function getMonthEnd(d) {
   date.setDate(0);
   date.setHours(23, 59, 59, 999);
   return date;
+}
+
+/** Parse placed_at (YYYY-MM-DD or ISO) to a Date for display so calendar day doesn't shift by timezone */
+function placedAtToDate(placedAt) {
+  if (!placedAt) return null;
+  const s = typeof placedAt === "string" ? placedAt.trim() : "";
+  if (s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const dateOnly = s.slice(0, 10);
+    return new Date(dateOnly + "T12:00:00.000Z");
+  }
+  const d = new Date(placedAt);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function formatDateWithWeekday(d) {
@@ -135,7 +157,7 @@ function isExistingOrder(order) {
 
 function isLateOrder(order) {
   if (order.status !== "open") return false;
-  const placed = order.placed_at ? new Date(order.placed_at) : null;
+  const placed = placedAtToDate(order.placed_at);
   if (!placed || Number.isNaN(placed.getTime())) return false;
   const days = parseInt(order.lead_time_days, 10) || 7;
   const expected = new Date(placed);
@@ -256,7 +278,11 @@ export default function UpcomingOrdersScreen({
         );
         return;
       }
-      placedAt = d.toISOString();
+      // Send date-only (YYYY-MM-DD) so server stores calendar date and it doesn't shift timezones
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      placedAt = `${y}-${m}-${day}`;
     }
     const validLines = lines
       .map((l) => ({
@@ -415,8 +441,8 @@ export default function UpcomingOrdersScreen({
   const ordersSortedByPlaced = useMemo(() => {
     const list = dateViewMode != null ? orders || [] : filteredOrders;
     return [...list].sort((a, b) => {
-      const pa = a.placed_at ? new Date(a.placed_at).getTime() : 0;
-      const pb = b.placed_at ? new Date(b.placed_at).getTime() : 0;
+      const pa = placedAtToDate(a.placed_at)?.getTime() ?? 0;
+      const pb = placedAtToDate(b.placed_at)?.getTime() ?? 0;
       return pb - pa;
     });
   }, [dateViewMode, orders, filteredOrders]);
@@ -425,7 +451,7 @@ export default function UpcomingOrdersScreen({
     if (dateViewMode !== "week") return [];
     const groups = new Map();
     for (const order of ordersSortedByPlaced) {
-      const placed = order.placed_at ? new Date(order.placed_at) : null;
+      const placed = placedAtToDate(order.placed_at);
       if (!placed || Number.isNaN(placed.getTime())) continue;
       const weekStart = getWeekStart(placed);
       const key = weekStart.getTime();
@@ -447,7 +473,7 @@ export default function UpcomingOrdersScreen({
     if (dateViewMode !== "month") return [];
     const groups = new Map();
     for (const order of ordersSortedByPlaced) {
-      const placed = order.placed_at ? new Date(order.placed_at) : null;
+      const placed = placedAtToDate(order.placed_at);
       if (!placed || Number.isNaN(placed.getTime())) continue;
       const monthStart = getMonthStart(placed);
       const key = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
@@ -466,7 +492,7 @@ export default function UpcomingOrdersScreen({
   }, [dateViewMode, ordersSortedByPlaced, inventory]);
 
   const renderOrderCard = (order) => {
-    const placed = order.placed_at ? new Date(order.placed_at) : null;
+    const placed = placedAtToDate(order.placed_at);
     const expected = placed
       ? expectedDate(order.placed_at, order.lead_time_days)
       : null;
@@ -676,6 +702,8 @@ export default function UpcomingOrdersScreen({
 
   const formatPlacedForInput = (placedAt) => {
     if (!placedAt) return "";
+    const s = typeof placedAt === "string" ? placedAt.trim() : "";
+    if (s.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
     try {
       const d = new Date(placedAt);
       if (Number.isNaN(d.getTime())) return "";
@@ -987,6 +1015,8 @@ export default function UpcomingOrdersScreen({
                 onPress={() => setOrderFilter("all")}
                 style={styles.filterBtn}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
+                buttonColor={orderFilter === "all" ? theme.colors.primary : undefined}
+                textColor={orderFilter === "all" ? "#fff" : undefined}
               >
                 All
               </Button>
@@ -994,8 +1024,10 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "existing" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("existing")}
-                style={styles.filterBtn}
+                style={[styles.filterBtn, orderFilter !== "existing" && FILTER_COLORS.existing && { borderColor: FILTER_COLORS.existing }]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
+                buttonColor={orderFilter === "existing" ? FILTER_COLORS.existing : undefined}
+                textColor={orderFilter === "existing" ? "#fff" : orderFilter !== "existing" && FILTER_COLORS.existing ? FILTER_COLORS.existing : undefined}
               >
                 Open POs
               </Button>
@@ -1003,8 +1035,10 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "back_orders" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("back_orders")}
-                style={styles.filterBtn}
+                style={[styles.filterBtn, orderFilter !== "back_orders" && FILTER_COLORS.back_orders && { borderColor: FILTER_COLORS.back_orders }]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
+                buttonColor={orderFilter === "back_orders" ? FILTER_COLORS.back_orders : undefined}
+                textColor={orderFilter === "back_orders" ? "#fff" : orderFilter !== "back_orders" && FILTER_COLORS.back_orders ? FILTER_COLORS.back_orders : undefined}
               >
                 Back Orders
               </Button>
@@ -1012,8 +1046,10 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "late_orders" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("late_orders")}
-                style={styles.filterBtn}
+                style={[styles.filterBtn, orderFilter !== "late_orders" && FILTER_COLORS.late_orders && { borderColor: FILTER_COLORS.late_orders }]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
+                buttonColor={orderFilter === "late_orders" ? FILTER_COLORS.late_orders : undefined}
+                textColor={orderFilter === "late_orders" ? "#fff" : orderFilter !== "late_orders" && FILTER_COLORS.late_orders ? FILTER_COLORS.late_orders : undefined}
               >
                 Late Orders
               </Button>
@@ -1021,8 +1057,10 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "completed" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("completed")}
-                style={styles.filterBtn}
+                style={[styles.filterBtn, orderFilter !== "completed" && FILTER_COLORS.completed && { borderColor: FILTER_COLORS.completed }]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
+                buttonColor={orderFilter === "completed" ? FILTER_COLORS.completed : undefined}
+                textColor={orderFilter === "completed" ? "#fff" : orderFilter !== "completed" && FILTER_COLORS.completed ? FILTER_COLORS.completed : undefined}
               >
                 Completed POs
               </Button>
