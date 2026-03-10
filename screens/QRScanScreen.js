@@ -17,7 +17,12 @@ import {
   SegmentedButtons,
 } from "react-native-paper";
 
-export default function QRScanScreen({ onScanResult, onCancel }) {
+export default function QRScanScreen({
+  onScanResult,
+  onCancel,
+  isAdmin = false,
+  onOpenBarcodeScan,
+}) {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 1024; // iPad is 768-1024px, so >1024 is desktop
@@ -377,6 +382,16 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
                     style={styles.button}
                   >
                     Scan Again
+                  </Button>
+                )}
+                {isAdmin && onOpenBarcodeScan && (
+                  <Button
+                    mode="text"
+                    onPress={onOpenBarcodeScan}
+                    style={styles.button}
+                    icon="barcode-scan"
+                  >
+                    Scan Paint Can Barcode
                   </Button>
                 )}
               </View>

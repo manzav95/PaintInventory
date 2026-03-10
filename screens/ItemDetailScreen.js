@@ -19,6 +19,7 @@ import {
   Menu,
   ActivityIndicator,
 } from "react-native-paper";
+import CameraColorPickerModal from "../components/CameraColorPickerModal";
 
 const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
@@ -75,6 +76,7 @@ export default function ItemDetailScreen({
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
 
   const isCustomType = CUSTOM_TYPES.includes(type);
 
@@ -502,6 +504,14 @@ export default function ItemDetailScreen({
                     <Text style={[styles.colorPickerLabel, { color: theme.colors.onSurfaceVariant }]}>Pick</Text>
                   </View>
                 )}
+                {!isWeb && (
+                  <IconButton
+                    icon="camera"
+                    size={24}
+                    onPress={() => setCameraPickerVisible(true)}
+                    style={styles.colorCameraButton}
+                  />
+                )}
               </View>
             ) : (
               <View style={styles.colorPreviewReadOnly}>
@@ -578,6 +588,14 @@ export default function ItemDetailScreen({
             </Button>
           )}
         </View>
+        <CameraColorPickerModal
+          visible={cameraPickerVisible}
+          onClose={() => setCameraPickerVisible(false)}
+          onColorPicked={(hex) => {
+            setCameraPickerVisible(false);
+            if (hex) setHexColorInput(hex);
+          }}
+        />
       </View>
     </ScrollView>
     </>
@@ -708,6 +726,9 @@ const styles = StyleSheet.create({
   colorPickerWrap: {
     alignItems: "center",
     paddingBottom: 8,
+  },
+  colorCameraButton: {
+    marginBottom: 8,
   },
   nativeColorInput: {
     width: 44,
