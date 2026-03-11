@@ -17,12 +17,7 @@ import {
   SegmentedButtons,
 } from "react-native-paper";
 
-export default function QRScanScreen({
-  onScanResult,
-  onCancel,
-  isAdmin = false,
-  onOpenBarcodeScan,
-}) {
+export default function QRScanScreen({ onScanResult, onCancel }) {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 1024; // iPad is 768-1024px, so >1024 is desktop
@@ -38,10 +33,8 @@ export default function QRScanScreen({
 
   const [hasPermission, setHasPermission] = useState(null);
   const [scanned, setScanned] = useState(false);
-  // On desktop or web via IP, default to manual; on mobile/tablet native, default to camera
-  const [inputMode, setInputMode] = useState(
-    isDesktop || isWebViaIP ? "manual" : "camera",
-  );
+  // Always default to manual input; users can switch to camera if desired
+  const [inputMode, setInputMode] = useState("manual");
   const [manualInput, setManualInput] = useState("");
   const [permissionError, setPermissionError] = useState(null);
   const theme = useTheme();
@@ -71,11 +64,12 @@ export default function QRScanScreen({
       setPermissionError(
         "Camera requires HTTPS or localhost. Use manual entry instead.",
       );
-    } else if (!isDesktop) {
-      requestCameraPermission();
-    } else {
+    } else if (isDesktop) {
       // On desktop localhost, we don't need camera permission
       setHasPermission(false);
+    } else {
+      // On native mobile/tablet, we'll request permission only when user switches to camera
+      setHasPermission(null);
     }
   }, []);
 
@@ -122,7 +116,7 @@ export default function QRScanScreen({
             >
               <Card.Content>
                 <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-                  Enter QR Code
+                  Enter Material Code
                 </Text>
                 <Text
                   style={[
@@ -130,17 +124,17 @@ export default function QRScanScreen({
                     { color: theme.colors.onSurfaceVariant },
                   ]}
                 >
-                  Type or paste the QR code value below
+                  Type or scan the material code below
                 </Text>
 
                 <TextInput
-                  label="QR Code Value"
+                  label="Material Code"
                   value={manualInput}
                   onChangeText={setManualInput}
                   mode="outlined"
                   style={styles.input}
                   autoFocus
-                  placeholder="Enter paint ID or QR code value"
+                  placeholder="Enter material ID"
                   onSubmitEditing={handleManualSubmit}
                 />
 
@@ -232,17 +226,17 @@ export default function QRScanScreen({
                   { color: theme.colors.onSurfaceVariant },
                 ]}
               >
-                Type or paste the QR code value below
+                Type or scan the Paint Code ID below
               </Text>
 
               <TextInput
-                label="QR Code Value"
+                label="Material"
                 value={manualInput}
                 onChangeText={setManualInput}
                 mode="outlined"
                 style={styles.input}
                 autoFocus
-                placeholder="Enter paint ID or QR code value"
+                placeholder="Enter paint ID"
                 onSubmitEditing={handleManualSubmit}
               />
 
@@ -382,16 +376,6 @@ export default function QRScanScreen({
                     style={styles.button}
                   >
                     Scan Again
-                  </Button>
-                )}
-                {isAdmin && onOpenBarcodeScan && (
-                  <Button
-                    mode="text"
-                    onPress={onOpenBarcodeScan}
-                    style={styles.button}
-                    icon="barcode-scan"
-                  >
-                    Scan Paint Can Barcode
                   </Button>
                 )}
               </View>

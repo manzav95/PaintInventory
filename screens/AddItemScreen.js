@@ -51,6 +51,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const [minQuantity, setMinQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [hexColor, setHexColor] = useState("");
+  const [externalCode, setExternalCode] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
 
@@ -92,6 +93,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
     const priceNum = price.trim() === "" ? undefined : parseFloat(price);
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
     const hexVal = normalizeHex(hexColor);
+    const extCode = externalCode.trim();
     // Recycle date for custom types is set on first check-in (4 months from that date), not on add
     const item = {
       id: itemId.trim(),
@@ -103,6 +105,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
       ...(priceNum != null && !isNaN(priceNum) && priceNum >= 0 && { price: priceNum }),
       ...(typeVal && { type: typeVal }),
       ...(hexVal && { hex_color: hexVal }),
+      ...(extCode && { external_code: extCode }),
     };
 
     onSave(item);
@@ -125,16 +128,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
               placeholder="Required – enter a custom ID"
               mode="outlined"
               style={styles.input}
-              placeholder="Any format (optional)"
             />
-            <Text
-              style={[
-                styles.helpText,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Leave blank to auto-generate a default code
-            </Text>
 
             <TextInput
               label="Paint Name *"
@@ -143,6 +137,17 @@ export default function AddItemScreen({ onSave, onCancel }) {
               mode="outlined"
               style={styles.input}
               autoFocus={!itemId}
+            />
+
+            <TextInput
+              label="External code (optional)"
+              value={externalCode}
+              onChangeText={setExternalCode}
+              mode="outlined"
+              style={styles.input}
+              placeholder="Barcode text or alternate code"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
 
             <TextInput

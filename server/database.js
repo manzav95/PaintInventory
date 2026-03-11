@@ -90,6 +90,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'external_code') THEN
+          ALTER TABLE items ADD COLUMN external_code TEXT UNIQUE DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     await client.query(`
@@ -202,9 +209,10 @@ class Database {
   }
 
   async getItem(itemId) {
-    const result = await this.pool.query("SELECT * FROM items WHERE id = $1", [
-      itemId,
-    ]);
+    const result = await this.pool.query(
+      "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
+      [itemId],
+    );
     return result.rows[0] || null;
   }
 
@@ -218,9 +226,12 @@ class Database {
     const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
     const hexColor = item.hex_color != null && String(item.hex_color).trim() !== "" ? String(item.hex_color).trim() : null;
     const recycleDate = item.recycle_date != null && String(item.recycle_date).trim() !== "" ? String(item.recycle_date).trim() : null;
+    const externalCode = item.external_code != null && String(item.external_code).trim() !== ""
+      ? String(item.external_code).trim()
+      : null;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         item.id,
         item.name,
@@ -237,9 +248,22 @@ class Database {
         displayOrder,
         hexColor,
         recycleDate,
+        externalCode,
       ],
     );
-    return { success: true, item: { ...item, updatedAt: now, price, type, display_order: displayOrder, hex_color: hexColor, recycle_date: recycleDate } };
+    return {
+      success: true,
+      item: {
+        ...item,
+        updatedAt: now,
+        price,
+        type,
+        display_order: displayOrder,
+        hex_color: hexColor,
+        recycle_date: recycleDate,
+        external_code: externalCode,
+      },
+    };
   }
 
   async updateItem(itemId, updates) {
@@ -259,6 +283,7 @@ class Database {
       "display_order",
       "hex_color",
       "recycle_date",
+      "external_code",
     ];
     const fields = [];
     const values = [];
@@ -293,6 +318,9 @@ class Database {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else if (key === "recycle_date") {
+          const v = updates[key];
+          values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
+        } else if (key === "external_code") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else {

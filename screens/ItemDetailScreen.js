@@ -70,6 +70,9 @@ export default function ItemDetailScreen({
     item?.display_order != null && item?.display_order !== "" ? String(item.display_order) : "0",
   );
   const [hexColorInput, setHexColorInput] = useState(item?.hex_color ?? "");
+  const [externalCodeInput, setExternalCodeInput] = useState(
+    item?.external_code != null ? String(item.external_code) : "",
+  );
   const [recycleDateInput, setRecycleDateInput] = useState(
     item?.recycle_date ?? "",
   );
@@ -110,6 +113,11 @@ export default function ItemDetailScreen({
   useEffect(() => {
     setRecycleDateInput(item?.recycle_date ?? "");
   }, [item?.id, item?.recycle_date]);
+  useEffect(() => {
+    setExternalCodeInput(
+      item?.external_code != null ? String(item.external_code) : "",
+    );
+  }, [item?.id, item?.external_code]);
 
   const handleSave = async () => {
     if (!isAdmin) {
@@ -145,6 +153,9 @@ export default function ItemDetailScreen({
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const hexVal = normalizeHex(hexColorInput);
     const recycleVal = recycleDateInput.trim() ? recycleDateInput.trim() : null;
+    const externalCodeVal = externalCodeInput.trim()
+      ? externalCodeInput.trim()
+      : null;
     const updatedItem = {
       ...item,
       id: idInput.trim() || item?.id,
@@ -157,6 +168,7 @@ export default function ItemDetailScreen({
       display_order: displayOrderVal,
       hex_color: hexVal || null,
       recycle_date: recycleVal,
+      external_code: externalCodeVal,
     };
 
     setSaving(true);
@@ -236,6 +248,27 @@ export default function ItemDetailScreen({
               />
             ) : (
               <Text style={styles.itemId}>{item?.id?.toString() || "N/A"}</Text>
+            )}
+
+            <Text style={styles.label}>External code</Text>
+            {isAdmin ? (
+              <TextInput
+                label="External code (optional)"
+                value={externalCodeInput}
+                onChangeText={setExternalCodeInput}
+                mode="outlined"
+                style={styles.input}
+                placeholder="Barcode text or alternate code"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            ) : (
+              <Text style={styles.itemId}>
+                {item?.external_code != null &&
+                String(item.external_code).trim() !== ""
+                  ? String(item.external_code)
+                  : "—"}
+              </Text>
             )}
           </Card.Content>
         </Card>

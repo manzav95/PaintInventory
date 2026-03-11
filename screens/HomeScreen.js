@@ -220,7 +220,7 @@ export default function HomeScreen({
     }
   };
 
-  const qrButtonText = isDesktop ? "Manual Entry" : "QR Scan or Text Input";
+  const qrButtonText = "Check In / Check Out";
   const getItemName = (itemId) =>
     inventory.find((i) => i.id === itemId)?.name || itemId || "Unknown";
 

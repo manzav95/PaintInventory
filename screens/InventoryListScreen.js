@@ -1747,6 +1747,8 @@ export default function InventoryListScreen({
                 tintColor={theme.colors.primary}
               />
             }
+            keyboardDismissMode="none"
+            keyboardShouldPersistTaps="handled"
           />
         )}
       </View>

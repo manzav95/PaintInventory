@@ -14,7 +14,6 @@ import HomeScreen from './screens/HomeScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import QRScanScreen from './screens/QRScanScreen';
-import BarcodeScanScreen from './screens/BarcodeScanScreen';
 import AddItemScreen from './screens/AddItemScreen';
 import LoginScreen from './screens/LoginScreen';
 import ItemDetailScreen from './screens/ItemDetailScreen';
@@ -791,15 +790,6 @@ export default function App() {
       case 'qrscan':
         return (
           <QRScanScreen
-            onScanResult={handleScanResult}
-            onCancel={() => setCurrentScreen('home')}
-            isAdmin={isAdmin}
-            onOpenBarcodeScan={() => setCurrentScreen('barcodeScan')}
-          />
-        );
-      case 'barcodeScan':
-        return (
-          <BarcodeScanScreen
             onScanResult={handleScanResult}
             onCancel={() => setCurrentScreen('home')}
           />
