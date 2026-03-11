@@ -485,6 +485,7 @@ export default function App() {
         ...(item.hasOwnProperty('display_order') && { display_order: item.display_order }),
         ...(item.hasOwnProperty('hex_color') && { hex_color: item.hex_color }),
         ...(item.hasOwnProperty('recycle_date') && { recycle_date: item.recycle_date }),
+        ...(item.hasOwnProperty('external_code') && { external_code: item.external_code }),
       };
       result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
     } else {
