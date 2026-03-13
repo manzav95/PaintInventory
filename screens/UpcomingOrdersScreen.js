@@ -197,6 +197,8 @@ export default function UpcomingOrdersScreen({
   const [dateViewMode, setDateViewMode] = useState(null); // null | "week" | "month"
   const [editingReceivedOrder, setEditingReceivedOrder] = useState(null);
   const [receivedLineQtys, setReceivedLineQtys] = useState({});
+  // track which week/month groups are expanded; default will be top group only
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState([]);
 
   useEffect(() => {
     if (initialFilter) setOrderFilter(initialFilter);
@@ -269,20 +271,26 @@ export default function UpcomingOrdersScreen({
       return;
     }
     let placedAt = null;
-    if (placedDate.trim()) {
-      const d = new Date(placedDate.trim());
-      if (Number.isNaN(d.getTime())) {
-        Alert.alert(
-          "Invalid",
-          "Placed date must be a valid date (e.g. YYYY-MM-DD).",
-        );
-        return;
+    const rawPlaced = placedDate.trim();
+    if (rawPlaced) {
+      // If user entered a clean YYYY-MM-DD, trust it as-is to avoid timezone shifting
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawPlaced)) {
+        placedAt = rawPlaced;
+      } else {
+        const d = new Date(rawPlaced);
+        if (Number.isNaN(d.getTime())) {
+          Alert.alert(
+            "Invalid",
+            "Placed date must be a valid date (e.g. YYYY-MM-DD).",
+          );
+          return;
+        }
+        // Fallback: convert to UTC date-only string
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(d.getUTCDate()).padStart(2, "0");
+        placedAt = `${y}-${m}-${day}`;
       }
-      // Send date-only (YYYY-MM-DD) so server stores calendar date and it doesn't shift timezones
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const day = String(d.getDate()).padStart(2, "0");
-      placedAt = `${y}-${m}-${day}`;
     }
     const validLines = lines
       .map((l) => ({
@@ -476,7 +484,9 @@ export default function UpcomingOrdersScreen({
       const placed = placedAtToDate(order.placed_at);
       if (!placed || Number.isNaN(placed.getTime())) continue;
       const monthStart = getMonthStart(placed);
-      const key = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}`;
+      const key = `${monthStart.getFullYear()}-${String(
+        monthStart.getMonth() + 1,
+      ).padStart(2, "0")}`;
       if (!groups.has(key)) {
         groups.set(key, { monthStart, orders: [] });
       }
@@ -716,7 +726,12 @@ export default function UpcomingOrdersScreen({
   const openNewOrder = () => {
     setEditingOrder(null);
     setPoNumber("");
-    setPlacedDate(formatPlacedForInput(new Date().toISOString()));
+    // Default placed date to today's local calendar date (YYYY-MM-DD)
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, "0");
+    const d = String(today.getDate()).padStart(2, "0");
+    setPlacedDate(`${y}-${m}-${d}`);
     setLeadTimeDays("7");
     setLines([{ itemId: "", quantity: "", searchQuery: "" }]);
     setFocusedLineIndex(null);
@@ -772,17 +787,19 @@ export default function UpcomingOrdersScreen({
           iconColor={primaryColor}
         />
         <Title style={styles.title}>Upcoming Deliveries</Title>
-        <View style={styles.headerRight}>
-          {!showForm ? (
-            <Button mode="contained" onPress={openNewOrder} icon="plus">
-              Add Order
-            </Button>
-          ) : (
-            <Button mode="outlined" onPress={closeForm}>
-              Cancel
-            </Button>
-          )}
-        </View>
+        {!isDesktop && (
+          <View style={styles.headerRight}>
+            {!showForm ? (
+              <Button mode="contained" onPress={openNewOrder} icon="plus">
+                Add Order
+              </Button>
+            ) : (
+              <Button mode="outlined" onPress={closeForm}>
+                Cancel
+              </Button>
+            )}
+          </View>
+        )}
       </View>
 
       <ScrollView
@@ -792,6 +809,71 @@ export default function UpcomingOrdersScreen({
           isDesktop && styles.scrollContentWeb,
         ]}
       >
+        {!showForm && (
+          <>
+            <Text
+              style={[
+                styles.dateViewLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              By date
+            </Text>
+            <View style={styles.filterRow}>
+              <Button
+                mode={dateViewMode === null ? "contained" : "outlined"}
+                compact
+                onPress={() => setDateViewMode(null)}
+                style={styles.filterBtn}
+              >
+                List
+              </Button>
+              <Button
+                mode={dateViewMode === "week" ? "contained" : "outlined"}
+                compact
+                onPress={() => {
+                  setDateViewMode("week");
+                  setOrderFilter("all");
+                  setExpandedGroupKeys([]);
+                }}
+                style={styles.filterBtn}
+              >
+                Week
+              </Button>
+              <Button
+                mode={dateViewMode === "month" ? "contained" : "outlined"}
+                compact
+                onPress={() => {
+                  setDateViewMode("month");
+                  setOrderFilter("all");
+                  setExpandedGroupKeys([]);
+                }}
+                style={styles.filterBtn}
+              >
+                Month
+              </Button>
+              {isDesktop && (
+                <View style={{ marginLeft: "auto" }}>
+                  <Button
+                    mode="outlined"
+                    onPress={openNewOrder}
+                    icon="plus"
+                    compact
+                  >
+                    Add Order
+                  </Button>
+                </View>
+              )}
+            </View>
+          </>
+        )}
+        {isDesktop && showForm && (
+          <View style={[styles.filterRow, { justifyContent: "flex-end", marginBottom: 8 }]}>
+            <Button mode="outlined" onPress={closeForm} compact>
+              Cancel
+            </Button>
+          </View>
+        )}
         {showForm && (
           <Card
             style={[styles.card, { backgroundColor: theme.colors.surface }]}
@@ -968,46 +1050,6 @@ export default function UpcomingOrdersScreen({
           </View>
         ) : !showForm ? (
           <>
-            <Text
-              style={[
-                styles.dateViewLabel,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              By date
-            </Text>
-            <View style={styles.filterRow}>
-              <Button
-                mode={dateViewMode === null ? "contained" : "outlined"}
-                compact
-                onPress={() => setDateViewMode(null)}
-                style={styles.filterBtn}
-              >
-                List
-              </Button>
-              <Button
-                mode={dateViewMode === "week" ? "contained" : "outlined"}
-                compact
-                onPress={() => {
-                  setDateViewMode("week");
-                  setOrderFilter("all");
-                }}
-                style={styles.filterBtn}
-              >
-                Week
-              </Button>
-              <Button
-                mode={dateViewMode === "month" ? "contained" : "outlined"}
-                compact
-                onPress={() => {
-                  setDateViewMode("month");
-                  setOrderFilter("all");
-                }}
-                style={styles.filterBtn}
-              >
-                Month
-              </Button>
-            </View>
             <View style={styles.filterRow}>
               <Button
                 mode={orderFilter === "all" ? "contained" : "outlined"}
@@ -1110,76 +1152,122 @@ export default function UpcomingOrdersScreen({
                 );
               }
               if (dateViewMode === "week") {
-                return groupedByWeek.map((group) => (
-                  <View
-                    key={group.weekStart.getTime()}
-                    style={styles.dateGroupBlock}
-                  >
+                return groupedByWeek.map((group, index) => {
+                  const key = `week-${group.weekStart.getTime()}`;
+                  const isExpanded = expandedGroupKeys.includes(key);
+                  return (
                     <View
-                      style={[
-                        styles.dateGroupHeader,
-                        {
-                          backgroundColor:
-                            theme.colors.surfaceVariant || "#e0e0e0",
-                        },
-                      ]}
+                      key={group.weekStart.getTime()}
+                      style={styles.dateGroupBlock}
                     >
-                      <Text
-                        style={[
-                          styles.dateGroupTitle,
-                          { color: theme.colors.onSurface },
-                        ]}
+                      <Pressable
+                        onPress={() =>
+                          setExpandedGroupKeys((prev) =>
+                            prev.includes(key)
+                              ? prev.filter((k) => k !== key)
+                              : [...prev, key],
+                          )
+                        }
                       >
-                        {formatWeekRange(group.weekStart)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.dateGroupTotals,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {formatTotalsByType(group.totalsByType)}
-                      </Text>
+                        <View
+                          style={[
+                            styles.dateGroupHeader,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceVariant || "#e0e0e0",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.dateGroupTitle,
+                              { color: theme.colors.onSurface },
+                            ]}
+                          >
+                            {formatWeekRange(group.weekStart)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateGroupTotals,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {formatTotalsByType(group.totalsByType)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateGroupToggle,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {isExpanded ? "Tap to collapse" : "Tap to expand"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                      {isExpanded &&
+                        group.orders.map((order) => renderOrderCard(order))}
                     </View>
-                    {group.orders.map((order) => renderOrderCard(order))}
-                  </View>
-                ));
+                  );
+                });
               }
               if (dateViewMode === "month") {
-                return groupedByMonth.map((group) => (
-                  <View
-                    key={group.monthStart.getTime()}
-                    style={styles.dateGroupBlock}
-                  >
+                return groupedByMonth.map((group, index) => {
+                  const key = `month-${group.monthStart.getTime()}`;
+                  const isExpanded = expandedGroupKeys.includes(key);
+                  return (
                     <View
-                      style={[
-                        styles.dateGroupHeader,
-                        {
-                          backgroundColor:
-                            theme.colors.surfaceVariant || "#e0e0e0",
-                        },
-                      ]}
+                      key={group.monthStart.getTime()}
+                      style={styles.dateGroupBlock}
                     >
-                      <Text
-                        style={[
-                          styles.dateGroupTitle,
-                          { color: theme.colors.onSurface },
-                        ]}
+                      <Pressable
+                        onPress={() =>
+                          setExpandedGroupKeys((prev) =>
+                            prev.includes(key)
+                              ? prev.filter((k) => k !== key)
+                              : [...prev, key],
+                          )
+                        }
                       >
-                        {formatMonthRange(group.monthStart)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.dateGroupTotals,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {formatTotalsByType(group.totalsByType)}
-                      </Text>
+                        <View
+                          style={[
+                            styles.dateGroupHeader,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceVariant || "#e0e0e0",
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.dateGroupTitle,
+                              { color: theme.colors.onSurface },
+                            ]}
+                          >
+                            {formatMonthRange(group.monthStart)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateGroupTotals,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {formatTotalsByType(group.totalsByType)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateGroupToggle,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {isExpanded ? "Tap to collapse" : "Tap to expand"}
+                          </Text>
+                        </View>
+                      </Pressable>
+                      {isExpanded &&
+                        group.orders.map((order) => renderOrderCard(order))}
                     </View>
-                    {group.orders.map((order) => renderOrderCard(order))}
-                  </View>
-                ));
+                  );
+                });
               }
               return ordersSortedByPlaced.map((order) =>
                 renderOrderCard(order),
@@ -1317,7 +1405,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   scrollContentWeb: {
-    maxWidth: 640,
+    maxWidth: 760,
     alignSelf: "center",
     width: "100%",
   },
@@ -1445,10 +1533,16 @@ const styles = StyleSheet.create({
   dateGroupTitle: {
     fontSize: 16,
     fontWeight: "700",
-    marginBottom: 4,
+    marginBottom: 6,
   },
   dateGroupTotals: {
     fontSize: 13,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  dateGroupToggle: {
+    fontSize: 11,
+    marginTop: 6,
   },
   orderCard: {
     marginBottom: 12,

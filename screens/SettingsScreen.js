@@ -226,7 +226,7 @@ export default function SettingsScreen({
               Signed in as {userName || "Unknown"}
             </Text>
             <Text style={[styles.footerVersion, { color: theme.colors.onSurfaceVariant }]}>
-              v{version?.build ?? "?"}
+              v1.{version?.build ?? "?"}
             </Text>
           </View>
         </View>

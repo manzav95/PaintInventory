@@ -656,7 +656,7 @@ export default function HomeScreen({
               Logged in as{" "}
               <Text style={styles.mono}>{isAdmin ? "Admin" : userName}</Text>
             </Text>
-            <Text style={styles.footerVersion}>v{version?.build ?? "?"}</Text>
+            <Text style={styles.footerVersion}>v1.{version?.build ?? "?"}</Text>
           </View>
         </View>
       </ScrollView>

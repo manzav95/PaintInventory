@@ -56,7 +56,9 @@ export default function InventoryListScreen({
   const { width, height } = useWindowDimensions();
   const desktopBreakpoint = 700;
   const isDesktop = isWeb && width >= desktopBreakpoint;
-  const isMobileLandscape = !isDesktop && width > height;
+  // Treat "mobile landscape" as tablet-size or larger only, so small phones
+  // don't flip layouts when the keyboard changes height.
+  const isMobileLandscape = !isDesktop && width > height && width >= 600;
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc', 'desc'
@@ -1322,22 +1324,16 @@ export default function InventoryListScreen({
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
                 <Button
-                  mode={
-                    bookFilter === "standard" ? "contained" : "outlined"
+                  mode={bookFilter === "standard" ? "contained" : "outlined"}
+                  compact
+                  onPress={() =>
+                    setBookFilter((prev) =>
+                      prev === "standard" ? "custom" : "standard",
+                    )
                   }
-                  compact
-                  onPress={() => setBookFilter("standard")}
                   style={styles.viewModeButtonMobile}
                 >
-                  Standard
-                </Button>
-                <Button
-                  mode={bookFilter === "custom" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setBookFilter("custom")}
-                  style={styles.viewModeButtonMobile}
-                >
-                  Custom
+                  {bookFilter === "standard" ? "Custom" : "Standard"}
                 </Button>
               </View>
               <Button
@@ -1370,6 +1366,11 @@ export default function InventoryListScreen({
             </View>
           </View>
 
+          <View style={styles.filterSummaryRow}>
+            <Text style={styles.filterSummaryText}>
+              {bookFilter === "standard" ? "Showing: Standard colors" : "Showing: Custom colors"}
+            </Text>
+          </View>
           <Searchbar
             placeholder={
               viewMode === "colorBook"
@@ -1379,6 +1380,9 @@ export default function InventoryListScreen({
             onChangeText={setSearchQuery}
             value={searchQuery}
             style={styles.searchbar}
+            autoCorrect={false}
+            autoCapitalize="none"
+            blurOnSubmit={false}
           />
           {recycleDueFilter && (
             <View style={styles.recycleDueBanner}>
@@ -1643,18 +1647,14 @@ export default function InventoryListScreen({
             <Button
               mode={bookFilter === "standard" ? "contained" : "outlined"}
               compact
-              onPress={() => setBookFilter("standard")}
+              onPress={() =>
+                setBookFilter((prev) =>
+                  prev === "standard" ? "custom" : "standard",
+                )
+              }
               style={styles.viewModeButtonMobile}
             >
-              Standard
-            </Button>
-            <Button
-              mode={bookFilter === "custom" ? "contained" : "outlined"}
-              compact
-              onPress={() => setBookFilter("custom")}
-              style={styles.viewModeButtonMobile}
-            >
-              Custom
+              {bookFilter === "standard" ? "Custom" : "Standard"}
             </Button>
           </View>
           <Button
@@ -1672,6 +1672,11 @@ export default function InventoryListScreen({
       </View>
 
       <View style={styles.searchbarWrap}>
+        <View style={styles.filterSummaryRow}>
+          <Text style={styles.filterSummaryText}>
+            {bookFilter === "standard" ? "Showing: Standard colors" : "Showing: Custom colors"}
+          </Text>
+        </View>
         <Searchbar
           placeholder={
             viewMode === "colorBook"
@@ -1681,6 +1686,9 @@ export default function InventoryListScreen({
           onChangeText={setSearchQuery}
           value={searchQuery}
           style={styles.searchbar}
+          autoCorrect={false}
+          autoCapitalize="none"
+          blurOnSubmit={false}
         />
       </View>
       {recycleDueFilter && (
@@ -1824,10 +1832,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 0,
     paddingBottom: 8,
-    maxHeight: 56,
   },
   searchbar: {
     margin: 0,
+  },
+  filterSummaryRow: {
+    marginBottom: 4,
+  },
+  filterSummaryText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#666",
   },
   list: {
     padding: 16,
