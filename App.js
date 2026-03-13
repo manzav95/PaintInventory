@@ -66,6 +66,11 @@ export default function App() {
   const [onOrderSummary, setOnOrderSummary] = useState({});
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
   const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
+  const [inventoryViewState, setInventoryViewState] = useState({
+    viewMode: 'inventory', // 'inventory' | 'colorBook'
+    bookFilter: 'standard', // 'standard' | 'custom'
+    scrollOffset: 0,
+  });
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
 
   useEffect(() => {
@@ -291,7 +296,7 @@ export default function App() {
   const handleScanResult = async (itemId) => {
     if (!itemId) {
       Alert.alert('Scan Failed', 'Could not read item ID.');
-      setCurrentScreen('home');
+      setCurrentScreen(previousScreen || 'home');
       return;
     }
 
@@ -312,7 +317,7 @@ export default function App() {
       Alert.alert(
         'Paint Not Found',
         `No paint found with ID: ${normalizedId}. Please add the paint manually first, then scan to update quantity.`,
-        [{ text: 'OK', onPress: () => setCurrentScreen('home') }]
+        [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }]
       );
       return;
     }
@@ -341,8 +346,8 @@ export default function App() {
           newQuantity: result.item.quantity,
         });
         setScannedItem(null);
-        setPreviousScreen('home');
-        setCurrentScreen('list');
+        const target = previousScreen || 'list';
+        setCurrentScreen(target);
       } else {
         Alert.alert('Error', 'Failed to check in quantity.');
       }
@@ -370,8 +375,8 @@ export default function App() {
         orderId,
       });
       setScannedItem(null);
-      setPreviousScreen('home');
-      setCurrentScreen('home');
+      const target = previousScreen || 'home';
+      setCurrentScreen(target);
     });
   };
 
@@ -394,8 +399,8 @@ export default function App() {
           newQuantity: result.item.quantity,
         });
         setScannedItem(null);
-        setPreviousScreen('home');
-        setCurrentScreen('list');
+        const target = previousScreen || 'list';
+        setCurrentScreen(target);
       } else {
         const msg = result.error || 'Failed to check out quantity.';
         if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -803,7 +808,8 @@ export default function App() {
             onCheckOut={handleCheckOut}
             onCancel={() => {
               setScannedItem(null);
-              setCurrentScreen('home');
+              const target = previousScreen || 'home';
+              setCurrentScreen(target);
             }}
             onOrderSummary={onOrderSummary}
             onReceiveDelivery={handleReceiveDelivery}
@@ -841,6 +847,10 @@ export default function App() {
             onOrderSummary={onOrderSummary}
             recycleDueFilter={recycleDueFilter}
             onClearRecycleDueFilter={() => setRecycleDueFilter(false)}
+            initialViewMode={inventoryViewState.viewMode}
+            initialBookFilter={inventoryViewState.bookFilter}
+            initialScrollOffset={inventoryViewState.scrollOffset}
+            onViewStateChange={(state) => setInventoryViewState(state)}
             onItemSelect={(item) => {
               setPreviousScreen('list');
               setSelectedItem(item);
@@ -849,6 +859,11 @@ export default function App() {
               } else {
                 setCurrentScreen('itemHistory');
               }
+            }}
+            onScanCode={(code) => {
+              // Remember that scan came from the list, so cancel / completion returns here
+              setPreviousScreen('list');
+              handleScanResult(code);
             }}
             onBack={() => setCurrentScreen('home')}
           />

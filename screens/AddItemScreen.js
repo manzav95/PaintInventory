@@ -60,7 +60,14 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const normalizeHex = (raw) => {
     const s = String(raw).trim().replace(/^#/, "");
     if (!s) return "";
-    if (/^[0-9A-Fa-f]{3}$/.test(s)) return "#" + s.split("").map((c) => c + c).join("");
+    if (/^[0-9A-Fa-f]{3}$/.test(s))
+      return (
+        "#" +
+        s
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      );
     if (/^[0-9A-Fa-f]{6}$/.test(s)) return "#" + s;
     return raw.trim().startsWith("#") ? raw.trim() : "#" + raw.trim();
   };
@@ -84,14 +91,17 @@ export default function AddItemScreen({ onSave, onCancel }) {
       return;
     }
 
-    const minQ = minQuantity.trim() === "" ? undefined : parseInt(minQuantity, 10);
+    const minQ =
+      minQuantity.trim() === "" ? undefined : parseInt(minQuantity, 10);
     if (minQuantity.trim() !== "" && (isNaN(minQ) || minQ < 0)) {
       Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
       return;
     }
 
     const priceNum = price.trim() === "" ? undefined : parseFloat(price);
-    const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
+    const typeVal = TYPE_OPTIONS.some((o) => o.value === type)
+      ? type
+      : undefined;
     const hexVal = normalizeHex(hexColor);
     const extCode = externalCode.trim();
     // Recycle date for custom types is set on first check-in (4 months from that date), not on add
@@ -102,7 +112,9 @@ export default function AddItemScreen({ onSave, onCancel }) {
       location: location.trim(),
       createdAt: new Date().toISOString(),
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
-      ...(priceNum != null && !isNaN(priceNum) && priceNum >= 0 && { price: priceNum }),
+      ...(priceNum != null &&
+        !isNaN(priceNum) &&
+        priceNum >= 0 && { price: priceNum }),
       ...(typeVal && { type: typeVal }),
       ...(hexVal && { hex_color: hexVal }),
       ...(extCode && { external_code: extCode }),
@@ -122,7 +134,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
             <Title style={styles.title}>Add New Paint</Title>
 
             <TextInput
-              label="Paint ID"
+              label="Paint ID *"
               value={itemId}
               onChangeText={setItemId}
               placeholder="Required – enter a custom ID"
@@ -156,6 +168,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
               onChangeText={setQuantity}
               mode="outlined"
               style={styles.input}
+              placeholder="0 (default)"
               keyboardType="numeric"
               right={<TextInput.Affix text="gal" />}
             />
@@ -167,12 +180,19 @@ export default function AddItemScreen({ onSave, onCancel }) {
               mode="outlined"
               style={styles.input}
               keyboardType="number-pad"
-              placeholder="Optional - leave blank to use app default"
+              placeholder="0 (default)"
             />
 
             {isWeb && isDesktop ? (
               <View style={styles.input}>
-                <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Type</Text>
+                <Text
+                  style={[
+                    styles.typeLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Type
+                </Text>
                 <select
                   value={type}
                   onChange={(e) => setType(e.target.value)}
@@ -196,17 +216,39 @@ export default function AddItemScreen({ onSave, onCancel }) {
               </View>
             ) : (
               <>
-                <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Type</Text>
+                <Text
+                  style={[
+                    styles.typeLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Type
+                </Text>
                 <Menu
                   visible={typeMenuOpen}
                   onDismiss={() => setTypeMenuOpen(false)}
                   anchor={
                     <Pressable
                       onPress={() => setTypeMenuOpen(true)}
-                      style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                      style={[
+                        styles.typeTrigger,
+                        {
+                          borderColor: theme.colors.outline,
+                          backgroundColor: theme.colors.surface,
+                        },
+                      ]}
                     >
-                      <Text style={{ color: type ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
-                        {type ? TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type : "Select type"}
+                      <Text
+                        style={{
+                          color: type
+                            ? theme.colors.onSurface
+                            : theme.colors.onSurfaceVariant,
+                        }}
+                      >
+                        {type
+                          ? (TYPE_OPTIONS.find((o) => o.value === type)
+                              ?.label ?? type)
+                          : "Select type"}
                       </Text>
                     </Pressable>
                   }
@@ -225,7 +267,14 @@ export default function AddItemScreen({ onSave, onCancel }) {
               </>
             )}
 
-            <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Container</Text>
+            <Text
+              style={[
+                styles.typeLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Container
+            </Text>
             {isWeb && isDesktop ? (
               <View style={styles.input}>
                 <select
@@ -257,10 +306,25 @@ export default function AddItemScreen({ onSave, onCancel }) {
                   anchor={
                     <Pressable
                       onPress={() => setLocationMenuOpen(true)}
-                      style={[styles.typeTrigger, { borderColor: theme.colors.outline, backgroundColor: theme.colors.surface }]}
+                      style={[
+                        styles.typeTrigger,
+                        {
+                          borderColor: theme.colors.outline,
+                          backgroundColor: theme.colors.surface,
+                        },
+                      ]}
                     >
-                      <Text style={{ color: location ? theme.colors.onSurface : theme.colors.onSurfaceVariant }}>
-                        {location ? CONTAINER_OPTIONS.find((o) => o.value === location)?.label ?? location : "Select container"}
+                      <Text
+                        style={{
+                          color: location
+                            ? theme.colors.onSurface
+                            : theme.colors.onSurfaceVariant,
+                        }}
+                      >
+                        {location
+                          ? (CONTAINER_OPTIONS.find((o) => o.value === location)
+                              ?.label ?? location)
+                          : "Select container"}
                       </Text>
                     </Pressable>
                   }
@@ -290,7 +354,14 @@ export default function AddItemScreen({ onSave, onCancel }) {
               left={<TextInput.Affix text="$" />}
             />
 
-            <Text style={[styles.typeLabel, { color: theme.colors.onSurfaceVariant }]}>Paint color (optional)</Text>
+            <Text
+              style={[
+                styles.typeLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Paint color (optional)
+            </Text>
             <View style={styles.colorRow}>
               <TextInput
                 label="Hex code"
@@ -306,19 +377,38 @@ export default function AddItemScreen({ onSave, onCancel }) {
                 <View style={styles.colorPickerWrap}>
                   <input
                     type="color"
-                    value={hexColor && /^#?[0-9A-Fa-f]{6}$/.test(hexColor.trim()) ? (hexColor.trim().startsWith("#") ? hexColor.trim() : "#" + hexColor.trim()) : "#808080"}
+                    value={
+                      hexColor && /^#?[0-9A-Fa-f]{6}$/.test(hexColor.trim())
+                        ? hexColor.trim().startsWith("#")
+                          ? hexColor.trim()
+                          : "#" + hexColor.trim()
+                        : "#808080"
+                    }
                     onChange={handleColorPickerChange}
                     style={styles.nativeColorInput}
                     title="Pick color"
                   />
-                  <Text style={[styles.colorPickerLabel, { color: theme.colors.onSurfaceVariant }]}>Pick</Text>
+                  <Text
+                    style={[
+                      styles.colorPickerLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Pick
+                  </Text>
                 </View>
               )}
             </View>
 
             {isCustomType && (
-              <Text style={[styles.recycleHint, { color: theme.colors.onSurfaceVariant }]}>
-                Recycle date is set automatically on first check-in (4 months from that date).
+              <Text
+                style={[
+                  styles.recycleHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Recycle date is set automatically on first check-in (4 months
+                from that date).
               </Text>
             )}
 

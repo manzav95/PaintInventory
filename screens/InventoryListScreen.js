@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -21,6 +21,7 @@ import {
   DataTable,
   Chip,
   Title,
+  TextInput,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 
@@ -50,6 +51,11 @@ export default function InventoryListScreen({
   onOrderSummary = {},
   recycleDueFilter = false,
   onClearRecycleDueFilter,
+  onScanCode,
+  initialViewMode = "inventory",
+  initialBookFilter,
+  initialScrollOffset = 0,
+  onViewStateChange,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -68,10 +74,47 @@ export default function InventoryListScreen({
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
-  const [viewMode, setViewMode] = useState("inventory"); // 'inventory' | 'colorBook' — default to standard inventory
+  const [viewMode, setViewMode] = useState(initialViewMode || "inventory"); // 'inventory' | 'colorBook' — default to standard inventory
   const [bookFilter, setBookFilter] = useState(
-    recycleDueFilter ? "custom" : "standard",
+    initialBookFilter || (recycleDueFilter ? "custom" : "standard"),
   ); // 'standard' | 'custom'
+  const [scanInput, setScanInput] = useState("");
+  const scanInputRef = useRef(null);
+  const [scrollOffset, setScrollOffset] = useState(initialScrollOffset || 0);
+  const listRef = useRef(null);
+  const hasRestoredScrollRef = useRef(false);
+
+  const notifyViewState = (next = {}) => {
+    if (!onViewStateChange) return;
+    onViewStateChange({
+      viewMode,
+      bookFilter,
+      scrollOffset,
+      ...next,
+    });
+  };
+
+  // Keep scan input focused on web so a hardware scanner can be used from anywhere.
+  useEffect(() => {
+    if (onScanCode && isWeb && scanInputRef.current) {
+      scanInputRef.current.focus();
+    }
+  }, [onScanCode, isWeb]);
+
+  // Restore scroll position once when mounting
+  useEffect(() => {
+    if (
+      !hasRestoredScrollRef.current &&
+      listRef.current &&
+      initialScrollOffset > 0
+    ) {
+      listRef.current.scrollToOffset({
+        offset: initialScrollOffset,
+        animated: false,
+      });
+      hasRestoredScrollRef.current = true;
+    }
+  }, [initialScrollOffset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +132,10 @@ export default function InventoryListScreen({
   }, []);
 
   useEffect(() => {
-    if (recycleDueFilter) setBookFilter("custom");
+    if (recycleDueFilter) {
+      setBookFilter("custom");
+      notifyViewState({ bookFilter: "custom" });
+    }
   }, [recycleDueFilter]);
 
   const handleBack = () => {
@@ -1690,6 +1736,37 @@ export default function InventoryListScreen({
           autoCapitalize="none"
           blurOnSubmit={false}
         />
+        {onScanCode && isWeb && (
+          <TextInput
+            label="Scan material code"
+            value={scanInput}
+            onChangeText={setScanInput}
+            ref={scanInputRef}
+            mode="outlined"
+            style={styles.scanInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="Ready for scanner input"
+            onSubmitEditing={() => {
+              const trimmed = scanInput.trim();
+              if (trimmed && onScanCode) {
+                onScanCode(trimmed);
+                setScanInput("");
+                // After a scan, keep current view/scroll in parent state
+                notifyViewState();
+              }
+            }}
+            blurOnSubmit={false}
+            keyboardType="default"
+            onBlur={() => {
+              // On web, gently refocus so scanner input stays ready.
+              if (!onScanCode || !isWeb) return;
+              setTimeout(() => {
+                scanInputRef.current?.focus();
+              }, 150);
+            }}
+          />
+        )}
       </View>
       {recycleDueFilter && (
         <View style={styles.recycleDueBanner}>
@@ -1730,6 +1807,7 @@ export default function InventoryListScreen({
           </View>
         ) : (
           <FlatList
+            ref={listRef}
             key={viewMode}
             data={
               viewMode === "inventory"
@@ -1757,6 +1835,12 @@ export default function InventoryListScreen({
             }
             keyboardDismissMode="none"
             keyboardShouldPersistTaps="handled"
+            onScroll={(e) => {
+              const y = e?.nativeEvent?.contentOffset?.y ?? 0;
+              setScrollOffset(y);
+              notifyViewState({ scrollOffset: y });
+            }}
+            scrollEventThrottle={16}
           />
         )}
       </View>
@@ -1835,6 +1919,9 @@ const styles = StyleSheet.create({
   },
   searchbar: {
     margin: 0,
+  },
+  scanInput: {
+    marginTop: 8,
   },
   filterSummaryRow: {
     marginBottom: 4,
