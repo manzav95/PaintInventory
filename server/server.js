@@ -332,6 +332,34 @@ app.post('/api/settings/overtime', async (req, res) => {
   }
 });
 
+// Get global paint external code suffix (used to derive bucket barcodes)
+app.get('/api/settings/paint-external-suffix', async (req, res) => {
+  try {
+    const value = await db.getSetting('paint_external_suffix');
+    res.json({ suffix: value != null ? String(value) : '' });
+  } catch (error) {
+    console.error('Error fetching paint external suffix:', error);
+    res.status(500).json({ error: 'Failed to fetch paint external suffix' });
+  }
+});
+
+// Set global paint external code suffix (admin only)
+app.post('/api/settings/paint-external-suffix', async (req, res) => {
+  try {
+    const { suffix, userName } = req.body || {};
+    const raw = (suffix ?? '').toString().trim();
+    // Allow empty to clear; otherwise keep as-is (can be hyphens/digits/etc.)
+    await db.setSetting('paint_external_suffix', raw);
+    await db.addAuditLog('set_paint_suffix', null, userName || 'unknown', {
+      suffix: raw,
+    });
+    res.json({ success: true, suffix: raw });
+  } catch (error) {
+    console.error('Error setting paint external suffix:', error);
+    res.status(500).json({ error: 'Failed to set paint external suffix' });
+  }
+});
+
 // Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {

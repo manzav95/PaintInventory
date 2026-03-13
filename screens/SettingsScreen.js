@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -16,9 +16,11 @@ import {
   Divider,
   useTheme,
   TextInput,
+  ActivityIndicator,
 } from "react-native-paper";
 import { IconButton } from "react-native-paper";
 import version from "../version";
+import InventoryService from "../services/inventoryService";
 
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
@@ -45,8 +47,25 @@ export default function SettingsScreen({
   const { width } = useWindowDimensions();
   const desktopBreakpoint = 700;
   const isDesktop = isWeb && width >= desktopBreakpoint;
-  const [exportFromDate, setExportFromDate] = useState(() => formatDateForInput(new Date()));
-  const [exportToDate, setExportToDate] = useState(() => formatDateForInput(new Date()));
+  const [exportFromDate, setExportFromDate] = useState(() =>
+    formatDateForInput(new Date()),
+  );
+  const [exportToDate, setExportToDate] = useState(() =>
+    formatDateForInput(new Date()),
+  );
+  const [paintSuffix, setPaintSuffix] = useState("");
+  const [savingSuffix, setSavingSuffix] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const suffix = await InventoryService.getPaintExternalSuffix();
+        setPaintSuffix(suffix || "");
+      } catch (e) {
+        console.error("Load paint suffix error:", e);
+      }
+    })();
+  }, []);
 
   return (
     <View
@@ -121,7 +140,7 @@ export default function SettingsScreen({
                       { color: theme.colors.onSurfaceVariant },
                     ]}
                   >
-                    Logged in as: {" "}{userName || "Unknown"}
+                    Logged in as: {userName || "Unknown"}
                   </Text>
                 </View>
               </View>
@@ -159,7 +178,9 @@ export default function SettingsScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      When on, Material Usage log day/swing shift times use OT boundaries (day 6am–4:25pm, swing 4:26pm–2:30am). When off, standard times (day 6am–3:25pm, swing 3:26pm–12:30am). Applies to all users.
+                      Material Usage Overtime
+                      {"\n"}On: Day 6:00am–4:25pm · Swing 4:26pm–2:30am
+                      {"\n"}Off: Day 6:00am–3:25pm · Swing 3:26pm–12:30am
                     </Text>
                   </View>
                   <Switch
@@ -212,25 +233,117 @@ export default function SettingsScreen({
                 />
                 <Button
                   mode="outlined"
-                  onPress={() => onExportMaterialUsageExcel?.(exportFromDate, exportToDate)}
+                  onPress={() =>
+                    onExportMaterialUsageExcel?.(exportFromDate, exportToDate)
+                  }
                   style={styles.adminButton}
                   icon="file-excel"
                 >
                   Export Material Usage to Excel
                 </Button>
+                <Divider style={styles.divider} />
+                <Text
+                  style={[
+                    styles.settingLabel,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  Paint external code suffix
+                </Text>
+                <Text
+                  style={[
+                    styles.settingDescription,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Optional ending sequence automatically appended to Paint and
+                  Custom Paint IDs (for bucket barcodes). Example:{" "}
+                  <Text style={{ fontFamily: "monospace" }}>-794394</Text> turns
+                  ID{" "}
+                  <Text style={{ fontFamily: "monospace" }}>H66LNL49323</Text>{" "}
+                  into external code{" "}
+                  <Text style={{ fontFamily: "monospace" }}>
+                    H66LNL49323-794394
+                  </Text>
+                  .
+                </Text>
+                <TextInput
+                  label="Suffix (optional)"
+                  value={paintSuffix}
+                  onChangeText={setPaintSuffix}
+                  mode="outlined"
+                  style={styles.adminInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder=""
+                  editable={!savingSuffix}
+                />
+                <Button
+                  mode="outlined"
+                  style={styles.adminButton}
+                  disabled={savingSuffix}
+                  onPress={async () => {
+                    try {
+                      setSavingSuffix(true);
+                      const result = await InventoryService.setPaintExternalSuffix(
+                        paintSuffix,
+                        userName || "unknown",
+                      );
+                      if (!result?.success) {
+                        Alert.alert(
+                          "Error",
+                          result?.error || "Failed to save suffix.",
+                        );
+                      } else {
+                        const confirmed =
+                          await InventoryService.getPaintExternalSuffix();
+                        setPaintSuffix(confirmed || "");
+                        Alert.alert("Saved", "Paint external suffix updated.");
+                      }
+                    } catch (e) {
+                      console.error("Save paint suffix error:", e);
+                      Alert.alert(
+                        "Error",
+                        e?.message || "Failed to save suffix.",
+                      );
+                    } finally {
+                      setSavingSuffix(false);
+                    }
+                  }}
+                >
+                  {savingSuffix ? "Saving..." : "Save Suffix"}
+                </Button>
               </Card.Content>
             </Card>
           )}
           <View style={styles.footer}>
-            <Text style={[styles.footerSignedIn, { color: theme.colors.onSurfaceVariant }]}>
+            <Text
+              style={[
+                styles.footerSignedIn,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
               Signed in as {userName || "Unknown"}
             </Text>
-            <Text style={[styles.footerVersion, { color: theme.colors.onSurfaceVariant }]}>
+            <Text
+              style={[
+                styles.footerVersion,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
               v1.{version?.build ?? "?"}
             </Text>
           </View>
         </View>
       </ScrollView>
+      {savingSuffix && (
+        <View style={styles.suffixSavingOverlay}>
+          <View style={styles.suffixSavingBox}>
+            <ActivityIndicator size="small" />
+            <Text style={styles.suffixSavingText}>Saving suffix…</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -328,5 +441,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     opacity: 0.8,
+  },
+  suffixSavingOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  suffixSavingBox: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: "#222831",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  suffixSavingText: {
+    color: "#fff",
+    fontSize: 14,
   },
 });

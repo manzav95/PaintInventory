@@ -209,11 +209,31 @@ class Database {
   }
 
   async getItem(itemId) {
-    const result = await this.pool.query(
+    const raw = itemId != null ? String(itemId).trim() : "";
+    if (!raw) return null;
+
+    // First try direct match on id or external_code
+    let result = await this.pool.query(
       "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
-      [itemId],
+      [raw],
     );
-    return result.rows[0] || null;
+    if (result.rows[0]) return result.rows[0];
+
+    // If not found, and a global paint suffix is configured, try stripping it
+    const suffix = await this.getSetting("paint_external_suffix");
+    const trimmedSuffix = suffix != null ? String(suffix).trim() : "";
+    if (trimmedSuffix && raw.endsWith(trimmedSuffix)) {
+      const base = raw.slice(0, -trimmedSuffix.length);
+      if (base) {
+        result = await this.pool.query(
+          "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
+          [base],
+        );
+        if (result.rows[0]) return result.rows[0];
+      }
+    }
+
+    return null;
   }
 
   async addItem(item) {
@@ -226,9 +246,18 @@ class Database {
     const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
     const hexColor = item.hex_color != null && String(item.hex_color).trim() !== "" ? String(item.hex_color).trim() : null;
     const recycleDate = item.recycle_date != null && String(item.recycle_date).trim() !== "" ? String(item.recycle_date).trim() : null;
-    const externalCode = item.external_code != null && String(item.external_code).trim() !== ""
+    let externalCode = item.external_code != null && String(item.external_code).trim() !== ""
       ? String(item.external_code).trim()
       : null;
+    // If no explicit external code provided and this is a paint/custom_paint,
+    // auto-derive one from the global suffix setting: <id><suffix>.
+    if (!externalCode && (type === "paint" || type === "custom_paint")) {
+      const suffix = await this.getSetting("paint_external_suffix");
+      const trimmed = suffix != null ? String(suffix).trim() : "";
+      if (trimmed) {
+        externalCode = String(item.id).trim() + trimmed;
+      }
+    }
     await this.pool.query(
       `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,

@@ -124,6 +124,28 @@ class InventoryService {
     }
   }
 
+  async getPaintExternalSuffix() {
+    try {
+      const result = await _fetch('/api/settings/paint-external-suffix');
+      return (result && typeof result.suffix === 'string') ? result.suffix : '';
+    } catch (error) {
+      console.error('Error getting paint external suffix:', error);
+      return '';
+    }
+  }
+
+  async setPaintExternalSuffix(suffix, userName) {
+    try {
+      await _fetch('/api/settings/paint-external-suffix', {
+        method: 'POST',
+        body: JSON.stringify({ suffix, userName }),
+      });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   async generateNextId() {
     try {
       const result = await _fetch('/api/settings/next-id');

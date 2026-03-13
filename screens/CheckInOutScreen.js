@@ -156,33 +156,37 @@ export default function CheckInOutScreen({
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <View style={styles.centeredBlock}>
-        <View style={[styles.hexSection, { backgroundColor: sectionBg }]}>
-          <View style={isDesktop && styles.webWrapper}>
-            <Text
-              style={[
-                styles.title,
-                { color: textOnHex ? textOnHex.primary : theme.colors.onSurface },
-              ]}
-            >
-              {item.name || "Paint Item"}
-            </Text>
-            <Text
-              style={[
-                styles.subtitle,
-                { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
-              ]}
-            >
-              ID: {item.id}
-            </Text>
-            <Text
-              style={[
-                styles.currentQty,
-                { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Current Quantity: {item.quantity || 0} gallons
-            </Text>
-          </View>
+        <View
+          style={[
+            styles.hexSection,
+            isDesktop && styles.webWrapper,
+            { backgroundColor: sectionBg },
+          ]}
+        >
+          <Text
+            style={[
+              styles.title,
+              { color: textOnHex ? textOnHex.primary : theme.colors.onSurface },
+            ]}
+          >
+            {item.name || "Paint Item"}
+          </Text>
+          <Text
+            style={[
+              styles.subtitle,
+              { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
+            ]}
+          >
+            ID: {item.id}
+          </Text>
+          <Text
+            style={[
+              styles.currentQty,
+              { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Current Quantity: {item.quantity || 0} gallons
+          </Text>
         </View>
 
         <View style={isDesktop && styles.webWrapper}>
