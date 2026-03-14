@@ -642,14 +642,49 @@ class Database {
     return result.rows[0] ? parseInt(result.rows[0].count, 10) : 0;
   }
 
+  /**
+   * Same UTC-based "late" rule as client isLateOrder: late when today (UTC)
+   * is on or after the day after expected (UTC). Keeps home badge and deliveries tab in sync.
+   */
+  static isOrderLate(order) {
+    if (!order || order.status !== "open") return false;
+    const placedAt = order.placed_at;
+    if (!placedAt) return false;
+    const s = typeof placedAt === "string" ? placedAt.trim().slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const [y, m, d] = s.split("-").map(Number);
+    const placedUtc = Date.UTC(y, m - 1, d);
+    const days = Math.max(0, parseInt(order.lead_time_days, 10) || 7);
+    const expectedUtc = new Date(placedUtc);
+    expectedUtc.setUTCDate(expectedUtc.getUTCDate() + days);
+    const dayAfterExpectedUtc = Date.UTC(
+      expectedUtc.getUTCFullYear(),
+      expectedUtc.getUTCMonth(),
+      expectedUtc.getUTCDate() + 1,
+    );
+    const now = new Date();
+    const todayUtcDay = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
+    return todayUtcDay >= dayAfterExpectedUtc;
+  }
+
   async getLateOrderCount() {
     const result = await this.pool.query(
-      `SELECT COUNT(*) AS count
-       FROM orders o
-       WHERE o.status = 'open'
-         AND (o.placed_at::timestamp + (COALESCE(o.lead_time_days, 5) + 1) * interval '1 day')::date < current_date`,
+      "SELECT id, placed_at, lead_time_days, status FROM orders WHERE status = 'open'",
     );
-    return result.rows[0] ? parseInt(result.rows[0].count, 10) : 0;
+    let count = 0;
+    for (const row of result.rows) {
+      const order = {
+        status: row.status,
+        placed_at: row.placed_at,
+        lead_time_days: row.lead_time_days,
+      };
+      if (Database.isOrderLate(order)) count += 1;
+    }
+    return count;
   }
 
   async updateOrderReceivedLines(orderId, lines) {

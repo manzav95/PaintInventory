@@ -37,6 +37,26 @@ const FILTER_COLORS = {
 const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst", "stain"];
 const LEAD_TIME_7_DAY_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
 
+// Category labels for PO cards: AP (clear, primer, catalyst, stain) and MIXING (paint, dye, custom_paint, custom_stain)
+const AP_TYPES = ["clear", "primer", "catalyst", "stain"];
+const MIXING_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
+
+function getOrderCategoryLabel(order, inventory) {
+  if (!order?.lines?.length || !inventory?.length) return null;
+  let hasAp = false;
+  let hasMixing = false;
+  for (const line of order.lines) {
+    const item = inventory.find((i) => String(i.id) === String(line.itemId));
+    const t = item?.type ? String(item.type).toLowerCase() : "";
+    if (AP_TYPES.includes(t)) hasAp = true;
+    if (MIXING_TYPES.includes(t)) hasMixing = true;
+  }
+  if (hasAp && hasMixing) return "AP · MIXING";
+  if (hasAp) return "AP";
+  if (hasMixing) return "MIXING";
+  return null;
+}
+
 function getDefaultLeadTimeDays(lines, inventory) {
   const itemIds = (lines || [])
     .map((l) => (l.itemId || "").trim())
@@ -155,17 +175,37 @@ function isExistingOrder(order) {
   return lines.every((l) => (parseInt(l.received_quantity, 10) || 0) === 0);
 }
 
+/** ETA = placed_at + lead_time_days. Used for sorting (earliest first). */
+function getExpectedTime(order) {
+  const placed = placedAtToDate(order.placed_at);
+  if (!placed || Number.isNaN(placed.getTime())) return null;
+  const expected = expectedDate(order.placed_at, order.lead_time_days);
+  return expected ? expected.getTime() : null;
+}
+
+/**
+ * Late = today (UTC) is on or after the day after expected (UTC).
+ * Matches server getLateOrderCount so home badge and deliveries tab stay in sync.
+ */
 function isLateOrder(order) {
   if (order.status !== "open") return false;
   const placed = placedAtToDate(order.placed_at);
   if (!placed || Number.isNaN(placed.getTime())) return false;
   const days = parseInt(order.lead_time_days, 10) || 7;
   const expected = new Date(placed);
-  expected.setDate(expected.getDate() + days);
-  const dayAfterExpected = new Date(expected);
-  dayAfterExpected.setDate(dayAfterExpected.getDate() + 1);
-  dayAfterExpected.setHours(23, 59, 59, 999);
-  return Date.now() > dayAfterExpected.getTime();
+  expected.setUTCDate(expected.getUTCDate() + days);
+  const dayAfterExpectedUtc = Date.UTC(
+    expected.getUTCFullYear(),
+    expected.getUTCMonth(),
+    expected.getUTCDate() + 1,
+  );
+  const todayUtc = new Date();
+  const todayUtcDay = Date.UTC(
+    todayUtc.getUTCFullYear(),
+    todayUtc.getUTCMonth(),
+    todayUtc.getUTCDate(),
+  );
+  return todayUtcDay >= dayAfterExpectedUtc;
 }
 
 export default function UpcomingOrdersScreen({
@@ -199,6 +239,7 @@ export default function UpcomingOrdersScreen({
   const [receivedLineQtys, setReceivedLineQtys] = useState({});
   // track which week/month groups are expanded; default will be top group only
   const [expandedGroupKeys, setExpandedGroupKeys] = useState([]);
+  const [poSearchQuery, setPoSearchQuery] = useState("");
 
   useEffect(() => {
     if (initialFilter) setOrderFilter(initialFilter);
@@ -404,6 +445,32 @@ export default function UpcomingOrdersScreen({
     return item ? item.name || itemId : itemId;
   };
 
+  const orderMatchesSearch = (order, query, inv) => {
+    const q = (query || "").trim().toLowerCase();
+    if (!q) return true;
+    // Order type: query as prefix of "ap" or "mixing" matches those orders (e.g. "m", "mi", "mix" → Mixing; "a", "ap" → AP)
+    const label = getOrderCategoryLabel(order, inv);
+    if (label === "AP" && "ap".startsWith(q)) return true;
+    if (label === "MIXING" && "mixing".startsWith(q)) return true;
+    const po = (order.po_number || "").trim().toLowerCase();
+    if (po && po.includes(q)) return true;
+    for (const line of order.lines || []) {
+      const itemId = String(line.itemId || line.item_id || "");
+      const item = (inv || []).find((i) => String(i.id) === itemId);
+      if (!item) {
+        if (itemId.toLowerCase().includes(q)) return true;
+        continue;
+      }
+      const name = (item.name || "").toLowerCase();
+      const id = String(item.id || "").toLowerCase();
+      const ext = (item.external_code || "").trim().toLowerCase();
+      if (name && name.includes(q)) return true;
+      if (id && id.includes(q)) return true;
+      if (ext && ext.includes(q)) return true;
+    }
+    return false;
+  };
+
   const filteredOrders = (orders || []).filter((order) => {
     if (!order) return false;
     if (orderFilter === "all") return true;
@@ -446,19 +513,23 @@ export default function UpcomingOrdersScreen({
     return parts.join(" · ");
   };
 
-  const ordersSortedByPlaced = useMemo(() => {
+  /** All POs sorted by ETA ascending: earliest ETA at top, latest at bottom. Search filter applied. */
+  const ordersSortedByEta = useMemo(() => {
     const list = dateViewMode != null ? orders || [] : filteredOrders;
-    return [...list].sort((a, b) => {
-      const pa = placedAtToDate(a.placed_at)?.getTime() ?? 0;
-      const pb = placedAtToDate(b.placed_at)?.getTime() ?? 0;
-      return pb - pa;
+    const afterSearch = list.filter((o) =>
+      orderMatchesSearch(o, poSearchQuery, inventory),
+    );
+    return [...afterSearch].sort((a, b) => {
+      const etaA = getExpectedTime(a) ?? Number.MAX_SAFE_INTEGER;
+      const etaB = getExpectedTime(b) ?? Number.MAX_SAFE_INTEGER;
+      return etaA - etaB;
     });
-  }, [dateViewMode, orders, filteredOrders]);
+  }, [dateViewMode, orders, filteredOrders, poSearchQuery, inventory]);
 
   const groupedByWeek = useMemo(() => {
     if (dateViewMode !== "week") return [];
     const groups = new Map();
-    for (const order of ordersSortedByPlaced) {
+    for (const order of ordersSortedByEta) {
       const placed = placedAtToDate(order.placed_at);
       if (!placed || Number.isNaN(placed.getTime())) continue;
       const weekStart = getWeekStart(placed);
@@ -472,15 +543,18 @@ export default function UpcomingOrdersScreen({
       .map(([_, v]) => v)
       .sort((a, b) => b.weekStart.getTime() - a.weekStart.getTime());
     arr.forEach((g) => {
+      g.orders.sort(
+        (a, b) => (getExpectedTime(a) ?? 0) - (getExpectedTime(b) ?? 0),
+      );
       g.totalsByType = getTotalsByType(g.orders);
     });
     return arr;
-  }, [dateViewMode, ordersSortedByPlaced, inventory]);
+  }, [dateViewMode, ordersSortedByEta, inventory]);
 
   const groupedByMonth = useMemo(() => {
     if (dateViewMode !== "month") return [];
     const groups = new Map();
-    for (const order of ordersSortedByPlaced) {
+    for (const order of ordersSortedByEta) {
       const placed = placedAtToDate(order.placed_at);
       if (!placed || Number.isNaN(placed.getTime())) continue;
       const monthStart = getMonthStart(placed);
@@ -496,10 +570,13 @@ export default function UpcomingOrdersScreen({
       .map(([_, v]) => v)
       .sort((a, b) => b.monthStart.getTime() - a.monthStart.getTime());
     arr.forEach((g) => {
+      g.orders.sort(
+        (a, b) => (getExpectedTime(a) ?? 0) - (getExpectedTime(b) ?? 0),
+      );
       g.totalsByType = getTotalsByType(g.orders);
     });
     return arr;
-  }, [dateViewMode, ordersSortedByPlaced, inventory]);
+  }, [dateViewMode, ordersSortedByEta, inventory]);
 
   const renderOrderCard = (order) => {
     const placed = placedAtToDate(order.placed_at);
@@ -510,6 +587,7 @@ export default function UpcomingOrdersScreen({
     const orderIsLate = isLateOrder(order);
     const orderIsBackOrder = isBackOrder(order);
     const singleReceivedDate = getSingleReceivedDate(order);
+    const categoryLabel = getOrderCategoryLabel(order, inventory);
     return (
       <Card
         key={order.id}
@@ -522,13 +600,35 @@ export default function UpcomingOrdersScreen({
         <Card.Content>
           <View style={styles.orderHeader}>
             <View style={styles.orderHeaderLeft}>
-              <Text
-                style={[styles.poNumber, { color: theme.colors.onSurface }]}
-              >
-                {order.po_number && String(order.po_number).trim()
-                  ? `PO #${order.po_number}`
-                  : "No PO (add in edit)"}
-              </Text>
+              <View style={styles.poNumberRow}>
+                <Text
+                  style={[styles.poNumber, { color: theme.colors.onSurface }]}
+                >
+                  {order.po_number && String(order.po_number).trim()
+                    ? `PO #${order.po_number}`
+                    : "No PO (add in edit)"}
+                </Text>
+                {categoryLabel != null && (
+                  <View
+                    style={[
+                      styles.categoryBadge,
+                      {
+                        backgroundColor:
+                          theme.colors.surfaceVariant || "#e0e0e0",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryBadgeText,
+                        { color: theme.colors.onSurfaceVariant || "#555" },
+                      ]}
+                    >
+                      {categoryLabel}
+                    </Text>
+                  </View>
+                )}
+              </View>
               <View style={styles.orderMetaBlock}>
                 <Text
                   style={[
@@ -786,7 +886,9 @@ export default function UpcomingOrdersScreen({
           onPress={onBack}
           iconColor={primaryColor}
         />
-        <Title style={styles.title}>Upcoming Deliveries</Title>
+        <Title style={[styles.title, isDesktop && styles.titleCentered]}>
+          Upcoming Deliveries
+        </Title>
         {!isDesktop && (
           <View style={styles.headerRight}>
             {!showForm ? (
@@ -811,6 +913,14 @@ export default function UpcomingOrdersScreen({
       >
         {!showForm && (
           <>
+            <TextInput
+              mode="outlined"
+              placeholder="Search by PO, name, ID, or external code"
+              value={poSearchQuery}
+              onChangeText={setPoSearchQuery}
+              style={styles.searchInput}
+              left={<TextInput.Icon icon="magnify" />}
+            />
             <Text
               style={[
                 styles.dateViewLabel,
@@ -868,7 +978,12 @@ export default function UpcomingOrdersScreen({
           </>
         )}
         {isDesktop && showForm && (
-          <View style={[styles.filterRow, { justifyContent: "flex-end", marginBottom: 8 }]}>
+          <View
+            style={[
+              styles.filterRow,
+              { justifyContent: "flex-end", marginBottom: 8 },
+            ]}
+          >
             <Button mode="outlined" onPress={closeForm} compact>
               Cancel
             </Button>
@@ -1057,7 +1172,9 @@ export default function UpcomingOrdersScreen({
                 onPress={() => setOrderFilter("all")}
                 style={styles.filterBtn}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={orderFilter === "all" ? theme.colors.primary : undefined}
+                buttonColor={
+                  orderFilter === "all" ? theme.colors.primary : undefined
+                }
                 textColor={orderFilter === "all" ? "#fff" : undefined}
               >
                 All
@@ -1066,10 +1183,26 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "existing" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("existing")}
-                style={[styles.filterBtn, orderFilter !== "existing" && FILTER_COLORS.existing && { borderColor: FILTER_COLORS.existing }]}
+                style={[
+                  styles.filterBtn,
+                  orderFilter !== "existing" &&
+                    FILTER_COLORS.existing && {
+                      borderColor: FILTER_COLORS.existing,
+                    },
+                ]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={orderFilter === "existing" ? FILTER_COLORS.existing : undefined}
-                textColor={orderFilter === "existing" ? "#fff" : orderFilter !== "existing" && FILTER_COLORS.existing ? FILTER_COLORS.existing : undefined}
+                buttonColor={
+                  orderFilter === "existing"
+                    ? FILTER_COLORS.existing
+                    : undefined
+                }
+                textColor={
+                  orderFilter === "existing"
+                    ? "#fff"
+                    : orderFilter !== "existing" && FILTER_COLORS.existing
+                      ? FILTER_COLORS.existing
+                      : undefined
+                }
               >
                 Open POs
               </Button>
@@ -1077,10 +1210,26 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "back_orders" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("back_orders")}
-                style={[styles.filterBtn, orderFilter !== "back_orders" && FILTER_COLORS.back_orders && { borderColor: FILTER_COLORS.back_orders }]}
+                style={[
+                  styles.filterBtn,
+                  orderFilter !== "back_orders" &&
+                    FILTER_COLORS.back_orders && {
+                      borderColor: FILTER_COLORS.back_orders,
+                    },
+                ]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={orderFilter === "back_orders" ? FILTER_COLORS.back_orders : undefined}
-                textColor={orderFilter === "back_orders" ? "#fff" : orderFilter !== "back_orders" && FILTER_COLORS.back_orders ? FILTER_COLORS.back_orders : undefined}
+                buttonColor={
+                  orderFilter === "back_orders"
+                    ? FILTER_COLORS.back_orders
+                    : undefined
+                }
+                textColor={
+                  orderFilter === "back_orders"
+                    ? "#fff"
+                    : orderFilter !== "back_orders" && FILTER_COLORS.back_orders
+                      ? FILTER_COLORS.back_orders
+                      : undefined
+                }
               >
                 Back Orders
               </Button>
@@ -1088,10 +1237,26 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "late_orders" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("late_orders")}
-                style={[styles.filterBtn, orderFilter !== "late_orders" && FILTER_COLORS.late_orders && { borderColor: FILTER_COLORS.late_orders }]}
+                style={[
+                  styles.filterBtn,
+                  orderFilter !== "late_orders" &&
+                    FILTER_COLORS.late_orders && {
+                      borderColor: FILTER_COLORS.late_orders,
+                    },
+                ]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={orderFilter === "late_orders" ? FILTER_COLORS.late_orders : undefined}
-                textColor={orderFilter === "late_orders" ? "#fff" : orderFilter !== "late_orders" && FILTER_COLORS.late_orders ? FILTER_COLORS.late_orders : undefined}
+                buttonColor={
+                  orderFilter === "late_orders"
+                    ? FILTER_COLORS.late_orders
+                    : undefined
+                }
+                textColor={
+                  orderFilter === "late_orders"
+                    ? "#fff"
+                    : orderFilter !== "late_orders" && FILTER_COLORS.late_orders
+                      ? FILTER_COLORS.late_orders
+                      : undefined
+                }
               >
                 Late Orders
               </Button>
@@ -1099,10 +1264,26 @@ export default function UpcomingOrdersScreen({
                 mode={orderFilter === "completed" ? "contained" : "outlined"}
                 compact
                 onPress={() => setOrderFilter("completed")}
-                style={[styles.filterBtn, orderFilter !== "completed" && FILTER_COLORS.completed && { borderColor: FILTER_COLORS.completed }]}
+                style={[
+                  styles.filterBtn,
+                  orderFilter !== "completed" &&
+                    FILTER_COLORS.completed && {
+                      borderColor: FILTER_COLORS.completed,
+                    },
+                ]}
                 disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={orderFilter === "completed" ? FILTER_COLORS.completed : undefined}
-                textColor={orderFilter === "completed" ? "#fff" : orderFilter !== "completed" && FILTER_COLORS.completed ? FILTER_COLORS.completed : undefined}
+                buttonColor={
+                  orderFilter === "completed"
+                    ? FILTER_COLORS.completed
+                    : undefined
+                }
+                textColor={
+                  orderFilter === "completed"
+                    ? "#fff"
+                    : orderFilter !== "completed" && FILTER_COLORS.completed
+                      ? FILTER_COLORS.completed
+                      : undefined
+                }
               >
                 Completed POs
               </Button>
@@ -1113,8 +1294,9 @@ export default function UpcomingOrdersScreen({
                   ? groupedByWeek.length
                   : dateViewMode === "month"
                     ? groupedByMonth.length
-                    : ordersSortedByPlaced.length;
+                    : ordersSortedByEta.length;
               const isEmpty = emptyCount === 0;
+              const hasSearchFilter = (poSearchQuery || "").trim() !== "";
               if (isEmpty) {
                 return (
                   <Card
@@ -1130,20 +1312,29 @@ export default function UpcomingOrdersScreen({
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        {dateViewMode != null && "No POs yet."}
-                        {dateViewMode === null &&
+                        {hasSearchFilter &&
+                          "No POs match your search."}
+                        {!hasSearchFilter &&
+                          dateViewMode != null &&
+                          "No POs yet."}
+                        {!hasSearchFilter &&
+                          dateViewMode === null &&
                           orderFilter === "all" &&
                           "No POs yet."}
-                        {dateViewMode === null &&
+                        {!hasSearchFilter &&
+                          dateViewMode === null &&
                           orderFilter === "existing" &&
                           "No open POs yet."}
-                        {dateViewMode === null &&
+                        {!hasSearchFilter &&
+                          dateViewMode === null &&
                           orderFilter === "back_orders" &&
                           "No back orders (partial deliveries)."}
-                        {dateViewMode === null &&
+                        {!hasSearchFilter &&
+                          dateViewMode === null &&
                           orderFilter === "late_orders" &&
                           "No late orders."}
-                        {dateViewMode === null &&
+                        {!hasSearchFilter &&
+                          dateViewMode === null &&
                           orderFilter === "completed" &&
                           "No completed POs yet."}
                       </Text>
@@ -1269,9 +1460,7 @@ export default function UpcomingOrdersScreen({
                   );
                 });
               }
-              return ordersSortedByPlaced.map((order) =>
-                renderOrderCard(order),
-              );
+              return ordersSortedByEta.map((order) => renderOrderCard(order));
             })()}
           </>
         ) : null}
@@ -1388,11 +1577,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
     gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   title: {
     fontSize: 20,
     fontWeight: "bold",
     flex: 1,
+  },
+  titleCentered: {
+    textAlign: "center",
   },
   headerRight: {
     marginLeft: "auto",
@@ -1510,6 +1704,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 6,
   },
+  searchInput: {
+    marginBottom: 12,
+    backgroundColor: "transparent",
+  },
   filterRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1573,10 +1771,25 @@ const styles = StyleSheet.create({
     minWidth: 0,
     marginRight: 12,
   },
+  poNumberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 6,
+  },
   poNumber: {
     fontSize: 17,
     fontWeight: "700",
-    marginBottom: 6,
+  },
+  categoryBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  categoryBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
   },
   orderMetaBlock: {
     marginBottom: 4,

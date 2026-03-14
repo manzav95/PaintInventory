@@ -62,6 +62,7 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionLoadingMessage, setActionLoadingMessage] = useState('');
+  const [scanLookupLoading, setScanLookupLoading] = useState(false);
   const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
   const [onOrderSummary, setOnOrderSummary] = useState({});
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
@@ -300,31 +301,36 @@ export default function App() {
       return;
     }
 
-    const normalizedId = (() => {
-      const raw = itemId.toString().trim().toUpperCase();
-      // If it's a 1-4 digit number (legacy format), pad it to 4 digits for backward compatibility
-      if (/^\d{1,4}$/.test(raw)) return raw.padStart(4, '0');
-      // If it's already in Sherwin Williams format, return as-is
-      if (/^H66[A-Z]{3}\d{5}$/.test(raw)) return raw;
-      // Otherwise return as-is (could be partial or other format)
-      return raw;
-    })();
+    setScanLookupLoading(true);
+    try {
+      const normalizedId = (() => {
+        const raw = itemId.toString().trim().toUpperCase();
+        // If it's a 1-4 digit number (legacy format), pad it to 4 digits for backward compatibility
+        if (/^\d{1,4}$/.test(raw)) return raw.padStart(4, '0');
+        // If it's already in Sherwin Williams format, return as-is
+        if (/^H66[A-Z]{3}\d{5}$/.test(raw)) return raw;
+        // Otherwise return as-is (could be partial or other format)
+        return raw;
+      })();
 
-    // Check if item exists
-    let item = await InventoryService.getItem(normalizedId);
-    
-    if (!item) {
-      Alert.alert(
-        'Paint Not Found',
-        `No paint found with ID: ${normalizedId}. Please add the paint manually first, then scan to update quantity.`,
-        [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }]
-      );
-      return;
+      // Check if item exists
+      const item = await InventoryService.getItem(normalizedId);
+
+      if (!item) {
+        Alert.alert(
+          'Paint Not Found',
+          `No paint found with ID: ${normalizedId}. Please add the paint manually first, then scan to update quantity.`,
+          [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }]
+        );
+        return;
+      }
+
+      // Item exists - show check in/out screen
+      setScannedItem(item);
+      setCurrentScreen('checkinout');
+    } finally {
+      setScanLookupLoading(false);
     }
-
-    // Item exists - show check in/out screen
-    setScannedItem(item);
-    setCurrentScreen('checkinout');
   };
 
   const handleCheckIn = async (quantity) => {
@@ -938,6 +944,14 @@ export default function App() {
               {!!actionLoadingMessage && (
                 <Text style={styles.loadingText}>{actionLoadingMessage}</Text>
               )}
+            </View>
+          </View>
+        )}
+        {scanLookupLoading && (
+          <View style={styles.loadingOverlay} pointerEvents="auto">
+            <View style={styles.loadingCard}>
+              <ActivityIndicator size="large" color={paperTheme.colors.primary} />
+              <Text style={styles.loadingText}>Looking up material…</Text>
             </View>
           </View>
         )}

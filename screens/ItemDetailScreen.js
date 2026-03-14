@@ -143,7 +143,12 @@ export default function ItemDetailScreen({
 
     const trimmedMin = minQuantityInput.trim();
     const minQ = trimmedMin === "" ? 0 : parseInt(trimmedMin, 10);
-    if (minQuantityInput.trim() !== "" && (isNaN(minQ) || minQ < 0)) {
+    if (
+      type !== "custom_paint" &&
+      type !== "custom_stain" &&
+      minQuantityInput.trim() !== "" &&
+      (isNaN(minQ) || minQ < 0)
+    ) {
       Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
       return;
     }
@@ -154,15 +159,22 @@ export default function ItemDetailScreen({
       Alert.alert("Invalid", "Unit price must be 0 or greater.");
       return;
     }
+    const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const displayOrderVal =
-      displayOrderInput.trim() === "" ? 0 : parseInt(displayOrderInput, 10);
-    if (isNaN(displayOrderVal) || displayOrderVal < 0) {
+      typeVal === "paint"
+        ? (displayOrderInput.trim() === ""
+            ? 0
+            : parseInt(displayOrderInput, 10))
+        : 0;
+    if (
+      typeVal === "paint" &&
+      (isNaN(displayOrderVal) || displayOrderVal < 0)
+    ) {
       Alert.alert("Invalid", "Display order must be 0 or greater.");
       return;
     }
 
     const priceVal = priceInput.trim() === "" ? 55.56 : parseFloat(priceInput);
-    const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const hexVal = normalizeHex(hexColorInput);
     const recycleVal = recycleDateInput.trim() ? recycleDateInput.trim() : null;
     const externalCodeVal = externalCodeInput.trim()
@@ -174,7 +186,9 @@ export default function ItemDetailScreen({
       name,
       quantity: quantity.trim() === "" ? 0 : parseInt(quantity, 10) || 0,
       location,
-      ...(minQ !== undefined && { minQuantity: minQ }),
+      ...(type !== "custom_paint" &&
+        type !== "custom_stain" &&
+        minQ !== undefined && { minQuantity: minQ }),
       ...(priceVal != null && !isNaN(priceVal) && priceVal >= 0
         ? { price: priceVal }
         : { price: null }),
@@ -540,23 +554,27 @@ export default function ItemDetailScreen({
                 return null;
               })()}
 
-              <Text style={styles.label}>Minimum quantity (low stock)</Text>
-              {isAdmin ? (
-                <TextInput
-                  label="Min quantity"
-                  value={minQuantityInput}
-                  onChangeText={setMinQuantityInput}
-                  mode="outlined"
-                  keyboardType="number-pad"
-                  style={styles.input}
-                  placeholder="Blank = 0"
-                />
-              ) : (
-                <Text style={styles.itemId}>
-                  {item?.minQuantity != null
-                    ? String(item.minQuantity)
-                    : "Use app default"}
-                </Text>
+              {type !== "custom_paint" && type !== "custom_stain" && (
+                <>
+                  <Text style={styles.label}>Minimum quantity (low stock)</Text>
+                  {isAdmin ? (
+                    <TextInput
+                      label="Min quantity"
+                      value={minQuantityInput}
+                      onChangeText={setMinQuantityInput}
+                      mode="outlined"
+                      keyboardType="number-pad"
+                      style={styles.input}
+                      placeholder="Blank = 0"
+                    />
+                  ) : (
+                    <Text style={styles.itemId}>
+                      {item?.minQuantity != null
+                        ? String(item.minQuantity)
+                        : "Use app default"}
+                    </Text>
+                  )}
+                </>
               )}
 
               <Text style={styles.label}>Unit price</Text>
@@ -579,7 +597,7 @@ export default function ItemDetailScreen({
                 </Text>
               )}
 
-              {isAdmin && type !== "custom_paint" && (
+              {isAdmin && type === "paint" && (
                 <>
                   <Text style={styles.label}>
                     Display order (for True order list)
@@ -781,6 +799,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   headerTitle: {
     fontSize: 20,

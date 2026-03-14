@@ -94,13 +94,6 @@ export default function InventoryListScreen({
     });
   };
 
-  // Keep scan input focused on web so a hardware scanner can be used from anywhere.
-  useEffect(() => {
-    if (onScanCode && isWeb && scanInputRef.current) {
-      scanInputRef.current.focus();
-    }
-  }, [onScanCode, isWeb]);
-
   // Restore scroll position once when mounting
   useEffect(() => {
     if (
@@ -305,7 +298,8 @@ export default function InventoryListScreen({
     const d = log.details;
     if (a === "check_in") return "Checked in";
     if (a === "check_out") return "Checked out";
-    if (a === "receiving" || (a === "update" && d?._actionType === "receiving")) return "Receiving";
+    if (a === "receiving" || (a === "update" && d?._actionType === "receiving"))
+      return "Receiving";
     if (a === "update" && d?._actionType === "check_in") return "Checked in";
     if (a === "update" && d?._actionType === "check_out") return "Checked out";
     if (a === "add") return "Added";
@@ -342,15 +336,22 @@ export default function InventoryListScreen({
     // Sort
     if (listOrderMode === "trueOrder") {
       filtered.sort((a, b) => {
-        const aOrder =
-          a.display_order != null && !isNaN(Number(a.display_order))
-            ? Number(a.display_order)
-            : 999999;
-        const bOrder =
-          b.display_order != null && !isNaN(Number(b.display_order))
-            ? Number(b.display_order)
-            : 999999;
-        if (aOrder !== bOrder) return aOrder - bOrder;
+        const aIsPaint = (a.type || "").toLowerCase() === "paint";
+        const bIsPaint = (b.type || "").toLowerCase() === "paint";
+        // Only paint type uses display_order; custom/stains/etc. sort by name
+        if (aIsPaint && bIsPaint) {
+          const aOrder =
+            a.display_order != null && !isNaN(Number(a.display_order))
+              ? Number(a.display_order)
+              : 999999;
+          const bOrder =
+            b.display_order != null && !isNaN(Number(b.display_order))
+              ? Number(b.display_order)
+              : 999999;
+          if (aOrder !== bOrder) return aOrder - bOrder;
+        }
+        if (aIsPaint && !bIsPaint) return -1;
+        if (!aIsPaint && bIsPaint) return 1;
         const aName = (a.name || "").toLowerCase();
         const bName = (b.name || "").toLowerCase();
         return aName.localeCompare(bName);
@@ -447,6 +448,8 @@ export default function InventoryListScreen({
     if (!it) return null;
     const bgHex = getValidHex(it.hex_color) || "#e0e0e0";
     const name = it.name || "Unnamed";
+    const type = (it.type || "").toLowerCase();
+    const isStain = type === "stain" || type === "custom_stain";
     return (
       <Modal
         visible={!!it}
@@ -465,9 +468,26 @@ export default function InventoryListScreen({
             ]}
             onPress={(e) => e?.stopPropagation?.()}
           >
-            <View
-              style={[styles.colorModalSwatch, { backgroundColor: bgHex }]}
-            />
+            <View style={styles.colorModalSwatchWrapper}>
+              <View
+                style={[styles.colorModalSwatch, { backgroundColor: bgHex }]}
+              />
+              {isStain && (
+                <View
+                  style={styles.colorModalStainWatermark}
+                  pointerEvents="none"
+                >
+                  <Text
+                    style={[
+                      styles.colorModalStainWatermarkText,
+                      { color: theme.dark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)" },
+                    ]}
+                  >
+                    STAIN
+                  </Text>
+                </View>
+              )}
+            </View>
             <View
               style={[
                 styles.colorModalNameRow,
@@ -576,17 +596,12 @@ export default function InventoryListScreen({
                 const textColor = isLate ? "#c62828" : theme.colors.primary;
                 return (
                   <View style={styles.onOrderBlock}>
-                    <Text
-                      style={[styles.onOrderText, { color: textColor }]}
-                    >
+                    <Text style={[styles.onOrderText, { color: textColor }]}>
                       On order: {orderInfo.quantity} gal
                     </Text>
                     {exp ? (
                       <Text
-                        style={[
-                          styles.onOrderDateText,
-                          { color: textColor },
-                        ]}
+                        style={[styles.onOrderDateText, { color: textColor }]}
                       >
                         {exp}
                       </Text>
@@ -600,9 +615,9 @@ export default function InventoryListScreen({
               const t = item.type ? String(item.type).toLowerCase() : "";
               const label =
                 t === "custom_paint"
-                  ? "Custom paint"
+                  ? "Custom Paint"
                   : t === "custom_stain"
-                    ? "Custom stain"
+                    ? "Custom Stain"
                     : item.type
                       ? String(item.type).charAt(0).toUpperCase() +
                         String(item.type).slice(1).toLowerCase()
@@ -657,12 +672,14 @@ export default function InventoryListScreen({
                   : " "}
               </Text>
               {getValidHex(item.hex_color) ? (
-                <IconButton
-                  icon="palette-outline"
-                  size={26}
+                <Pressable
                   onPress={() => setColorPreviewItem(item)}
-                  style={styles.colorPreviewButtonBottom}
-                  iconColor={theme.colors.primary}
+                  style={[
+                    styles.inventoryColorSwatch,
+                    {
+                      backgroundColor: getValidHex(item.hex_color),
+                    },
+                  ]}
                 />
               ) : null}
             </View>
@@ -717,23 +734,36 @@ export default function InventoryListScreen({
                   styles.headerFilterGroupSpacer,
                 ]}
               >
+                {isAdmin && viewMode !== "colorBook" && (
+                  <Button
+                    mode={
+                      listOrderMode === "trueOrder" ? "contained" : "outlined"
+                    }
+                    compact
+                    onPress={() =>
+                      setListOrderMode((prev) =>
+                        prev === "trueOrder" ? "alphabetical" : "trueOrder",
+                      )
+                    }
+                    style={[styles.viewModeButton, styles.viewModeButtonLong]}
+                    disabled={bookFilter === "custom"}
+                  >
+                    {listOrderMode === "trueOrder"
+                      ? "Alphabetical"
+                      : "True Order"}
+                  </Button>
+                )}
                 <Button
-                  mode={
-                    bookFilter === "standard" ? "contained" : "outlined"
+                  mode={bookFilter === "standard" ? "outlined" : "contained"}
+                  compact
+                  onPress={() =>
+                    setBookFilter((prev) =>
+                      prev === "standard" ? "custom" : "standard",
+                    )
                   }
-                  compact
-                  onPress={() => setBookFilter("standard")}
                   style={styles.viewModeButton}
                 >
-                  Standard
-                </Button>
-                <Button
-                  mode={bookFilter === "custom" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setBookFilter("custom")}
-                  style={styles.viewModeButton}
-                >
-                  Custom
+                  {bookFilter === "standard" ? "Stock" : "Custom"}
                 </Button>
               </View>
               <Button
@@ -837,12 +867,15 @@ export default function InventoryListScreen({
                     </Card.Content>
                   </Card>
                   {analytics.lowStockCount > 0 && (
-                    <Card
+                    <Pressable
                       style={[
                         styles.analyticsCard,
                         styles.analyticsCardFilter,
                         stockFilter === "lowStock" &&
                           styles.analyticsCardFilterActive,
+                        stockFilter === "lowStock" && {
+                          borderColor: theme.colors.primary,
+                        },
                       ]}
                       onPress={() =>
                         setStockFilter((f) =>
@@ -850,23 +883,34 @@ export default function InventoryListScreen({
                         )
                       }
                     >
-                      <Card.Content>
-                        <Text style={styles.analyticsLabel}>Low Stock</Text>
-                        <Title
-                          style={[styles.analyticsValue, { color: "#ff9800" }]}
-                        >
-                          {analytics.lowStockCount}
-                        </Title>
-                      </Card.Content>
-                    </Card>
+                      <Card style={styles.analyticsCardInner}>
+                        <Card.Content>
+                          <Text style={styles.analyticsLabel}>
+                            Low Stock
+                            {stockFilter === "lowStock" ? " (filtering)" : ""}
+                          </Text>
+                          <Title
+                            style={[
+                              styles.analyticsValue,
+                              { color: "#ff9800" },
+                            ]}
+                          >
+                            {analytics.lowStockCount}
+                          </Title>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
                   )}
                   {analytics.outOfStockCount > 0 && (
-                    <Card
+                    <Pressable
                       style={[
                         styles.analyticsCard,
                         styles.analyticsCardFilter,
                         stockFilter === "outOfStock" &&
                           styles.analyticsCardFilterActive,
+                        stockFilter === "outOfStock" && {
+                          borderColor: theme.colors.primary,
+                        },
                       ]}
                       onPress={() =>
                         setStockFilter((f) =>
@@ -874,24 +918,38 @@ export default function InventoryListScreen({
                         )
                       }
                     >
-                      <Card.Content>
-                        <Text style={styles.analyticsLabel}>Out of Stock</Text>
-                        <Title
-                          style={[styles.analyticsValue, { color: "#f44336" }]}
-                        >
-                          {analytics.outOfStockCount}
-                        </Title>
-                      </Card.Content>
-                    </Card>
+                      <Card style={styles.analyticsCardInner}>
+                        <Card.Content>
+                          <Text style={styles.analyticsLabel}>
+                            Out of Stock
+                            {stockFilter === "outOfStock"
+                              ? " (filtering)"
+                              : ""}
+                          </Text>
+                          <Title
+                            style={[
+                              styles.analyticsValue,
+                              { color: "#f44336" },
+                            ]}
+                          >
+                            {analytics.outOfStockCount}
+                          </Title>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
                   )}
-                  <Card
-                    style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                  <Pressable
+                    style={[
+                      styles.analyticsCard,
+                      styles.analyticsCardFilter,
+                    ]}
                     onPress={() => setGalPeriodWeek((prev) => !prev)}
                   >
-                    <Card.Content>
-                      <Text style={styles.analyticsLabel}>
-                        Checked out this {galPeriodWeek ? "week" : "month"}
-                      </Text>
+                    <Card style={styles.analyticsCardInner}>
+                      <Card.Content>
+                        <Text style={styles.analyticsLabel}>
+                          Checked out this {galPeriodWeek ? "week" : "month"}
+                        </Text>
                       <Title style={styles.analyticsValue}>
                         {galPeriodWeek
                           ? gallonsUsedThisWeek
@@ -907,16 +965,21 @@ export default function InventoryListScreen({
                         Tap for {galPeriodWeek ? "month" : "week"}
                       </Text>
                     </Card.Content>
-                  </Card>
+                    </Card>
+                  </Pressable>
                   {mostUsedColor && (
-                    <Card
-                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                    <Pressable
+                      style={[
+                        styles.analyticsCard,
+                        styles.analyticsCardFilter,
+                      ]}
                       onPress={() => setMostUsedByWeek((prev) => !prev)}
                     >
-                      <Card.Content>
-                        <Text style={styles.analyticsLabel}>
-                          Most gallons checked out
-                        </Text>
+                      <Card style={styles.analyticsCardInner}>
+                        <Card.Content>
+                          <Text style={styles.analyticsLabel}>
+                            Most gallons checked out
+                          </Text>
                         <Title
                           style={[styles.analyticsValue, { fontSize: 18 }]}
                           numberOfLines={1}
@@ -934,6 +997,7 @@ export default function InventoryListScreen({
                         </Text>
                       </Card.Content>
                     </Card>
+                  </Pressable>
                   )}
                 </View>
 
@@ -942,17 +1006,28 @@ export default function InventoryListScreen({
                   <Card style={styles.tableCardFlex}>
                     <Card.Content style={styles.tableCardContentFlex}>
                       <View style={styles.tableHeader}>
-                        <Searchbar
-                          placeholder="Search by name, ID, location, or type..."
-                          onChangeText={setSearchQuery}
-                          value={searchQuery}
-                          style={styles.webSearchbar}
-                          inputStyle={styles.searchbarInput}
-                        />
-                        <Text style={styles.resultCount}>
-                          {filteredAndSortedInventory.length} of{" "}
-                          {inventory.length} items
-                        </Text>
+                        <View style={styles.filterSummaryRow}>
+                          <Text style={styles.filterSummaryText}>
+                            {bookFilter === "custom"
+                              ? "Custom"
+                              : listOrderMode === "trueOrder"
+                                ? "Stock - True order"
+                                : "Stock - Alphabetical"}
+                          </Text>
+                        </View>
+                        <View style={styles.tableHeaderSearchRow}>
+                          <Searchbar
+                            placeholder="Search by name, ID, location, or type..."
+                            onChangeText={setSearchQuery}
+                            value={searchQuery}
+                            style={styles.webSearchbar}
+                            inputStyle={styles.searchbarInput}
+                          />
+                          <Text style={styles.resultCount}>
+                            {filteredAndSortedInventory.length} of{" "}
+                            {inventory.length} items
+                          </Text>
+                        </View>
                       </View>
 
                       {filteredAndSortedInventory.length === 0 ? (
@@ -1010,13 +1085,23 @@ export default function InventoryListScreen({
                                 >
                                   Quantity
                                 </DataTable.Title>
-                                <DataTable.Title style={styles.tableCell}>
+                                <DataTable.Title
+                                  style={[
+                                    styles.tableCell,
+                                    styles.idColCell,
+                                  ]}
+                                >
                                   ID
                                 </DataTable.Title>
                                 <DataTable.Title style={styles.tableCell}>
                                   Material Type
                                 </DataTable.Title>
-                                <DataTable.Title style={styles.tableCell}>
+                                <DataTable.Title
+                                  style={[
+                                    styles.tableCell,
+                                    styles.locationColCell,
+                                  ]}
+                                >
                                   Location
                                 </DataTable.Title>
                                 <DataTable.Title
@@ -1027,7 +1112,12 @@ export default function InventoryListScreen({
                                 >
                                   Color
                                 </DataTable.Title>
-                                <DataTable.Title style={styles.tableCell}>
+                                <DataTable.Title
+                                  style={[
+                                    styles.tableCell,
+                                    styles.onOrderColCell,
+                                  ]}
+                                >
                                   On order
                                 </DataTable.Title>
                                 <DataTable.Title
@@ -1100,7 +1190,12 @@ export default function InventoryListScreen({
                                         {item.quantity || 0} gal
                                       </Text>
                                     </DataTable.Cell>
-                                    <DataTable.Cell style={styles.tableCell}>
+                                    <DataTable.Cell
+                                      style={[
+                                        styles.tableCell,
+                                        styles.idColCell,
+                                      ]}
+                                    >
                                       <Text
                                         style={[
                                           styles.idText,
@@ -1119,9 +1214,9 @@ export default function InventoryListScreen({
                                           : "";
                                         const label =
                                           t === "custom_paint"
-                                            ? "Custom paint"
+                                            ? "Custom Paint"
                                             : t === "custom_stain"
-                                              ? "Custom stain"
+                                              ? "Custom Stain"
                                               : item.type
                                                 ? String(item.type)
                                                     .charAt(0)
@@ -1161,7 +1256,12 @@ export default function InventoryListScreen({
                                         );
                                       })()}
                                     </DataTable.Cell>
-                                    <DataTable.Cell style={styles.tableCell}>
+                                    <DataTable.Cell
+                                      style={[
+                                        styles.tableCell,
+                                        styles.locationColCell,
+                                      ]}
+                                    >
                                       <Text
                                         style={[
                                           styles.locationText,
@@ -1180,17 +1280,26 @@ export default function InventoryListScreen({
                                       ]}
                                     >
                                       {getValidHex(item.hex_color) ? (
-                                        <IconButton
-                                          icon="palette-outline"
-                                          size={20}
+                                        <Pressable
                                           onPress={() =>
                                             setColorPreviewItem(item)
                                           }
-                                          iconColor={theme.colors.primary}
+                                          style={[
+                                            styles.inventoryColorSwatch,
+                                            {
+                                              backgroundColor:
+                                                getValidHex(item.hex_color),
+                                            },
+                                          ]}
                                         />
                                       ) : null}
                                     </DataTable.Cell>
-                                    <DataTable.Cell style={styles.tableCell}>
+                                    <DataTable.Cell
+                                      style={[
+                                        styles.tableCell,
+                                        styles.onOrderColCell,
+                                      ]}
+                                    >
                                       {(() => {
                                         const orderInfo =
                                           onOrderSummary[item.id] ||
@@ -1203,14 +1312,21 @@ export default function InventoryListScreen({
                                             ? new Date(orderInfo.expectedDate)
                                             : null;
                                           const exp = expDate
-                                            ? expDate.toLocaleDateString("en-US", {
-                                                month: "short",
-                                                day: "numeric",
-                                                year: "numeric",
-                                              })
+                                            ? expDate.toLocaleDateString(
+                                                "en-US",
+                                                {
+                                                  month: "short",
+                                                  day: "numeric",
+                                                  year: "numeric",
+                                                },
+                                              )
                                             : "";
-                                          const isLate = expDate && expDate.getTime() < Date.now();
-                                          const textColor = isLate ? "#c62828" : theme.colors.primary;
+                                          const isLate =
+                                            expDate &&
+                                            expDate.getTime() < Date.now();
+                                          const textColor = isLate
+                                            ? "#c62828"
+                                            : theme.colors.primary;
                                           return (
                                             <View>
                                               <Text
@@ -1369,8 +1485,30 @@ export default function InventoryListScreen({
             </Text>
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
+                {isAdmin && viewMode !== "colorBook" && (
+                  <Button
+                    mode={
+                      listOrderMode === "trueOrder" ? "contained" : "outlined"
+                    }
+                    compact
+                    onPress={() =>
+                      setListOrderMode((prev) =>
+                        prev === "trueOrder" ? "alphabetical" : "trueOrder",
+                      )
+                    }
+                    style={[
+                      styles.viewModeButtonMobile,
+                      styles.viewModeButtonLong,
+                    ]}
+                    disabled={bookFilter === "custom"}
+                  >
+                    {listOrderMode === "trueOrder"
+                      ? "Display order"
+                      : "Sort by display order"}
+                  </Button>
+                )}
                 <Button
-                  mode={bookFilter === "standard" ? "contained" : "outlined"}
+                  mode={bookFilter === "standard" ? "outlined" : "contained"}
                   compact
                   onPress={() =>
                     setBookFilter((prev) =>
@@ -1379,7 +1517,7 @@ export default function InventoryListScreen({
                   }
                   style={styles.viewModeButtonMobile}
                 >
-                  {bookFilter === "standard" ? "Custom" : "Standard"}
+                  {bookFilter === "standard" ? "Stock" : "Custom"}
                 </Button>
               </View>
               <Button
@@ -1390,7 +1528,10 @@ export default function InventoryListScreen({
                     viewMode === "colorBook" ? "inventory" : "colorBook",
                   )
                 }
-                style={styles.viewModeButtonMobile}
+                style={[
+                  styles.viewModeButtonMobile,
+                  styles.viewModeButtonColorBook,
+                ]}
                 icon="palette-outline"
               >
                 {viewMode === "colorBook" ? "Inventory" : "Color Book"}
@@ -1414,7 +1555,15 @@ export default function InventoryListScreen({
 
           <View style={styles.filterSummaryRow}>
             <Text style={styles.filterSummaryText}>
-              {bookFilter === "standard" ? "Showing: Standard colors" : "Showing: Custom colors"}
+              {viewMode === "colorBook"
+                ? bookFilter === "standard"
+                  ? "Stock"
+                  : "Custom"
+                : bookFilter === "custom"
+                  ? "Custom"
+                  : listOrderMode === "trueOrder"
+                    ? "Stock - True order"
+                    : "Stock - Alphabetical"}
             </Text>
           </View>
           <Searchbar
@@ -1473,13 +1622,16 @@ export default function InventoryListScreen({
                 </Card>
               )}
               {analytics.lowStockCount > 0 && (
-                <Card
+                <Pressable
                   style={[
                     styles.analyticsCardMobile,
                     isMobileLandscape && styles.analyticsCardMobileLandscape,
                     styles.analyticsCardFilter,
                     stockFilter === "lowStock" &&
                       styles.analyticsCardFilterActive,
+                    stockFilter === "lowStock" && {
+                      borderColor: theme.colors.primary,
+                    },
                   ]}
                   onPress={() =>
                     setStockFilter((f) =>
@@ -1487,33 +1639,41 @@ export default function InventoryListScreen({
                     )
                   }
                 >
-                  <Card.Content
-                    style={[
-                      styles.analyticsCardMobileContent,
-                      isMobileLandscape &&
-                        styles.analyticsCardMobileContentLandscape,
-                    ]}
-                  >
-                    <Text style={styles.analyticsLabelMobile}>Low Stock</Text>
-                    <Title
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
                       style={[
-                        styles.analyticsValueMobile,
-                        { color: "#ff9800" },
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
                       ]}
                     >
-                      {analytics.lowStockCount}
-                    </Title>
-                  </Card.Content>
-                </Card>
+                      <Text style={styles.analyticsLabelMobile}>
+                        Low Stock
+                        {stockFilter === "lowStock" ? " (filtering)" : ""}
+                      </Text>
+                      <Title
+                        style={[
+                          styles.analyticsValueMobile,
+                          { color: "#ff9800" },
+                        ]}
+                      >
+                        {analytics.lowStockCount}
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
               )}
               {analytics.outOfStockCount > 0 && (
-                <Card
+                <Pressable
                   style={[
                     styles.analyticsCardMobile,
                     isMobileLandscape && styles.analyticsCardMobileLandscape,
                     styles.analyticsCardFilter,
                     stockFilter === "outOfStock" &&
                       styles.analyticsCardFilterActive,
+                    stockFilter === "outOfStock" && {
+                      borderColor: theme.colors.primary,
+                    },
                   ]}
                   onPress={() =>
                     setStockFilter((f) =>
@@ -1521,58 +1681,63 @@ export default function InventoryListScreen({
                     )
                   }
                 >
-                  <Card.Content
-                    style={[
-                      styles.analyticsCardMobileContent,
-                      isMobileLandscape &&
-                        styles.analyticsCardMobileContentLandscape,
-                    ]}
-                  >
-                    <Text style={styles.analyticsLabelMobile}>
-                      Out of Stock
-                    </Text>
-                    <Title
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
                       style={[
-                        styles.analyticsValueMobile,
-                        { color: "#f44336" },
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
                       ]}
                     >
-                      {analytics.outOfStockCount}
-                    </Title>
-                  </Card.Content>
-                </Card>
+                      <Text style={styles.analyticsLabelMobile}>
+                        Out of Stock
+                        {stockFilter === "outOfStock" ? " (filtering)" : ""}
+                      </Text>
+                      <Title
+                        style={[
+                          styles.analyticsValueMobile,
+                          { color: "#f44336" },
+                        ]}
+                      >
+                        {analytics.outOfStockCount}
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
               )}
               {(gallonsUsedThisWeek > 0 || gallonsUsedThisMonth > 0) && (
-                <Card
+                <Pressable
                   style={[
                     styles.analyticsCardMobile,
                     isMobileLandscape && styles.analyticsCardMobileLandscape,
                   ]}
                   onPress={() => setGalPeriodWeek((prev) => !prev)}
                 >
-                  <Card.Content
-                    style={[
-                      styles.analyticsCardMobileContent,
-                      isMobileLandscape &&
-                        styles.analyticsCardMobileContentLandscape,
-                    ]}
-                  >
-                    <Text style={styles.analyticsLabelMobile}>
-                      Gal this {galPeriodWeek ? "week" : "month"}
-                    </Text>
-                    <Title style={styles.analyticsValueMobile}>
-                      {galPeriodWeek
-                        ? gallonsUsedThisWeek
-                        : gallonsUsedThisMonth}
-                    </Title>
-                    <Text style={styles.analyticsSubtextMobile}>
-                      Tap for {galPeriodWeek ? "month" : "week"}
-                    </Text>
-                  </Card.Content>
-                </Card>
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
+                      style={[
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
+                      ]}
+                    >
+                      <Text style={styles.analyticsLabelMobile}>
+                        Gal this {galPeriodWeek ? "week" : "month"}
+                      </Text>
+                      <Title style={styles.analyticsValueMobile}>
+                        {galPeriodWeek
+                          ? gallonsUsedThisWeek
+                          : gallonsUsedThisMonth}
+                      </Title>
+                      <Text style={styles.analyticsSubtextMobile}>
+                        Tap for {galPeriodWeek ? "month" : "week"}
+                      </Text>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
               )}
               {mostUsedColor && mostUsedColor.totalGal > 0 && (
-                <Card
+                <Pressable
                   style={[
                     styles.analyticsCardMobile,
                     isMobileLandscape && styles.analyticsCardMobileLandscape,
@@ -1580,13 +1745,14 @@ export default function InventoryListScreen({
                   ]}
                   onPress={() => setMostUsedByWeek((prev) => !prev)}
                 >
-                  <Card.Content
-                    style={[
-                      styles.analyticsCardMobileContent,
-                      isMobileLandscape &&
-                        styles.analyticsCardMobileContentLandscape,
-                    ]}
-                  >
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
+                      style={[
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
+                      ]}
+                    >
                     <Text style={styles.analyticsLabelMobile}>
                       Most checked out
                     </Text>
@@ -1601,6 +1767,7 @@ export default function InventoryListScreen({
                     </Text>
                   </Card.Content>
                 </Card>
+              </Pressable>
               )}
             </View>
           )}
@@ -1690,8 +1857,25 @@ export default function InventoryListScreen({
         </View>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
+            {isAdmin && viewMode !== "colorBook" && (
+              <Button
+                mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
+                compact
+                onPress={() =>
+                  setListOrderMode((prev) =>
+                    prev === "trueOrder" ? "alphabetical" : "trueOrder",
+                  )
+                }
+                style={[styles.viewModeButtonMobile, styles.viewModeButtonLong]}
+                disabled={bookFilter === "custom"}
+              >
+                {listOrderMode === "trueOrder"
+                  ? "True Order"
+                  : "Alphabetical"}
+              </Button>
+            )}
             <Button
-              mode={bookFilter === "standard" ? "contained" : "outlined"}
+              mode={bookFilter === "standard" ? "outlined" : "contained"}
               compact
               onPress={() =>
                 setBookFilter((prev) =>
@@ -1700,27 +1884,40 @@ export default function InventoryListScreen({
               }
               style={styles.viewModeButtonMobile}
             >
-              {bookFilter === "standard" ? "Custom" : "Standard"}
+              {bookFilter === "standard" ? "Stock" : "Custom"}
             </Button>
           </View>
-          <Button
-            mode={viewMode === "colorBook" ? "contained" : "outlined"}
-            compact
-            onPress={() =>
-              setViewMode(viewMode === "colorBook" ? "inventory" : "colorBook")
-            }
-            style={styles.viewModeButtonMobile}
-            icon="palette-outline"
-          >
-            {viewMode === "colorBook" ? "Inventory" : "Color Book"}
-          </Button>
+          <View style={styles.headerFilterRowRight}>
+            <Button
+              mode={viewMode === "colorBook" ? "contained" : "outlined"}
+              compact
+              onPress={() =>
+                setViewMode(viewMode === "colorBook" ? "inventory" : "colorBook")
+              }
+              style={[
+                styles.viewModeButtonMobile,
+                styles.viewModeButtonColorBook,
+              ]}
+              icon="palette-outline"
+            >
+              {viewMode === "colorBook" ? "Inventory" : "Color Book"}
+            </Button>
+          </View>
         </View>
       </View>
 
       <View style={styles.searchbarWrap}>
         <View style={styles.filterSummaryRow}>
           <Text style={styles.filterSummaryText}>
-            {bookFilter === "standard" ? "Showing: Standard colors" : "Showing: Custom colors"}
+            {viewMode === "colorBook"
+              ? bookFilter === "standard"
+                ? "Stock"
+                : "Custom"
+              : bookFilter === "custom"
+                ? "Custom"
+                : listOrderMode === "trueOrder"
+                  ? "Stock - True order"
+                  : "Stock - Alphabetical"}
           </Text>
         </View>
         <Searchbar
@@ -1752,19 +1949,11 @@ export default function InventoryListScreen({
               if (trimmed && onScanCode) {
                 onScanCode(trimmed);
                 setScanInput("");
-                // After a scan, keep current view/scroll in parent state
                 notifyViewState();
               }
             }}
             blurOnSubmit={false}
             keyboardType="default"
-            onBlur={() => {
-              // On web, gently refocus so scanner input stays ready.
-              if (!onScanCode || !isWeb) return;
-              setTimeout(() => {
-                scanInputRef.current?.focus();
-              }, 150);
-            }}
           />
         )}
       </View>
@@ -1868,6 +2057,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     minHeight: 48,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   headerMobilePortrait: {
     paddingHorizontal: 16,
@@ -1887,6 +2078,9 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
     marginTop: 8,
+  },
+  headerFilterRowRight: {
+    marginLeft: "auto",
   },
   headerFilterGroup: {
     flexDirection: "row",
@@ -1966,6 +2160,13 @@ const styles = StyleSheet.create({
   colorPreviewButtonBottom: {
     margin: -4,
     marginLeft: 8,
+  },
+  inventoryColorSwatch: {
+    width: 26,
+    height: 26,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
   },
   nonClickableCard: {
     // Remove any visual indication that it's clickable
@@ -2056,10 +2257,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
-  colorModalSwatch: {
+  colorModalSwatchWrapper: {
+    position: "relative",
     width: "100%",
     aspectRatio: 1.1,
     minHeight: 280,
+  },
+  colorModalSwatch: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  colorModalStainWatermark: {
+    position: "absolute",
+    top: 50,
+    left: 30,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  colorModalStainWatermarkText: {
+    fontSize: 36,
+    fontWeight: "700",
+    letterSpacing: 55,
+    transform: [{ rotate: "45deg" }],
   },
   colorModalNameRow: {
     paddingHorizontal: 16,
@@ -2082,11 +2306,22 @@ const styles = StyleSheet.create({
     right: 8,
     backgroundColor: "rgba(255,255,255,0.9)",
   },
+  locationColCell: {
+    paddingRight: 28,
+  },
+  idColCell: {
+    minWidth: 130,
+  },
   colorColHeader: {
     width: 56,
+    paddingRight: 6,
   },
   colorColCell: {
     width: 56,
+    paddingRight: 6,
+  },
+  onOrderColCell: {
+    paddingLeft: 6,
   },
   // Web/Dashboard Styles
   webDesktopRoot: {
@@ -2120,6 +2355,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   webHeaderLeft: {
     flexDirection: "row",
@@ -2159,12 +2397,18 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 180,
     elevation: 2,
+    borderRadius: 12,
+  },
+  analyticsCardInner: {
+    flex: 1,
   },
   analyticsCardFilter: {
     backgroundColor: "rgba(0,0,0,0.04)",
   },
   analyticsCardFilterActive: {
-    backgroundColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(0,0,0,0.12)",
+    borderWidth: 2,
+    borderRadius: 12,
   },
   analyticsRowMobile: {
     flexDirection: "row",
@@ -2182,6 +2426,7 @@ const styles = StyleSheet.create({
     flex: 1,
     elevation: 2,
     maxWidth: 120,
+    borderRadius: 12,
   },
   analyticsCardMobileLandscape: {
     minWidth: 64,
@@ -2257,6 +2502,10 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     marginBottom: 16,
+    flexDirection: "column",
+    gap: 8,
+  },
+  tableHeaderSearchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 16,
@@ -2395,12 +2644,22 @@ const styles = StyleSheet.create({
   },
   viewModeButton: {
     marginRight: 8,
+    minWidth: 68,
+    paddingHorizontal: 12,
   },
   viewModeButtonColorBook: {
     marginLeft: 8,
+    minWidth: 128,
+    paddingHorizontal: 12,
   },
   viewModeButtonMobile: {
     marginRight: 4,
+    minWidth: 68,
+    paddingHorizontal: 12,
+  },
+  viewModeButtonLong: {
+    minWidth: 0,
+    paddingHorizontal: 12,
   },
   colorBookScrollDesktop: {
     flex: 1,

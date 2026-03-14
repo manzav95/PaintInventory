@@ -92,7 +92,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
     }
 
     const minQ =
-      minQuantity.trim() === "" ? undefined : parseInt(minQuantity, 10);
+      minQuantity.trim() === "" ? 0 : parseInt(minQuantity, 10);
     if (minQuantity.trim() !== "" && (isNaN(minQ) || minQ < 0)) {
       Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
       return;

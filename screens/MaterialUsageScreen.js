@@ -182,7 +182,10 @@ function formatMaterialTypeLabel(type) {
   if (!type || typeof type !== "string") return "—";
   const t = type.trim();
   if (!t) return "—";
-  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  return t
+    .split(/[\s_]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 /** Material type colors (match inventory list): paint blue, clear orange, stain green, primer brown, dye purple, catalyst yellow. */
@@ -303,6 +306,7 @@ export default function MaterialUsageScreen({
   const [shiftFilter, setShiftFilterState] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [expandedLogDayKeys, setExpandedLogDayKeys] = useState([]);
   const lastAmpmTapRef = useRef(0);
 
   const setBooth = (value) => {
@@ -334,7 +338,9 @@ export default function MaterialUsageScreen({
           setBoothState(savedBooth);
         if (
           savedBoothFilter &&
-          ["all", "Booth 1&3", "Booth 2", "Booth 4"].includes(savedBoothFilter)
+          ["all", "Booth 1 & 3", "Booth 2", "Booth 4"].includes(
+            savedBoothFilter,
+          )
         )
           setBoothFilterState(savedBoothFilter);
         if (
@@ -476,10 +482,39 @@ export default function MaterialUsageScreen({
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(row);
     });
+    const dayTotals = (rows) => {
+      const t = { paint: 0, clear: 0, primer: 0, stain: 0, dye: 0 };
+      rows.forEach((row) => {
+        const type = getResolvedMaterialType(row, inventory);
+        const qty = Number(row.qty_gallons) || 0;
+        if (type === "paint" || type === "custom_paint") t.paint += qty;
+        else if (type === "clear") t.clear += qty;
+        else if (type === "primer") t.primer += qty;
+        else if (type === "stain" || type === "custom_stain") t.stain += qty;
+        else if (type === "dye") t.dye += qty;
+      });
+      return t;
+    };
     return Object.keys(byDay)
       .sort((a, b) => (b || "").localeCompare(a || ""))
-      .map((date) => ({ date, rows: byDay[date] }));
-  }, [filteredLogs, materialUsageOvertime]);
+      .map((date) => ({
+        date,
+        rows: byDay[date],
+        totals: dayTotals(byDay[date]),
+      }));
+  }, [filteredLogs, materialUsageOvertime, inventory]);
+
+  const formatDayTotals = (totals) => {
+    if (!totals) return "";
+    const parts = [];
+    if (totals.paint > 0) parts.push(`Paint: ${totals.paint.toFixed(2)} gal`);
+    if (totals.clear > 0) parts.push(`Clear: ${totals.clear.toFixed(2)} gal`);
+    if (totals.primer > 0)
+      parts.push(`Primer: ${totals.primer.toFixed(2)} gal`);
+    if (totals.stain > 0) parts.push(`Stain: ${totals.stain.toFixed(2)} gal`);
+    if (totals.dye > 0) parts.push(`Dye: ${totals.dye.toFixed(2)} gal`);
+    return parts.length ? parts.join(" · ") : "No line items";
+  };
 
   const totalsFilterLabel = (() => {
     const boothPart =
@@ -498,10 +533,10 @@ export default function MaterialUsageScreen({
     filteredLogs.forEach((row) => {
       const type = getResolvedMaterialType(row, inventory);
       const qty = Number(row.qty_gallons) || 0;
-      if (type === "paint") t.paint += qty;
+      if (type === "paint" || type === "custom_paint") t.paint += qty;
       else if (type === "clear") t.clear += qty;
       else if (type === "primer") t.primer += qty;
-      else if (type === "stain") t.stain += qty;
+      else if (type === "stain" || type === "custom_stain") t.stain += qty;
       else if (type === "dye") t.dye += qty;
     });
     return t;
@@ -689,15 +724,14 @@ export default function MaterialUsageScreen({
       <View
         style={[styles.container, { backgroundColor: theme.colors.background }]}
       >
-        <View style={styles.headerRow}>
-          <View style={styles.headerLeft}>
-            <Button icon="arrow-left" onPress={onBack} mode="text">
-              Back
-            </Button>
-          </View>
-          <View style={styles.headerCenter}>
-            <Title style={styles.title}>Material Usage Form</Title>
-          </View>
+        <View style={styles.header}>
+          <IconButton
+            icon="arrow-left"
+            size={24}
+            onPress={onBack}
+            iconColor={theme.colors.primary}
+          />
+          <Title style={styles.headerTitle}>Material Usage</Title>
           <View style={styles.headerRight}>
             <IconButton
               icon="refresh"
@@ -978,14 +1012,9 @@ export default function MaterialUsageScreen({
           <Card style={styles.card}>
             <Card.Content>
               <Title style={styles.cardTitle}>Transaction log</Title>
-              {isAdmin && (
-                <Text style={[styles.statLabel, { marginBottom: 4 }]}>
-                  Showing last 3 months (admin)
-                </Text>
-              )}
               <Text style={styles.statLabel}>Filter by booth</Text>
               <View style={styles.buttonRow}>
-                {["all", "Booth 1&3", "Booth 2", "Booth 4"].map((bf) => (
+                {["all", "Booth 1 & 3", "Booth 2", "Booth 4"].map((bf) => (
                   <Button
                     key={bf}
                     mode={boothFilter === bf ? "contained" : "outlined"}
@@ -1020,6 +1049,7 @@ export default function MaterialUsageScreen({
                     ]}
                   >
                     Totals ({totalsFilterLabel})
+                    {isAdmin ? " · Showing last 3 months (admin)" : ""}
                   </Text>
                   <View style={styles.totalsGrid}>
                     <Text
@@ -1123,262 +1153,331 @@ export default function MaterialUsageScreen({
                       nestedScrollEnabled
                     >
                       <View style={styles.table}>
-                        {logsByDay.map(({ date, rows }) => (
-                          <React.Fragment key={date}>
-                            <View
-                              style={[
-                                styles.dayHeaderRow,
-                                {
-                                  backgroundColor:
-                                    theme.colors.surfaceVariant || "#eee",
-                                  borderLeftWidth: 4,
-                                  borderLeftColor:
-                                    theme.colors.primary || "#6f95ab",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.dayHeaderText,
-                                  { color: theme.colors.onSurface },
-                                ]}
+                        {logsByDay.map(({ date, rows, totals }) => {
+                          const dayKey = `day-${date}`;
+                          const isExpanded =
+                            expandedLogDayKeys.includes(dayKey);
+                          return (
+                            <React.Fragment key={date}>
+                              <Pressable
+                                onPress={() =>
+                                  setExpandedLogDayKeys((prev) =>
+                                    prev.includes(dayKey)
+                                      ? prev.filter((k) => k !== dayKey)
+                                      : [...prev, dayKey],
+                                  )
+                                }
                               >
-                                {formatLogDate(date)}
-                              </Text>
-                            </View>
-                            {rows.map((row) => (
-                              <View key={row.id} style={styles.tableRow}>
-                                <View style={[styles.td, styles.thDate]}>
-                                  <Text
-                                    style={[
-                                      styles.timeOnly,
-                                      { color: theme.colors.onSurface },
-                                    ]}
-                                  >
-                                    {formatTimeDisplay(row.entry_time)}
-                                  </Text>
-                                </View>
-                                <Text
-                                  style={[styles.td, styles.thUser]}
-                                  numberOfLines={1}
-                                >
-                                  {row.user_name || "—"}
-                                </Text>
-                                <Text
-                                  style={[styles.td, styles.thJob]}
-                                  numberOfLines={1}
-                                >
-                                  {row.job_name || "—"}
-                                </Text>
-                                <Text
+                                <View
                                   style={[
-                                    styles.td,
-                                    styles.thMaterialType,
+                                    styles.dayHeaderRow,
                                     {
-                                      color: getMaterialTypeColor(
-                                        getResolvedMaterialType(row, inventory),
-                                        theme,
-                                      ),
-                                      fontWeight: "600",
+                                      backgroundColor:
+                                        theme.colors.surfaceVariant || "#eee",
+                                      borderLeftWidth: 4,
+                                      borderLeftColor:
+                                        theme.colors.primary || "#6f95ab",
                                     },
                                   ]}
-                                  numberOfLines={1}
                                 >
-                                  {formatMaterialTypeLabel(
-                                    getResolvedMaterialType(row, inventory),
-                                  )}
-                                </Text>
-                                <Text
-                                  style={[styles.td, styles.thColor]}
-                                  numberOfLines={1}
-                                >
-                                  {row.color_name || "—"}
-                                </Text>
-                                <Text style={[styles.td, styles.thQty]}>
-                                  {formatQtyDisplay(row)}
-                                </Text>
-                                <Text style={[styles.td, styles.thCat]}>
-                                  {(() => {
-                                    const resolvedType =
-                                      getResolvedMaterialType(row, inventory);
-                                    if (
-                                      resolvedType === "dye" ||
-                                      resolvedType === "stain"
-                                    )
-                                      return "—";
-                                    return row.catalyst_oz != null
-                                      ? Number(row.catalyst_oz).toFixed(2)
-                                      : row.catalyst_gallons != null
-                                        ? (
-                                            Number(row.catalyst_gallons) * 128
-                                          ).toFixed(2)
-                                        : "—";
-                                  })()}
-                                </Text>
-                                <Text
-                                  style={[styles.td, styles.thBooth]}
-                                  numberOfLines={1}
-                                >
-                                  {row.booth}
-                                </Text>
-                              </View>
-                            ))}
-                          </React.Fragment>
-                        ))}
+                                  <View style={styles.dayHeaderContent}>
+                                    <Text
+                                      style={[
+                                        styles.dayHeaderText,
+                                        { color: theme.colors.onSurface },
+                                      ]}
+                                    >
+                                      {formatLogDate(date)}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.dayHeaderTotals,
+                                        {
+                                          color:
+                                            theme.colors.onSurfaceVariant ||
+                                            "#666",
+                                        },
+                                      ]}
+                                    >
+                                      {formatDayTotals(totals)}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.dayHeaderToggle,
+                                        {
+                                          color:
+                                            theme.colors.onSurfaceVariant ||
+                                            "#666",
+                                        },
+                                      ]}
+                                    >
+                                      {isExpanded
+                                        ? "Tap to collapse"
+                                        : "Tap to expand"}
+                                    </Text>
+                                  </View>
+                                </View>
+                              </Pressable>
+                              {isExpanded &&
+                                rows.map((row) => (
+                                  <View key={row.id} style={styles.tableRow}>
+                                    <View style={[styles.td, styles.thDate]}>
+                                      <Text
+                                        style={[
+                                          styles.timeOnly,
+                                          { color: theme.colors.onSurface },
+                                        ]}
+                                      >
+                                        {formatTimeDisplay(row.entry_time)}
+                                      </Text>
+                                    </View>
+                                    <Text style={[styles.td, styles.thUser]}>
+                                      {row.user_name || "—"}
+                                    </Text>
+                                    <Text style={[styles.td, styles.thJob]}>
+                                      {row.job_name || "—"}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.td,
+                                        styles.thMaterialType,
+                                        {
+                                          color: getMaterialTypeColor(
+                                            getResolvedMaterialType(
+                                              row,
+                                              inventory,
+                                            ),
+                                            theme,
+                                          ),
+                                          fontWeight: "600",
+                                        },
+                                      ]}
+                                    >
+                                      {formatMaterialTypeLabel(
+                                        getResolvedMaterialType(row, inventory),
+                                      )}
+                                    </Text>
+                                    <Text style={[styles.td, styles.thColor]}>
+                                      {row.color_name || "—"}
+                                    </Text>
+                                    <Text style={[styles.td, styles.thQty]}>
+                                      {formatQtyDisplay(row)}
+                                    </Text>
+                                    <Text style={[styles.td, styles.thCat]}>
+                                      {(() => {
+                                        const resolvedType =
+                                          getResolvedMaterialType(
+                                            row,
+                                            inventory,
+                                          );
+                                        if (
+                                          resolvedType === "dye" ||
+                                          resolvedType === "stain"
+                                        )
+                                          return "—";
+                                        return row.catalyst_oz != null
+                                          ? Number(row.catalyst_oz).toFixed(2)
+                                          : row.catalyst_gallons != null
+                                            ? (
+                                                Number(row.catalyst_gallons) *
+                                                128
+                                              ).toFixed(2)
+                                            : "—";
+                                      })()}
+                                    </Text>
+                                    <Text style={[styles.td, styles.thBooth]}>
+                                      {row.booth}
+                                    </Text>
+                                  </View>
+                                ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </View>
                     </ScrollView>
                   </View>
                 </ScrollView>
               ) : (
                 <View style={styles.logCardList}>
-                  {logsByDay.map(({ date, rows }) => (
-                    <React.Fragment key={date}>
-                      <View
-                        style={[
-                          styles.dayHeaderCard,
-                          {
-                            backgroundColor:
-                              theme.colors.surfaceVariant || "#eee",
-                            borderLeftColor: theme.colors.primary || "#6f95ab",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.dayHeaderText,
-                            { color: theme.colors.onSurface },
-                          ]}
+                  {logsByDay.map(({ date, rows, totals }) => {
+                    const dayKey = `day-${date}`;
+                    const isExpanded = expandedLogDayKeys.includes(dayKey);
+                    return (
+                      <React.Fragment key={date}>
+                        <Pressable
+                          onPress={() =>
+                            setExpandedLogDayKeys((prev) =>
+                              prev.includes(dayKey)
+                                ? prev.filter((k) => k !== dayKey)
+                                : [...prev, dayKey],
+                            )
+                          }
                         >
-                          {formatLogDate(date)}
-                        </Text>
-                      </View>
-                      {rows.map((row) => {
-                        const resolvedType = getResolvedMaterialType(
-                          row,
-                          inventory,
-                        );
-                        const showCatalyst =
-                          resolvedType !== "dye" && resolvedType !== "stain";
-                        const catalystDisplay =
-                          row.catalyst_oz != null
-                            ? Number(row.catalyst_oz).toFixed(2)
-                            : row.catalyst_gallons != null
-                              ? (Number(row.catalyst_gallons) * 128).toFixed(2)
-                              : "—";
-                        return (
                           <View
-                            key={row.id}
                             style={[
-                              styles.logCard,
+                              styles.dayHeaderCard,
                               {
-                                borderLeftWidth: 4,
-                                borderLeftColor: getMaterialTypeColor(
-                                  getResolvedMaterialType(row, inventory),
-                                  theme,
-                                ),
+                                backgroundColor:
+                                  theme.colors.surfaceVariant || "#eee",
+                                borderLeftColor:
+                                  theme.colors.primary || "#6f95ab",
                               },
                             ]}
                           >
-                            {/* Top row: time + user stacked on left */}
-                            <View style={styles.logCardTopRow}>
-                              <View style={styles.logCardTopLeft}>
-                                <Text style={styles.logCardLabel}>Time</Text>
-                                <Text style={styles.logCardValueMain}>
-                                  {formatTimeDisplay(row.entry_time)}
-                                </Text>
-                                <Text
-                                  style={[
-                                    styles.logCardLabel,
-                                    { marginTop: 4 },
-                                  ]}
-                                >
-                                  User
-                                </Text>
-                                <Text
-                                  style={styles.logCardValueSecondary}
-                                  numberOfLines={1}
-                                >
-                                  {row.user_name || "—"}
-                                </Text>
-                              </View>
-                            </View>
-
-                            {/* Second row: type and color inline */}
-                            <View style={styles.logCardInlineRow}>
-                              <View style={styles.logCardInlineCol}>
-                                <Text style={styles.logCardLabel}>Type</Text>
-                                <Text
-                                  style={[
-                                    styles.logCardValueInline,
-                                    {
-                                      color: getMaterialTypeColor(
-                                        resolvedType,
-                                        theme,
-                                      ),
-                                      fontWeight: "600",
-                                    },
-                                  ]}
-                                  numberOfLines={1}
-                                >
-                                  {formatMaterialTypeLabel(resolvedType)}
-                                </Text>
-                              </View>
-                              <View style={styles.logCardInlineCol}>
-                                <Text style={styles.logCardLabel}>Color</Text>
-                                <Text
-                                  style={styles.logCardValueInline}
-                                  numberOfLines={1}
-                                >
-                                  {row.color_name || "—"}
-                                </Text>
-                              </View>
-                            </View>
-
-                            {/* Third row: qty and catalyst inline */}
-                            <View style={styles.logCardInlineRow}>
-                              <View style={styles.logCardInlineCol}>
-                                <Text style={styles.logCardLabel}>
-                                  Qty ({row.cup_gun ? "oz" : "gal"})
-                                </Text>
-                                <Text style={styles.logCardValueInline}>
-                                  {formatQtyDisplay(row)}
-                                </Text>
-                              </View>
-                              {showCatalyst && (
-                                <View style={styles.logCardInlineCol}>
-                                  <Text style={styles.logCardLabel}>
-                                    Cat (oz)
-                                  </Text>
-                                  <Text style={styles.logCardValueInline}>
-                                    {catalystDisplay}
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-
-                            {/* Booth & Job row: inline columns */}
-                            <View style={styles.logCardInlineRow}>
-                              <View style={styles.logCardInlineCol}>
-                                <Text style={styles.logCardLabel}>Booth</Text>
-                                <Text style={styles.logCardValueInline}>
-                                  {row.booth}
-                                </Text>
-                              </View>
-                              <View style={styles.logCardInlineCol}>
-                                <Text style={styles.logCardLabel}>Job</Text>
-                                <Text
-                                  style={styles.logCardValueInline}
-                                  numberOfLines={1}
-                                >
-                                  {row.job_name || "—"}
-                                </Text>
-                              </View>
-                            </View>
+                            <Text
+                              style={[
+                                styles.dayHeaderText,
+                                { color: theme.colors.onSurface },
+                              ]}
+                            >
+                              {formatLogDate(date)}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.dayHeaderTotals,
+                                {
+                                  color:
+                                    theme.colors.onSurfaceVariant || "#666",
+                                },
+                              ]}
+                            >
+                              {formatDayTotals(totals)}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.dayHeaderToggle,
+                                {
+                                  color:
+                                    theme.colors.onSurfaceVariant || "#666",
+                                },
+                              ]}
+                            >
+                              {isExpanded ? "Tap to collapse" : "Tap to expand"}
+                            </Text>
                           </View>
-                        );
-                      })}
-                    </React.Fragment>
-                  ))}
+                        </Pressable>
+                        {isExpanded &&
+                          rows.map((row) => {
+                            const resolvedType = getResolvedMaterialType(
+                              row,
+                              inventory,
+                            );
+                            const showCatalyst =
+                              resolvedType !== "dye" &&
+                              resolvedType !== "stain";
+                            const catalystDisplay =
+                              row.catalyst_oz != null
+                                ? Number(row.catalyst_oz).toFixed(2)
+                                : row.catalyst_gallons != null
+                                  ? (
+                                      Number(row.catalyst_gallons) * 128
+                                    ).toFixed(2)
+                                  : "—";
+                            const logItem = (inventory || []).find(
+                              (i) => String(i.id) === String(row.item_id),
+                            );
+                            const hexColor =
+                              logItem?.hex_color &&
+                              String(logItem.hex_color).trim()
+                                ? String(logItem.hex_color).trim()
+                                : null;
+                            const normalizedHex =
+                              hexColor &&
+                              /^#?[0-9A-Fa-f]{3,8}$/.test(hexColor.replace(/^#/, ""))
+                                ? hexColor.startsWith("#")
+                                  ? hexColor
+                                  : `#${hexColor}`
+                                : null;
+                            return (
+                              <View
+                                key={row.id}
+                                style={[
+                                  styles.logCard,
+                                  {
+                                    borderLeftWidth: 4,
+                                    borderLeftColor: getMaterialTypeColor(
+                                      getResolvedMaterialType(row, inventory),
+                                      theme,
+                                    ),
+                                  },
+                                ]}
+                              >
+                                <View style={styles.logCardInnerRow}>
+                                  <View style={styles.logCardMain}>
+                                    {/* Very top left: Time + User, then Booth (same format) */}
+                                    <Text style={[styles.logCardMetaLine, { color: theme.colors.onSurfaceVariant }]}>
+                                      {formatTimeDisplay(row.entry_time)}
+                                      {" · "}
+                                      {row.user_name || "—"}
+                                    </Text>
+                                    <Text style={[styles.logCardMetaLine, styles.logCardMetaLineSecond, { color: theme.colors.onSurfaceVariant }]}>
+                                      {row.booth || "—"}
+                                    </Text>
+
+                                    {/* Job */}
+                                    <View style={styles.logCardJobBlock}>
+                                      <Text style={styles.logCardJobLabel}>Job</Text>
+                                      <Text style={styles.logCardJobValue} numberOfLines={2}>
+                                        {row.job_name || "—"}
+                                      </Text>
+                                    </View>
+
+                                    {/* Color — large */}
+                                    <View style={styles.logCardHighlightBlock}>
+                                      <Text style={styles.logCardHighlightLabel}>Color</Text>
+                                      <Text style={styles.logCardHighlightValue} numberOfLines={2}>
+                                        {row.color_name || "—"}
+                                      </Text>
+                                    </View>
+
+                                    {/* Qty — large, catalyst small below (last block: no extra bottom margin) */}
+                                    <View style={[styles.logCardHighlightBlock, styles.logCardHighlightBlockLast]}>
+                                      <Text style={styles.logCardHighlightLabel}>
+                                        Qty ({row.cup_gun ? "oz" : "gal"})
+                                      </Text>
+                                      <Text style={styles.logCardHighlightValue}>
+                                        {formatQtyDisplay(row)}
+                                      </Text>
+                                      {showCatalyst && (
+                                        <Text style={styles.logCardCatalystSub}>
+                                          Cat {catalystDisplay} oz
+                                        </Text>
+                                      )}
+                                    </View>
+                                  </View>
+
+                                  {/* Right: Type at top */}
+                                  <View style={styles.logCardRightCol}>
+                                    <Text
+                                      style={[
+                                        styles.logCardTypePill,
+                                        {
+                                          color: getMaterialTypeColor(
+                                            resolvedType,
+                                            theme,
+                                          ),
+                                        },
+                                      ]}
+                                    >
+                                      {formatMaterialTypeLabel(resolvedType)}
+                                    </Text>
+                                  </View>
+                                </View>
+                                {/* Color swatch: fixed bottom-right ~25% of card, same spot every card */}
+                                {normalizedHex ? (
+                                  <View
+                                    style={[
+                                      styles.logCardColorSwatchFixed,
+                                      { backgroundColor: normalizedHex },
+                                    ]}
+                                  />
+                                ) : null}
+                              </View>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })}
                 </View>
               )}
             </Card.Content>
@@ -1439,28 +1538,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  headerRow: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === "web" ? 8 : 40,
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
-  headerLeft: {
-    minWidth: 80,
-    alignItems: "flex-start",
-  },
-  headerCenter: {
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
+    textAlign: "center",
   },
   headerRight: {
-    minWidth: 80,
-    alignItems: "flex-end",
-  },
-  title: {
-    fontSize: 22,
+    marginLeft: "auto",
   },
   subtitle: {
     fontSize: 13,
@@ -1649,20 +1742,114 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 3,
+    position: "relative",
+  },
+  logCardInnerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  logCardMain: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  logCardRightCol: {
+    flexShrink: 0,
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
   },
   logCardTopRow: {
     flexDirection: "row",
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   logCardTopLeft: {
     flex: 1,
-    paddingRight: 8,
+    paddingRight: 12,
+    minWidth: 0,
   },
   logCardTopRight: {
-    flexShrink: 1,
-    maxWidth: "45%",
+    flexShrink: 0,
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
+  },
+  logCardJobBlock: {
+    marginBottom: 10,
+  },
+  logCardJobLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    opacity: 0.8,
+    marginBottom: 2,
+  },
+  logCardJobValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    lineHeight: 22,
+  },
+  logCardTypePill: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  logCardColorSwatchFixed: {
+    position: "absolute",
+    right: 12,
+    bottom: 36,
+    width: 96,
+    height: 96,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+  },
+  logCardMetaLine: {
+    fontSize: 12,
+    marginBottom: 4,
+    opacity: 0.85,
+  },
+  logCardMetaLineSecond: {
+    marginBottom: 12,
+  },
+  logCardHighlightBlock: {
+    marginBottom: 14,
+  },
+  logCardHighlightBlockLast: {
+    marginBottom: 0,
+  },
+  logCardHighlightLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    opacity: 0.75,
+    marginBottom: 4,
+  },
+  logCardHighlightValue: {
+    fontSize: 20,
+    fontWeight: "600",
+    lineHeight: 26,
+  },
+  logCardCatalystSub: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  logCardBoothRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  logCardBoothLabel: {
+    fontSize: 11,
+    opacity: 0.75,
+    marginRight: 6,
+  },
+  logCardBoothValue: {
+    fontSize: 13,
+    fontWeight: "500",
   },
   logCardRow: {
     flexDirection: "row",
@@ -1692,11 +1879,9 @@ const styles = StyleSheet.create({
   },
   logCardValueInline: {
     fontSize: 14,
+    lineHeight: 20,
     marginTop: 2,
     textAlign: "left",
-  },
-  logCardBoothRow: {
-    paddingTop: 4,
   },
   cupGunRow: {
     flexDirection: "row",
@@ -1711,9 +1896,11 @@ const styles = StyleSheet.create({
   logCardValueMain: {
     fontSize: 16,
     fontWeight: "600",
+    lineHeight: 22,
   },
   logCardValueSecondary: {
     fontSize: 14,
+    lineHeight: 20,
   },
   tableHorizontalWrap: {
     marginTop: 4,
@@ -1741,16 +1928,19 @@ const styles = StyleSheet.create({
   },
   tableRow: {
     flexDirection: "row",
-    paddingVertical: 8,
+    alignItems: "flex-start",
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#eee",
   },
   th: {
     fontWeight: "600",
     fontSize: 12,
+    lineHeight: 20,
   },
   td: {
     fontSize: 13,
+    lineHeight: 20,
   },
   dateLine: {
     fontSize: 13,
@@ -1761,6 +1951,7 @@ const styles = StyleSheet.create({
   },
   timeOnly: {
     fontSize: 13,
+    lineHeight: 20,
   },
   dayHeaderRow: {
     flexDirection: "row",
@@ -1770,6 +1961,18 @@ const styles = StyleSheet.create({
     minWidth: 619,
     borderBottomWidth: 2,
     borderBottomColor: "rgba(0,0,0,0.15)",
+  },
+  dayHeaderContent: {
+    flex: 1,
+  },
+  dayHeaderTotals: {
+    fontSize: 13,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  dayHeaderToggle: {
+    fontSize: 11,
+    marginTop: 2,
   },
   dayHeaderCard: {
     paddingVertical: 10,
@@ -1783,14 +1986,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
-  thDate: { width: 72 },
-  thUser: { width: 80 },
-  thJob: { width: 100 },
-  thMaterialType: { width: 64 },
-  thColor: { width: 120 },
-  thQty: { width: 50 },
-  thCat: { width: 58 },
-  thBooth: { width: 75 },
+  thDate: { width: 72, paddingRight: 10 },
+  thUser: { width: 80, paddingRight: 10 },
+  thJob: { width: 100, paddingRight: 10 },
+  thMaterialType: { width: 92, paddingRight: 10 },
+  thColor: { width: 120, paddingRight: 10 },
+  thQty: { width: 50, paddingRight: 10 },
+  thCat: { width: 58, paddingRight: 10 },
+  thBooth: { width: 75, paddingRight: 10 },
   totalsSection: {
     marginTop: 16,
     marginBottom: 16,

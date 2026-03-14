@@ -113,6 +113,8 @@ export default function HomeScreen({
   const [auditLogsLoaded, setAuditLogsLoaded] = useState(false);
   const [backOrderCount, setBackOrderCount] = useState(0);
   const [lateOrderCount, setLateOrderCount] = useState(0);
+  // Admin only: 'all' = full transaction history, 'reduced' = what standard users see
+  const [transactionHistoryView, setTransactionHistoryView] = useState("all");
 
   const lowStockItems = useMemo(
     () =>
@@ -129,23 +131,21 @@ export default function HomeScreen({
   );
 
   const loadAuditLogs = async () => {
-    if (!isDesktop) setAuditLogsLoading(true);
+    setAuditLogsLoading(true);
     try {
       const logs = await AuditService.list(200);
       setAuditLogs(Array.isArray(logs) ? logs : []);
     } catch (e) {
       console.error("HomeScreen audit load:", e);
     } finally {
-      if (!isDesktop) {
-        setAuditLogsLoading(false);
-        setAuditLogsLoaded(true);
-      }
+      setAuditLogsLoading(false);
+      setAuditLogsLoaded(true);
     }
   };
 
   useEffect(() => {
-    if (!isDesktop) loadAuditLogs();
-  }, [isDesktop]);
+    loadAuditLogs();
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -167,32 +167,58 @@ export default function HomeScreen({
     return () => { cancelled = true; };
   }, [isAdmin]);
 
-  const todayStart = useMemo(() => {
+  const weekAgoStart = useMemo(() => {
     const d = new Date();
+    d.setDate(d.getDate() - 7);
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   }, []);
-  const todayEnd = useMemo(() => {
-    const d = new Date();
-    d.setHours(23, 59, 59, 999);
-    return d.getTime();
-  }, []);
 
-  const mobileTransactionLogs = useMemo(() => {
-    if (isDesktop) return [];
-    const todayLogs = auditLogs.filter((log) => {
-      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-      return t >= todayStart && t <= todayEnd;
-    });
-    if (isAdmin) return todayLogs;
-    return todayLogs.filter((log) => {
+  const filterToStandardUserVisible = (logs) =>
+    logs.filter((log) => {
       const a = log.action;
       const d = log.details;
       if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
       if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
       return false;
     });
-  }, [auditLogs, isDesktop, todayStart, todayEnd, isAdmin]);
+
+  const recentTransactionLogs = useMemo(() => {
+    const weekLogs = auditLogs.filter((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t >= weekAgoStart;
+    });
+    if (!isAdmin) return filterToStandardUserVisible(weekLogs);
+    if (transactionHistoryView === "reduced") return filterToStandardUserVisible(weekLogs);
+    return weekLogs;
+  }, [auditLogs, weekAgoStart, isAdmin, transactionHistoryView]);
+
+  const transactionLogsByDay = useMemo(() => {
+    const byDay = {};
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    recentTransactionLogs.forEach((log) => {
+      const t = log.timestamp ? new Date(log.timestamp) : null;
+      if (!t) return;
+      const dayStart = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+      const key = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+      if (!byDay[key]) byDay[key] = { key, dayStart, logs: [] };
+      byDay[key].logs.push(log);
+    });
+    return Object.values(byDay)
+      .sort((a, b) => b.dayStart - a.dayStart)
+      .map((group) => {
+        let dateLabel;
+        if (group.dayStart === todayStart) dateLabel = "Today";
+        else if (group.dayStart === yesterdayStart) dateLabel = "Yesterday";
+        else {
+          const d = new Date(group.dayStart);
+          dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+        }
+        return { ...group, dateLabel };
+      });
+  }, [recentTransactionLogs]);
 
   const getDisplayUserName = (log) => {
     const u = (log.userName || "").trim().toLowerCase();
@@ -205,7 +231,7 @@ export default function HomeScreen({
 
   const handleRefresh = async () => {
     await onRefresh?.();
-    if (!isDesktop) await loadAuditLogs();
+    await loadAuditLogs();
     if (isAdmin) {
       try {
         const [back, late] = await Promise.all([
@@ -223,6 +249,113 @@ export default function HomeScreen({
   const qrButtonText = "Check In / Check Out";
   const getItemName = (itemId) =>
     inventory.find((i) => i.id === itemId)?.name || itemId || "Unknown";
+
+  const transactionSection = (
+    <Card style={styles.card}>
+      <Card.Content>
+        <Text style={styles.sectionTitle}>Past week's transactions</Text>
+        {isAdmin && (
+          <View style={styles.transactionToggleRow}>
+            <Button
+              mode="contained"
+              compact
+              onPress={() =>
+                setTransactionHistoryView((prev) =>
+                  prev === "all" ? "reduced" : "all",
+                )
+              }
+              style={styles.transactionToggleBtn}
+            >
+              {transactionHistoryView === "all" ? "All" : "Reduced"}
+            </Button>
+          </View>
+        )}
+        {!auditLogsLoaded || auditLogsLoading ? (
+          [0, 1, 2, 3].map((i) => (
+            <View
+              key={`placeholder-${i}`}
+              style={[styles.transactionRow, i < 3 && styles.transactionRowBorder]}
+            >
+              <View style={styles.transactionLeftCol}>
+                <Text style={[styles.transactionDateTime, styles.placeholderText]}>—</Text>
+                <Text style={[styles.transactionUser, styles.placeholderText]}>—</Text>
+              </View>
+              <View style={[styles.transactionActionCol, styles.placeholderAction]}>
+                <Text style={[styles.transactionActionText, styles.placeholderText]}>—</Text>
+              </View>
+              <View style={styles.transactionQtyCol}>
+                <Text style={[styles.transactionQty, styles.placeholderText]}>—</Text>
+              </View>
+              <Text style={[styles.transactionColor, styles.placeholderText]} numberOfLines={2}>—</Text>
+            </View>
+          ))
+        ) : transactionLogsByDay.length === 0 ? (
+          <Text style={styles.emptyLogs}>No transactions in the past week</Text>
+        ) : (
+          transactionLogsByDay.map((dayGroup) => (
+            <View key={dayGroup.key} style={styles.transactionDayBlock}>
+              <Text style={[styles.transactionDayHeader, { color: theme.colors.primary }]}>
+                {dayGroup.dateLabel}
+              </Text>
+              {dayGroup.logs.map((log, index) => {
+                const actionText = formatAction(log.action, log.details);
+                const color = getActionColor(log.action, log.details);
+                const itemName = getItemName(log.itemId);
+                const qtyStr = getQuantityDisplay(log.action, log.details);
+                const d = log.timestamp ? new Date(log.timestamp) : null;
+                const dateTimeStr = d
+                  ? `${d.toLocaleString("en-US", { month: "short", day: "numeric" })} @ ${d.toLocaleString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(/\s/g, "")}`
+                  : "";
+                return (
+                  <View
+                    key={`${log.timestamp}-${log.itemId}-${index}`}
+                    style={[
+                      styles.transactionRow,
+                      index < dayGroup.logs.length - 1 && styles.transactionRowBorder,
+                    ]}
+                  >
+                    <View style={styles.transactionLeftCol}>
+                      <Text
+                        style={[styles.transactionDateTime, { color: theme.dark ? "#aaa" : "#666" }]}
+                        numberOfLines={1}
+                      >
+                        {dateTimeStr}
+                      </Text>
+                      <Text
+                        style={[styles.transactionUser, { color: theme.dark ? "#999" : "#888" }]}
+                        numberOfLines={1}
+                      >
+                        {getDisplayUserName(log)}
+                      </Text>
+                    </View>
+                    <View style={[styles.transactionActionCol, { backgroundColor: color + "22" }]}>
+                      <Text style={[styles.transactionActionText, { color }]} numberOfLines={2}>
+                        {actionText}
+                      </Text>
+                    </View>
+                    <View style={styles.transactionQtyCol}>
+                      <Text
+                        style={[styles.transactionQty, { color: theme.colors.onSurface }]}
+                        numberOfLines={1}
+                      >
+                        {qtyStr !== "-" ? `${qtyStr} gal` : "-"}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[styles.transactionColor, { color: theme.colors.onSurface }]}
+                      numberOfLines={2}
+                    >
+                      {itemName}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ))
+        )}
+      </Card.Content>
+    </Card>
+  );
 
   const actionButtons = (
     <>
@@ -549,105 +682,7 @@ export default function HomeScreen({
                 </>
               )}
               {actionButtons}
-              <Card style={styles.card}>
-                <Card.Content>
-                  <Text style={styles.sectionTitle}>Today's transactions</Text>
-                  {!auditLogsLoaded || auditLogsLoading ? (
-                    [0, 1, 2, 3].map((i) => (
-                      <View
-                        key={`placeholder-${i}`}
-                        style={[
-                          styles.transactionRow,
-                          i < 3 && styles.transactionRowBorder,
-                        ]}
-                      >
-                        <View style={styles.transactionLeftCol}>
-                          <Text style={[styles.transactionDateTime, styles.placeholderText]}>—</Text>
-                          <Text style={[styles.transactionUser, styles.placeholderText]}>—</Text>
-                        </View>
-                        <View style={[styles.transactionActionCol, styles.placeholderAction]}>
-                          <Text style={[styles.transactionActionText, styles.placeholderText]}>—</Text>
-                        </View>
-                        <View style={styles.transactionQtyCol}>
-                          <Text style={[styles.transactionQty, styles.placeholderText]}>—</Text>
-                        </View>
-                        <Text style={[styles.transactionColor, styles.placeholderText]} numberOfLines={2}>—</Text>
-                      </View>
-                    ))
-                  ) : mobileTransactionLogs.length === 0 ? (
-                    <Text style={styles.emptyLogs}>No transactions today</Text>
-                  ) : (
-                    mobileTransactionLogs.map((log, index) => {
-                      const actionText = formatAction(log.action, log.details);
-                      const color = getActionColor(log.action, log.details);
-                      const itemName = getItemName(log.itemId);
-                      const qtyStr = getQuantityDisplay(log.action, log.details);
-                      const d = log.timestamp ? new Date(log.timestamp) : null;
-                      const dateTimeStr = d
-                        ? `${d.toLocaleString("en-US", { month: "short", day: "numeric" })} @ ${d.toLocaleString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(/\s/g, "")}`
-                        : "";
-                      return (
-                        <View
-                          key={`${log.timestamp}-${log.itemId}-${index}`}
-                          style={[
-                            styles.transactionRow,
-                            index < mobileTransactionLogs.length - 1 && styles.transactionRowBorder,
-                          ]}
-                        >
-                          <View style={styles.transactionLeftCol}>
-                            <Text
-                              style={[
-                                styles.transactionDateTime,
-                                { color: theme.dark ? "#aaa" : "#666" },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {dateTimeStr}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.transactionUser,
-                                { color: theme.dark ? "#999" : "#888" },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {getDisplayUserName(log)}
-                            </Text>
-                          </View>
-                          <View style={[styles.transactionActionCol, { backgroundColor: color + "22" }]}>
-                            <Text
-                              style={[styles.transactionActionText, { color }]}
-                              numberOfLines={2}
-                            >
-                              {actionText}
-                            </Text>
-                          </View>
-                          <View style={styles.transactionQtyCol}>
-                            <Text
-                              style={[
-                                styles.transactionQty,
-                                { color: theme.colors.onSurface },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {qtyStr !== "-" ? `${qtyStr} gal` : "-"}
-                            </Text>
-                          </View>
-                          <Text
-                            style={[
-                              styles.transactionColor,
-                              { color: theme.colors.onSurface },
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {itemName}
-                          </Text>
-                        </View>
-                      );
-                    })
-                  )}
-                </Card.Content>
-              </Card>
+              {transactionSection}
             </>
           )}
 
@@ -681,6 +716,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 10,
     backgroundColor: "transparent",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   headerButtons: {
     flexDirection: "row",
@@ -805,6 +842,31 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 12,
   },
+  transactionToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 12,
+  },
+  transactionToggleBtn: {
+    minWidth: 100,
+  },
+  transactionToggleHint: {
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  transactionDayBlock: {
+    marginTop: 16,
+  },
+  transactionDayHeader: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 8,
+    paddingBottom: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,0,0,0.12)",
+  },
   emptyLogs: {
     fontSize: 14,
     color: "#999",
@@ -881,6 +943,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 16,
     paddingHorizontal: 0,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
   },
   webTitle: {
     fontSize: 20,
