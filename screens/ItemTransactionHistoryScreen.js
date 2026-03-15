@@ -5,6 +5,7 @@ import {
   ScrollView,
   RefreshControl,
   Platform,
+  useWindowDimensions,
 } from "react-native";
 import {
   Card,
@@ -100,9 +101,21 @@ function getDisplayUserName(log) {
   return adminOnly ? "Admin" : (log.userName || "Unknown");
 }
 
-export default function ItemTransactionHistoryScreen({ item, onBack }) {
+function filterToStandardUserVisible(logs) {
+  return logs.filter((log) => {
+    const a = log.action;
+    const d = log.details;
+    if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
+    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
+    return false;
+  });
+}
+
+export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = true }) {
   const theme = useTheme();
+  const { width } = useWindowDimensions();
   const isWeb = Platform.OS === "web";
+  const isDesktop = isWeb && width >= 700;
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -115,13 +128,14 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
     try {
       const all = await AuditService.list(2000);
       const itemId = item?.id != null ? String(item.id) : "";
-      const filtered = (Array.isArray(all) ? all : [])
+      let filtered = (Array.isArray(all) ? all : [])
         .filter((log) => String(log.itemId) === itemId)
         .filter((log) => {
           const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
           return t >= cutoff;
         })
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      if (!isAdmin) filtered = filterToStandardUserVisible(filtered);
       setLogs(filtered);
     } catch (e) {
       console.error("ItemTransactionHistoryScreen load:", e);
@@ -134,14 +148,14 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
 
   useEffect(() => {
     if (item) loadLogs();
-  }, [item?.id]);
+  }, [item?.id, isAdmin]);
 
   if (!item) {
     return null;
   }
 
-  return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+  const content = (
+    <>
       <View style={styles.header}>
         <IconButton
           icon="arrow-left"
@@ -149,10 +163,18 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
           onPress={onBack}
           iconColor={theme.colors.primary}
         />
-        <Title style={styles.title}>Transaction history</Title>
+        <Title style={styles.title}>Item Transaction History</Title>
         <View style={styles.placeholder} />
       </View>
-      <View style={styles.itemSummary}>
+      <View
+        style={[
+          styles.itemSummary,
+          {
+            borderBottomWidth: 1,
+            borderBottomColor: theme.dark ? "rgba(255,255,255,0.15)" : "#eee",
+          },
+        ]}
+      >
         <Text style={[styles.itemName, { color: theme.colors.onSurface }]}>
           {item.name || "Unnamed"}
         </Text>
@@ -176,7 +198,7 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
             />
           }
         >
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }]}>
+          <Card style={[styles.card, { backgroundColor: "#25232A" }]}>
             <Card.Content style={styles.cardContent}>
               {logs.length === 0 ? (
                 <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
@@ -231,6 +253,18 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
           </Card>
         </ScrollView>
       )}
+    </>
+  );
+
+  return (
+    <View style={[styles.container, { backgroundColor: "#1a1a1e" }]}>
+      {isDesktop ? (
+        <View style={styles.webContainer}>
+          {content}
+        </View>
+      ) : (
+        content
+      )}
     </View>
   );
 }
@@ -238,6 +272,15 @@ export default function ItemTransactionHistoryScreen({ item, onBack }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  webContainer: {
+    flex: 1,
+    maxWidth: 1200,
+    width: "100%",
+    alignSelf: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    paddingTop: 8,
   },
   header: {
     flexDirection: "row",
@@ -257,6 +300,7 @@ const styles = StyleSheet.create({
   },
   itemSummary: {
     paddingHorizontal: 20,
+    paddingTop: 24,
     paddingBottom: 16,
   },
   itemName: {

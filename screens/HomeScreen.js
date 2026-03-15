@@ -21,12 +21,15 @@ import OrderService from "../services/orderService";
 import version from "../version";
 
 function formatAction(action, details) {
-  if (action === "update" && details?._actionType === "check_in") return "Checked In";
-  if (action === "update" && details?._actionType === "check_out") return "Checked Out";
+  if (action === "update" && details?._actionType === "check_in")
+    return "Checked In";
+  if (action === "update" && details?._actionType === "check_out")
+    return "Checked Out";
   if (action === "add") return "New Entry";
   if (action === "check_in") return "Checked In";
   if (action === "check_out") return "Checked Out";
-  if (action === "update" && details?._actionType === "receiving") return "Receiving";
+  if (action === "update" && details?._actionType === "receiving")
+    return "Receiving";
   if (action === "receiving") return "Receiving";
   if (action === "update") return "Manual Adjustment";
   if (action === "delete") return "Deleted";
@@ -35,11 +38,14 @@ function formatAction(action, details) {
 }
 
 function getActionColor(action, details) {
-  if (action === "update" && details?._actionType === "check_in") return "#81c784";
-  if (action === "update" && details?._actionType === "check_out") return "#e57373";
+  if (action === "update" && details?._actionType === "check_in")
+    return "#81c784";
+  if (action === "update" && details?._actionType === "check_out")
+    return "#e57373";
   if (action === "check_in") return "#81c784";
   if (action === "check_out") return "#e57373";
-  if (action === "update" && details?._actionType === "receiving") return "#64b5f6";
+  if (action === "update" && details?._actionType === "receiving")
+    return "#64b5f6";
   if (action === "receiving") return "#64b5f6";
   if (action === "add") return "#64b5f6";
   if (action === "delete") return "#f44336";
@@ -55,7 +61,9 @@ function getQuantityDisplay(action, details) {
     action === "receiving" ||
     (action === "update" &&
       details._actionType &&
-      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
+      (details._actionType === "check_in" ||
+        details._actionType === "check_out" ||
+        details._actionType === "receiving"));
   if (isCheckInOut && typeof details.quantityChange === "number") {
     return String(details.quantityChange);
   }
@@ -164,7 +172,9 @@ export default function HomeScreen({
         if (!cancelled) console.error("HomeScreen order counts:", e);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [isAdmin]);
 
   const weekAgoStart = useMemo(() => {
@@ -174,34 +184,63 @@ export default function HomeScreen({
     return d.getTime();
   }, []);
 
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, []);
+
   const filterToStandardUserVisible = (logs) =>
     logs.filter((log) => {
       const a = log.action;
       const d = log.details;
-      if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
-      if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
+      if (
+        a === "check_in" ||
+        a === "check_out" ||
+        a === "receiving" ||
+        a === "delete"
+      )
+        return true;
+      if (
+        a === "update" &&
+        d?._actionType &&
+        (d._actionType === "check_in" ||
+          d._actionType === "check_out" ||
+          d._actionType === "receiving")
+      )
+        return true;
       return false;
     });
 
   const recentTransactionLogs = useMemo(() => {
-    const weekLogs = auditLogs.filter((log) => {
+    const timeCutoff = isAdmin ? weekAgoStart : todayStart;
+    const timeFiltered = auditLogs.filter((log) => {
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-      return t >= weekAgoStart;
+      return t >= timeCutoff;
     });
-    if (!isAdmin) return filterToStandardUserVisible(weekLogs);
-    if (transactionHistoryView === "reduced") return filterToStandardUserVisible(weekLogs);
-    return weekLogs;
-  }, [auditLogs, weekAgoStart, isAdmin, transactionHistoryView]);
+    if (!isAdmin) return filterToStandardUserVisible(timeFiltered);
+    if (transactionHistoryView === "reduced")
+      return filterToStandardUserVisible(timeFiltered);
+    return timeFiltered;
+  }, [auditLogs, weekAgoStart, todayStart, isAdmin, transactionHistoryView]);
 
   const transactionLogsByDay = useMemo(() => {
     const byDay = {};
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).getTime();
     const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
     recentTransactionLogs.forEach((log) => {
       const t = log.timestamp ? new Date(log.timestamp) : null;
       if (!t) return;
-      const dayStart = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+      const dayStart = new Date(
+        t.getFullYear(),
+        t.getMonth(),
+        t.getDate(),
+      ).getTime();
       const key = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
       if (!byDay[key]) byDay[key] = { key, dayStart, logs: [] };
       byDay[key].logs.push(log);
@@ -214,7 +253,12 @@ export default function HomeScreen({
         else if (group.dayStart === yesterdayStart) dateLabel = "Yesterday";
         else {
           const d = new Date(group.dayStart);
-          dateLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined });
+          dateLabel = d.toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+          });
         }
         return { ...group, dateLabel };
       });
@@ -224,9 +268,20 @@ export default function HomeScreen({
     const u = (log.userName || "").trim().toLowerCase();
     if (u && u !== "unknown") return log.userName;
     const adminOnly =
-      ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-      (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving"));
-    return adminOnly ? "Admin" : (log.userName || "Unknown");
+      [
+        "add",
+        "change_id",
+        "set_next_id",
+        "set_min_quantity",
+        "delete",
+      ].includes(log.action) ||
+      (log.action === "update" &&
+        !(
+          log.details?._actionType === "check_in" ||
+          log.details?._actionType === "check_out" ||
+          log.details?._actionType === "receiving"
+        ));
+    return adminOnly ? "Admin" : log.userName || "Unknown";
   };
 
   const handleRefresh = async () => {
@@ -253,7 +308,9 @@ export default function HomeScreen({
   const transactionSection = (
     <Card style={styles.card}>
       <Card.Content>
-        <Text style={styles.sectionTitle}>Past week's transactions</Text>
+        <Text style={styles.sectionTitle}>
+          {isAdmin ? "Past week's transactions" : "Today's transactions"}
+        </Text>
         {isAdmin && (
           <View style={styles.transactionToggleRow}>
             <Button
@@ -274,29 +331,62 @@ export default function HomeScreen({
           [0, 1, 2, 3].map((i) => (
             <View
               key={`placeholder-${i}`}
-              style={[styles.transactionRow, i < 3 && styles.transactionRowBorder]}
+              style={[
+                styles.transactionRow,
+                i < 3 && styles.transactionRowBorder,
+              ]}
             >
               <View style={styles.transactionLeftCol}>
-                <Text style={[styles.transactionDateTime, styles.placeholderText]}>—</Text>
-                <Text style={[styles.transactionUser, styles.placeholderText]}>—</Text>
+                <Text
+                  style={[styles.transactionDateTime, styles.placeholderText]}
+                >
+                  —
+                </Text>
+                <Text style={[styles.transactionUser, styles.placeholderText]}>
+                  —
+                </Text>
               </View>
-              <View style={[styles.transactionActionCol, styles.placeholderAction]}>
-                <Text style={[styles.transactionActionText, styles.placeholderText]}>—</Text>
+              <View
+                style={[styles.transactionActionCol, styles.placeholderAction]}
+              >
+                <Text
+                  style={[styles.transactionActionText, styles.placeholderText]}
+                >
+                  —
+                </Text>
               </View>
               <View style={styles.transactionQtyCol}>
-                <Text style={[styles.transactionQty, styles.placeholderText]}>—</Text>
+                <Text style={[styles.transactionQty, styles.placeholderText]}>
+                  —
+                </Text>
               </View>
-              <Text style={[styles.transactionColor, styles.placeholderText]} numberOfLines={2}>—</Text>
+              <Text
+                style={[styles.transactionColor, styles.placeholderText]}
+                numberOfLines={2}
+              >
+                —
+              </Text>
             </View>
           ))
         ) : transactionLogsByDay.length === 0 ? (
-          <Text style={styles.emptyLogs}>No transactions in the past week</Text>
+          <Text style={styles.emptyLogs}>
+            {isAdmin
+              ? "No transactions in the past week"
+              : "No transactions today"}
+          </Text>
         ) : (
           transactionLogsByDay.map((dayGroup) => (
             <View key={dayGroup.key} style={styles.transactionDayBlock}>
-              <Text style={[styles.transactionDayHeader, { color: theme.colors.primary }]}>
-                {dayGroup.dateLabel}
-              </Text>
+              {isAdmin && (
+                <Text
+                  style={[
+                    styles.transactionDayHeader,
+                    { color: theme.colors.primary },
+                  ]}
+                >
+                  {dayGroup.dateLabel}
+                </Text>
+              )}
               {dayGroup.logs.map((log, index) => {
                 const actionText = formatAction(log.action, log.details);
                 const color = getActionColor(log.action, log.details);
@@ -311,38 +401,59 @@ export default function HomeScreen({
                     key={`${log.timestamp}-${log.itemId}-${index}`}
                     style={[
                       styles.transactionRow,
-                      index < dayGroup.logs.length - 1 && styles.transactionRowBorder,
+                      index < dayGroup.logs.length - 1 &&
+                        styles.transactionRowBorder,
                     ]}
                   >
                     <View style={styles.transactionLeftCol}>
                       <Text
-                        style={[styles.transactionDateTime, { color: theme.dark ? "#aaa" : "#666" }]}
+                        style={[
+                          styles.transactionDateTime,
+                          { color: theme.dark ? "#aaa" : "#666" },
+                        ]}
                         numberOfLines={1}
                       >
                         {dateTimeStr}
                       </Text>
                       <Text
-                        style={[styles.transactionUser, { color: theme.dark ? "#999" : "#888" }]}
+                        style={[
+                          styles.transactionUser,
+                          { color: theme.dark ? "#999" : "#888" },
+                        ]}
                         numberOfLines={1}
                       >
                         {getDisplayUserName(log)}
                       </Text>
                     </View>
-                    <View style={[styles.transactionActionCol, { backgroundColor: color + "22" }]}>
-                      <Text style={[styles.transactionActionText, { color }]} numberOfLines={2}>
+                    <View
+                      style={[
+                        styles.transactionActionCol,
+                        { backgroundColor: color + "22" },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.transactionActionText, { color }]}
+                        numberOfLines={2}
+                      >
                         {actionText}
                       </Text>
                     </View>
                     <View style={styles.transactionQtyCol}>
                       <Text
-                        style={[styles.transactionQty, { color: theme.colors.onSurface }]}
+                        style={[
+                          styles.transactionQty,
+                          { color: theme.colors.onSurface },
+                        ]}
                         numberOfLines={1}
                       >
                         {qtyStr !== "-" ? `${qtyStr} gal` : "-"}
                       </Text>
                     </View>
                     <Text
-                      style={[styles.transactionColor, { color: theme.colors.onSurface }]}
+                      style={[
+                        styles.transactionColor,
+                        { color: theme.colors.onSurface },
+                      ]}
                       numberOfLines={2}
                     >
                       {itemName}
@@ -358,7 +469,7 @@ export default function HomeScreen({
   );
 
   const actionButtons = (
-    <>
+    <View style={!isWeb ? styles.actionButtonsWrapMobile : undefined}>
       {isAdmin && (
         <Button
           mode="contained"
@@ -392,7 +503,7 @@ export default function HomeScreen({
           style={styles.button}
           icon="truck-delivery"
         >
-          Upcoming Deliveries
+          Purchase Orders
         </Button>
       )}
       {onOpenMaterialUsage && (
@@ -405,7 +516,7 @@ export default function HomeScreen({
           Material Usage
         </Button>
       )}
-    </>
+    </View>
   );
 
   return (
@@ -504,9 +615,14 @@ export default function HomeScreen({
                 <>
                   <Card style={styles.card}>
                     <Card.Content>
-                      <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                      <Text style={styles.statLabel}>
+                        Paint Need to Recycle
+                      </Text>
                       <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <ActivityIndicator
+                          size="small"
+                          color={theme.colors.primary}
+                        />
                         <Text style={styles.statLoadingText}>Loading…</Text>
                       </View>
                     </Card.Content>
@@ -516,7 +632,10 @@ export default function HomeScreen({
                       <Card.Content>
                         <Text style={styles.statLabel}>Back Orders</Text>
                         <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <ActivityIndicator
+                            size="small"
+                            color={theme.colors.primary}
+                          />
                           <Text style={styles.statLoadingText}>Loading…</Text>
                         </View>
                       </Card.Content>
@@ -527,7 +646,10 @@ export default function HomeScreen({
                       <Card.Content>
                         <Text style={styles.statLabel}>Late Orders</Text>
                         <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <ActivityIndicator
+                            size="small"
+                            color={theme.colors.primary}
+                          />
                           <Text style={styles.statLoadingText}>Loading…</Text>
                         </View>
                       </Card.Content>
@@ -537,7 +659,10 @@ export default function HomeScreen({
                     <Card.Content>
                       <Text style={styles.statLabel}>Low Stock</Text>
                       <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <ActivityIndicator
+                          size="small"
+                          color={theme.colors.primary}
+                        />
                         <Text style={styles.statLoadingText}>Loading…</Text>
                       </View>
                     </Card.Content>
@@ -548,7 +673,9 @@ export default function HomeScreen({
                   {recycleDueCount > 0 && onOpenRecycleDue && (
                     <Card style={styles.card} onPress={onOpenRecycleDue}>
                       <Card.Content>
-                        <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                        <Text style={styles.statLabel}>
+                          Paint Need to Recycle
+                        </Text>
                         <Title style={[styles.statValue, { color: "#e65100" }]}>
                           {recycleDueCount}
                         </Title>
@@ -599,7 +726,9 @@ export default function HomeScreen({
                   ) : (
                     <Card style={styles.card}>
                       <Card.Content>
-                        <Text style={styles.statLabel}>All paints in stock</Text>
+                        <Text style={styles.statLabel}>
+                          All paints in stock
+                        </Text>
                         <Text style={styles.statValue}>✓</Text>
                       </Card.Content>
                     </Card>
@@ -614,9 +743,14 @@ export default function HomeScreen({
                 <>
                   <Card style={styles.card}>
                     <Card.Content>
-                      <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                      <Text style={styles.statLabel}>
+                        Paint Need to Recycle
+                      </Text>
                       <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator size="small" color={theme.colors.primary} />
+                        <ActivityIndicator
+                          size="small"
+                          color={theme.colors.primary}
+                        />
                         <Text style={styles.statLoadingText}>Loading…</Text>
                       </View>
                     </Card.Content>
@@ -626,7 +760,10 @@ export default function HomeScreen({
                       <Card.Content>
                         <Text style={styles.statLabel}>Back Orders</Text>
                         <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <ActivityIndicator
+                            size="small"
+                            color={theme.colors.primary}
+                          />
                           <Text style={styles.statLoadingText}>Loading…</Text>
                         </View>
                       </Card.Content>
@@ -637,7 +774,10 @@ export default function HomeScreen({
                       <Card.Content>
                         <Text style={styles.statLabel}>Late Orders</Text>
                         <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <ActivityIndicator
+                            size="small"
+                            color={theme.colors.primary}
+                          />
                           <Text style={styles.statLoadingText}>Loading…</Text>
                         </View>
                       </Card.Content>
@@ -649,7 +789,9 @@ export default function HomeScreen({
                   {recycleDueCount > 0 && onOpenRecycleDue && (
                     <Card style={styles.card} onPress={onOpenRecycleDue}>
                       <Card.Content>
-                        <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+                        <Text style={styles.statLabel}>
+                          Paint Need to Recycle
+                        </Text>
                         <Title style={[styles.statValue, { color: "#e65100" }]}>
                           {recycleDueCount}
                         </Title>
@@ -688,7 +830,7 @@ export default function HomeScreen({
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>
-              Logged in as{" "}
+              Logged in as:{" "}
               <Text style={styles.mono}>{isAdmin ? "Admin" : userName}</Text>
             </Text>
             <Text style={styles.footerVersion}>v1.{version?.build ?? "?"}</Text>
@@ -799,6 +941,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#ff6b6b",
+  },
+  actionButtonsWrapMobile: {
+    paddingTop: 15,
   },
   button: {
     marginBottom: 15,

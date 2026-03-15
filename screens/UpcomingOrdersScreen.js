@@ -887,7 +887,7 @@ export default function UpcomingOrdersScreen({
           iconColor={primaryColor}
         />
         <Title style={[styles.title, isDesktop && styles.titleCentered]}>
-          Upcoming Deliveries
+          Purchase Orders
         </Title>
         {!isDesktop && (
           <View style={styles.headerRight}>
@@ -1312,8 +1312,7 @@ export default function UpcomingOrdersScreen({
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        {hasSearchFilter &&
-                          "No POs match your search."}
+                        {hasSearchFilter && "No POs match your search."}
                         {!hasSearchFilter &&
                           dateViewMode != null &&
                           "No POs yet."}

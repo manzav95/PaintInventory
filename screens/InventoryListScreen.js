@@ -728,44 +728,22 @@ export default function InventoryListScreen({
               <Title style={styles.webTitle}>Inventory Dashboard</Title>
             </View>
             <View style={styles.refreshContainer}>
-              <View
-                style={[
-                  styles.headerFilterGroup,
-                  styles.headerFilterGroupSpacer,
-                ]}
-              >
-                {isAdmin && viewMode !== "colorBook" && (
+              {viewMode === "colorBook" && (
+                <View style={[styles.headerFilterGroup, { marginRight: 8 }]}>
                   <Button
-                    mode={
-                      listOrderMode === "trueOrder" ? "contained" : "outlined"
-                    }
+                    mode={bookFilter === "standard" ? "outlined" : "contained"}
                     compact
                     onPress={() =>
-                      setListOrderMode((prev) =>
-                        prev === "trueOrder" ? "alphabetical" : "trueOrder",
+                      setBookFilter((prev) =>
+                        prev === "standard" ? "custom" : "standard",
                       )
                     }
-                    style={[styles.viewModeButton, styles.viewModeButtonLong]}
-                    disabled={bookFilter === "custom"}
+                    style={styles.viewModeButton}
                   >
-                    {listOrderMode === "trueOrder"
-                      ? "Alphabetical"
-                      : "True Order"}
+                    {bookFilter === "standard" ? "Stock" : "Custom"}
                   </Button>
-                )}
-                <Button
-                  mode={bookFilter === "standard" ? "outlined" : "contained"}
-                  compact
-                  onPress={() =>
-                    setBookFilter((prev) =>
-                      prev === "standard" ? "custom" : "standard",
-                    )
-                  }
-                  style={styles.viewModeButton}
-                >
-                  {bookFilter === "standard" ? "Stock" : "Custom"}
-                </Button>
-              </View>
+                </View>
+              )}
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
                 compact
@@ -779,20 +757,6 @@ export default function InventoryListScreen({
               >
                 {viewMode === "colorBook" ? "Inventory" : "Color Book"}
               </Button>
-              <IconButton
-                icon="refresh"
-                size={24}
-                onPress={onRefresh}
-                disabled={isRefreshing}
-                iconColor={theme.colors.primary}
-              />
-              {isRefreshing && (
-                <ActivityIndicator
-                  size="small"
-                  color={theme.colors.primary}
-                  style={styles.refreshIndicator}
-                />
-              )}
             </View>
           </View>
 
@@ -859,7 +823,7 @@ export default function InventoryListScreen({
                 {/* Analytics Cards */}
                 <View style={styles.analyticsRow}>
                   <Card style={styles.analyticsCard}>
-                    <Card.Content>
+                    <Card.Content style={styles.analyticsCardContent}>
                       <Text style={styles.analyticsLabel}>Total Gallons</Text>
                       <Title style={styles.analyticsValue}>
                         {analytics.totalGallons.toLocaleString()}
@@ -884,7 +848,7 @@ export default function InventoryListScreen({
                       }
                     >
                       <Card style={styles.analyticsCardInner}>
-                        <Card.Content>
+                        <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Low Stock
                             {stockFilter === "lowStock" ? " (filtering)" : ""}
@@ -919,7 +883,7 @@ export default function InventoryListScreen({
                       }
                     >
                       <Card style={styles.analyticsCardInner}>
-                        <Card.Content>
+                        <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Out of Stock
                             {stockFilter === "outOfStock"
@@ -946,7 +910,7 @@ export default function InventoryListScreen({
                     onPress={() => setGalPeriodWeek((prev) => !prev)}
                   >
                     <Card style={styles.analyticsCardInner}>
-                      <Card.Content>
+                      <Card.Content style={styles.analyticsCardContent}>
                         <Text style={styles.analyticsLabel}>
                           Checked out this {galPeriodWeek ? "week" : "month"}
                         </Text>
@@ -976,7 +940,7 @@ export default function InventoryListScreen({
                       onPress={() => setMostUsedByWeek((prev) => !prev)}
                     >
                       <Card style={styles.analyticsCardInner}>
-                        <Card.Content>
+                        <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Most gallons checked out
                           </Text>
@@ -1006,14 +970,70 @@ export default function InventoryListScreen({
                   <Card style={styles.tableCardFlex}>
                     <Card.Content style={styles.tableCardContentFlex}>
                       <View style={styles.tableHeader}>
-                        <View style={styles.filterSummaryRow}>
-                          <Text style={styles.filterSummaryText}>
-                            {bookFilter === "custom"
-                              ? "Custom"
-                              : listOrderMode === "trueOrder"
-                                ? "Stock - True order"
-                                : "Stock - Alphabetical"}
-                          </Text>
+                        <View style={styles.tableHeaderTopRow}>
+                          {viewMode !== "colorBook" && (
+                            <View style={styles.headerFilterGroup}>
+                              {isAdmin && (
+                                <Button
+                                  mode={
+                                    listOrderMode === "trueOrder"
+                                      ? "contained"
+                                      : "outlined"
+                                  }
+                                  compact
+                                  onPress={() =>
+                                    setListOrderMode((prev) =>
+                                      prev === "trueOrder"
+                                        ? "alphabetical"
+                                        : "trueOrder",
+                                    )
+                                  }
+                                  style={[
+                                    styles.viewModeButton,
+                                    styles.viewModeButtonLong,
+                                  ]}
+                                  disabled={bookFilter === "custom"}
+                                >
+                                  {listOrderMode === "trueOrder"
+                                    ? "Alphabetical"
+                                    : "True Order"}
+                                </Button>
+                              )}
+                              <Button
+                                mode={
+                                  bookFilter === "standard"
+                                    ? "outlined"
+                                    : "contained"
+                                }
+                                compact
+                                onPress={() =>
+                                  setBookFilter((prev) =>
+                                    prev === "standard"
+                                      ? "custom"
+                                      : "standard",
+                                  )
+                                }
+                                style={styles.viewModeButton}
+                              >
+                                {bookFilter === "standard"
+                                  ? "Stock"
+                                  : "Custom"}
+                              </Button>
+                            </View>
+                          )}
+                          <View style={styles.tableHeaderTopRight}>
+                            <Text style={styles.filterSummaryText}>
+                              {bookFilter === "custom"
+                                ? "Custom"
+                                : listOrderMode === "trueOrder"
+                                  ? "Stock - True order"
+                                  : "Stock - Alphabetical"}
+                            </Text>
+                            <Text style={styles.resultCount}>
+                              {filteredAndSortedInventory.length} of{" "}
+                              {inventory.length} items
+                            </Text>
+                          </View>
                         </View>
                         <View style={styles.tableHeaderSearchRow}>
                           <Searchbar
@@ -1023,10 +1043,30 @@ export default function InventoryListScreen({
                             style={styles.webSearchbar}
                             inputStyle={styles.searchbarInput}
                           />
-                          <Text style={styles.resultCount}>
-                            {filteredAndSortedInventory.length} of{" "}
-                            {inventory.length} items
-                          </Text>
+                          {onScanCode && (
+                            <TextInput
+                              label="Scan material code"
+                              value={scanInput}
+                              onChangeText={setScanInput}
+                              ref={scanInputRef}
+                              mode="outlined"
+                              dense
+                              style={styles.scanInput}
+                              autoCapitalize="none"
+                              autoCorrect={false}
+                              placeholder="Ready for scanner input"
+                              onSubmitEditing={() => {
+                                const trimmed = scanInput.trim();
+                                if (trimmed && onScanCode) {
+                                  onScanCode(trimmed);
+                                  setScanInput("");
+                                  notifyViewState();
+                                }
+                              }}
+                              blurOnSubmit={false}
+                              keyboardType="default"
+                            />
+                          )}
                         </View>
                       </View>
 
@@ -1040,23 +1080,11 @@ export default function InventoryListScreen({
                         </View>
                       ) : (
                         <ScrollView
-                          style={styles.tableScrollOuter}
-                          contentContainerStyle={styles.tableScrollOuterContent}
-                          showsVerticalScrollIndicator={true}
-                          nestedScrollEnabled
-                          refreshControl={
-                            <RefreshControl
-                              refreshing={isRefreshing}
-                              onRefresh={onRefresh}
-                              tintColor={theme.colors.primary}
-                            />
-                          }
+                          horizontal
+                          style={styles.tableScrollHorizontal}
+                          showsHorizontalScrollIndicator={true}
                         >
-                          <ScrollView
-                            horizontal
-                            style={styles.tableScrollHorizontal}
-                            showsHorizontalScrollIndicator={true}
-                          >
+                          <View style={styles.tableWithStaticHeader}>
                             <DataTable style={styles.dataTable}>
                               <DataTable.Header>
                                 <DataTable.Title
@@ -1134,8 +1162,22 @@ export default function InventoryListScreen({
                                   Last Action
                                 </DataTable.Title>
                               </DataTable.Header>
-
-                              {filteredAndSortedInventory.map((item) => {
+                            </DataTable>
+                            <ScrollView
+                              style={styles.tableScrollOuter}
+                              contentContainerStyle={styles.tableScrollOuterContent}
+                              showsVerticalScrollIndicator={true}
+                              nestedScrollEnabled
+                              refreshControl={
+                                <RefreshControl
+                                  refreshing={isRefreshing}
+                                  onRefresh={onRefresh}
+                                  tintColor={theme.colors.primary}
+                                />
+                              }
+                            >
+                              <DataTable style={styles.dataTable}>
+                                {filteredAndSortedInventory.map((item) => {
                                 const isLowStock =
                                   (item.quantity || 0) <
                                   (item.minQuantity ?? minQuantity ?? 30);
@@ -1439,8 +1481,9 @@ export default function InventoryListScreen({
                                   </DataTable.Row>
                                 );
                               })}
-                            </DataTable>
-                          </ScrollView>
+                              </DataTable>
+                            </ScrollView>
+                          </View>
                         </ScrollView>
                       )}
                     </Card.Content>
@@ -1536,20 +1579,6 @@ export default function InventoryListScreen({
               >
                 {viewMode === "colorBook" ? "Inventory" : "Color Book"}
               </Button>
-              <IconButton
-                icon="refresh"
-                size={24}
-                onPress={onRefresh}
-                disabled={isRefreshing}
-                iconColor={theme.colors.primary}
-              />
-              {isRefreshing && (
-                <ActivityIndicator
-                  size="small"
-                  color={theme.colors.primary}
-                  style={styles.refreshIndicator}
-                />
-              )}
             </View>
           </View>
 
@@ -1579,6 +1608,30 @@ export default function InventoryListScreen({
             autoCapitalize="none"
             blurOnSubmit={false}
           />
+          {onScanCode && (
+            <TextInput
+              label="Scan material code"
+              value={scanInput}
+              onChangeText={setScanInput}
+              ref={scanInputRef}
+              mode="outlined"
+              dense
+              style={styles.scanInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="Ready for scanner input"
+              onSubmitEditing={() => {
+                const trimmed = scanInput.trim();
+                if (trimmed && onScanCode) {
+                  onScanCode(trimmed);
+                  setScanInput("");
+                  notifyViewState();
+                }
+              }}
+              blurOnSubmit={false}
+              keyboardType="default"
+            />
+          )}
           {recycleDueFilter && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
@@ -1838,22 +1891,7 @@ export default function InventoryListScreen({
           <Text style={styles.headerTitle}>
             {viewMode === "colorBook" ? "Color Book" : "Inventory"}
           </Text>
-          <View style={styles.refreshContainer}>
-            <IconButton
-              icon="refresh"
-              size={24}
-              onPress={onRefresh}
-              disabled={isRefreshing}
-              iconColor={theme.colors.primary}
-            />
-            {isRefreshing && (
-              <ActivityIndicator
-                size="small"
-                color={theme.colors.primary}
-                style={styles.refreshIndicator}
-              />
-            )}
-          </View>
+          <View style={styles.refreshContainer} />
         </View>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
@@ -1933,13 +1971,14 @@ export default function InventoryListScreen({
           autoCapitalize="none"
           blurOnSubmit={false}
         />
-        {onScanCode && isWeb && (
+        {onScanCode && (
           <TextInput
             label="Scan material code"
             value={scanInput}
             onChangeText={setScanInput}
             ref={scanInputRef}
             mode="outlined"
+            dense
             style={styles.scanInput}
             autoCapitalize="none"
             autoCorrect={false}
@@ -2109,13 +2148,18 @@ const styles = StyleSheet.create({
   searchbarWrap: {
     paddingHorizontal: 16,
     paddingTop: 0,
-    paddingBottom: 8,
+    paddingBottom: 6,
   },
   searchbar: {
     margin: 0,
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   scanInput: {
-    marginTop: 8,
+    marginTop: 6,
+    ...(Platform.OS === "web" && { minHeight: 40 }),
   },
   filterSummaryRow: {
     marginBottom: 4,
@@ -2390,8 +2434,8 @@ const styles = StyleSheet.create({
   analyticsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 16,
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 16,
   },
   analyticsCard: {
     flex: 1,
@@ -2401,6 +2445,10 @@ const styles = StyleSheet.create({
   },
   analyticsCardInner: {
     flex: 1,
+  },
+  analyticsCardContent: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   analyticsCardFilter: {
     backgroundColor: "rgba(0,0,0,0.04)",
@@ -2413,9 +2461,9 @@ const styles = StyleSheet.create({
   analyticsRowMobile: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
     paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   analyticsRowMobileLandscape: {
     gap: 4,
@@ -2433,11 +2481,11 @@ const styles = StyleSheet.create({
     maxWidth: 96,
   },
   analyticsCardMobileContent: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
   },
   analyticsCardMobileContentLandscape: {
-    paddingVertical: 6,
+    paddingVertical: 4,
     paddingHorizontal: 6,
   },
   listLandscape: {
@@ -2449,38 +2497,38 @@ const styles = StyleSheet.create({
     color: "#666",
     textTransform: "uppercase",
     letterSpacing: 0.3,
-    marginBottom: 2,
+    marginBottom: 0,
   },
   analyticsValueMobile: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "bold",
     color: "#6f95ab",
   },
   analyticsSubtextMobile: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#999",
-    marginTop: 2,
+    marginTop: 1,
   },
   analyticsLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#666",
-    marginBottom: 8,
+    marginBottom: 4,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   analyticsValue: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: "bold",
     color: "#6f95ab",
   },
   analyticsValueUnit: {
-    fontSize: 18,
+    fontSize: 14,
     color: "#666",
   },
   analyticsSubtext: {
-    fontSize: 11,
+    fontSize: 10,
     color: "#999",
-    marginTop: 4,
+    marginTop: 2,
   },
   tableCardWrapper: {
     flex: 1,
@@ -2501,9 +2549,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   tableHeader: {
-    marginBottom: 16,
     flexDirection: "column",
     gap: 8,
+  },
+  tableHeaderTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  tableHeaderTopRight: {
+    alignItems: "flex-end",
   },
   tableHeaderSearchRow: {
     flexDirection: "row",
@@ -2513,14 +2568,25 @@ const styles = StyleSheet.create({
   webSearchbar: {
     flex: 1,
     elevation: 0,
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   colorBookSearchbar: {
-    marginBottom: 12,
+    marginBottom: 8,
     elevation: 0,
-    maxHeight: 56,
+    height: 52,
+    maxHeight: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   searchbarInput: {
-    fontSize: 14,
+    fontSize: 13,
+    paddingVertical: 0,
+    ...(Platform.OS === "android" && { textAlignVertical: "center" }),
+    ...(Platform.OS === "web" && { paddingVertical: 12 }),
   },
   resultCount: {
     fontSize: 12,
@@ -2537,6 +2603,11 @@ const styles = StyleSheet.create({
   },
   orderToggleButtonMobile: {
     alignSelf: "flex-start",
+  },
+  tableWithStaticHeader: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 1100,
   },
   tableScrollOuter: {
     flex: 1,
@@ -2643,23 +2714,27 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   viewModeButton: {
-    marginRight: 8,
+    marginRight: 6,
     minWidth: 68,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
   },
   viewModeButtonColorBook: {
-    marginLeft: 8,
+    marginLeft: 6,
     minWidth: 128,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
   },
   viewModeButtonMobile: {
     marginRight: 4,
     minWidth: 68,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
   },
   viewModeButtonLong: {
     minWidth: 0,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
   },
   colorBookScrollDesktop: {
     flex: 1,

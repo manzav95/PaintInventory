@@ -215,6 +215,7 @@ export default function ItemDetailScreen({
         }
       }
       await Promise.resolve(onSave(updatedItem));
+      onBack?.();
     } finally {
       setSaving(false);
     }
@@ -258,10 +259,7 @@ export default function ItemDetailScreen({
           </View>
         </View>
       </Modal>
-      <ScrollView
-        style={[styles.container, { backgroundColor: theme.colors.background }]}
-        contentContainerStyle={isDesktop && styles.webContentContainer}
-      >
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
         <View style={styles.header}>
           <Button icon="arrow-left" onPress={onBack} mode="text">
             Back
@@ -269,8 +267,11 @@ export default function ItemDetailScreen({
           <Text style={styles.headerTitle}>Item Details</Text>
           <View style={styles.placeholder} />
         </View>
-
-        <View style={isDesktop && styles.webWrapper}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={isDesktop && styles.webContentContainer}
+        >
+          <View style={isDesktop && styles.webWrapper}>
           <Card style={[styles.card, isDesktop && styles.webCard]}>
             <Card.Content>
               <Text style={styles.label}>Paint ID</Text>
@@ -767,7 +768,8 @@ export default function ItemDetailScreen({
             }}
           />
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     </>
   );
 }
@@ -776,6 +778,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+  },
+  scrollView: {
+    flex: 1,
   },
   savingOverlay: {
     flex: 1,

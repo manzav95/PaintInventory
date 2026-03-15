@@ -879,6 +879,7 @@ export default function App() {
           <ItemTransactionHistoryScreen
             item={selectedItem}
             onBack={() => setCurrentScreen('list')}
+            isAdmin={isAdmin}
           />
         );
       case 'orders':

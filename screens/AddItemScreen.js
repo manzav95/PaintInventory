@@ -16,7 +16,9 @@ import {
   Title,
   useTheme,
   Menu,
+  IconButton,
 } from "react-native-paper";
+import CameraColorPickerModal from "../components/CameraColorPickerModal";
 
 const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
@@ -54,6 +56,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const [externalCode, setExternalCode] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+  const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
 
   const isCustomType = CUSTOM_TYPES.includes(type);
 
@@ -398,7 +401,23 @@ export default function AddItemScreen({ onSave, onCancel }) {
                   </Text>
                 </View>
               )}
+              {!isWeb && (
+                <IconButton
+                  icon="camera"
+                  size={24}
+                  onPress={() => setCameraPickerVisible(true)}
+                  style={styles.colorCameraButton}
+                />
+              )}
             </View>
+            <CameraColorPickerModal
+              visible={cameraPickerVisible}
+              onClose={() => setCameraPickerVisible(false)}
+              onColorPicked={(hex) => {
+                setCameraPickerVisible(false);
+                if (hex) setHexColor(hex);
+              }}
+            />
 
             {isCustomType && (
               <Text
@@ -503,6 +522,9 @@ const styles = StyleSheet.create({
   colorInput: {
     flex: 1,
     marginBottom: 0,
+  },
+  colorCameraButton: {
+    marginBottom: 8,
   },
   colorPickerWrap: {
     alignItems: "center",
