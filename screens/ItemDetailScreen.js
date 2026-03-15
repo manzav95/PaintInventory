@@ -162,9 +162,9 @@ export default function ItemDetailScreen({
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
     const displayOrderVal =
       typeVal === "paint"
-        ? (displayOrderInput.trim() === ""
-            ? 0
-            : parseInt(displayOrderInput, 10))
+        ? displayOrderInput.trim() === ""
+          ? 0
+          : parseInt(displayOrderInput, 10)
         : 0;
     if (
       typeVal === "paint" &&
@@ -259,7 +259,9 @@ export default function ItemDetailScreen({
           </View>
         </View>
       </Modal>
-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <View
+        style={[styles.container, { backgroundColor: theme.colors.background }]}
+      >
         <View style={styles.header}>
           <Button icon="arrow-left" onPress={onBack} mode="text">
             Back
@@ -272,502 +274,507 @@ export default function ItemDetailScreen({
           contentContainerStyle={isDesktop && styles.webContentContainer}
         >
           <View style={isDesktop && styles.webWrapper}>
-          <Card style={[styles.card, isDesktop && styles.webCard]}>
-            <Card.Content>
-              <Text style={styles.label}>Paint ID</Text>
-              {isAdmin ? (
-                <TextInput
-                  label="Paint ID"
-                  value={idInput}
-                  onChangeText={setIdInput}
-                  mode="outlined"
-                  style={styles.input}
-                  placeholder="Any format"
-                />
-              ) : (
-                <Text style={styles.itemId}>
-                  {item?.id?.toString() || "N/A"}
-                </Text>
-              )}
-
-              <Text style={styles.label}>External code</Text>
-              {isAdmin ? (
-                <TextInput
-                  label="External code (optional)"
-                  value={externalCodeInput}
-                  onChangeText={setExternalCodeInput}
-                  mode="outlined"
-                  style={styles.input}
-                  placeholder="Barcode text or alternate code"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              ) : (
-                <Text style={styles.itemId}>
-                  {item?.external_code != null &&
-                  String(item.external_code).trim() !== ""
-                    ? String(item.external_code)
-                    : "—"}
-                </Text>
-              )}
-            </Card.Content>
-          </Card>
-
-          <Card style={[styles.card, isDesktop && styles.webCard]}>
-            <Card.Content>
-              <TextInput
-                label="Paint Name"
-                value={name}
-                onChangeText={setName}
-                mode="outlined"
-                style={styles.input}
-                disabled={!isAdmin}
-                editable={isAdmin}
-              />
-
-              <Text style={styles.label}>Type</Text>
-              {isWeb && isDesktop ? (
-                <View style={styles.input}>
-                  <select
-                    value={type}
-                    onChange={(e) => setType(e.target.value)}
-                    disabled={!isAdmin}
-                    style={{
-                      width: "100%",
-                      padding: 12,
-                      fontSize: 16,
-                      borderRadius: 4,
-                      border: `1px solid ${theme.colors.outline}`,
-                      backgroundColor: theme.colors.surface,
-                      color:
-                        type === "catalyst"
-                          ? "#9a7b00"
-                          : theme.colors.onSurface,
-                    }}
-                  >
-                    <option value="">Select type</option>
-                    {TYPE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </View>
-              ) : (
-                <>
-                  {isAdmin ? (
-                    <Menu
-                      visible={typeMenuOpen}
-                      onDismiss={() => setTypeMenuOpen(false)}
-                      anchor={
-                        <Pressable
-                          onPress={() => isAdmin && setTypeMenuOpen(true)}
-                          style={[
-                            styles.typeTrigger,
-                            {
-                              borderColor: theme.colors.outline,
-                              backgroundColor: theme.colors.surface,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={{
-                              color:
-                                type === "catalyst"
-                                  ? "#9a7b00"
-                                  : type
-                                    ? theme.colors.onSurface
-                                    : theme.colors.onSurfaceVariant,
-                            }}
-                          >
-                            {type
-                              ? (TYPE_OPTIONS.find((o) => o.value === type)
-                                  ?.label ?? type)
-                              : "Select type"}
-                          </Text>
-                        </Pressable>
-                      }
-                    >
-                      {TYPE_OPTIONS.map((o) => (
-                        <Menu.Item
-                          key={o.value}
-                          onPress={() => {
-                            setType(o.value);
-                            setTypeMenuOpen(false);
-                          }}
-                          title={o.label}
-                        />
-                      ))}
-                    </Menu>
-                  ) : (
-                    <View style={{ marginBottom: 16 }}>
-                      <Text
-                        style={[
-                          styles.itemId,
-                          type === "catalyst" && { color: "#9a7b00" },
-                        ]}
-                      >
-                        {type
-                          ? (TYPE_OPTIONS.find((o) => o.value === type)
-                              ?.label ?? type)
-                          : "—"}
-                      </Text>
-                    </View>
-                  )}
-                </>
-              )}
-
-              <Text style={styles.label}>Container</Text>
-              {isWeb && isDesktop ? (
-                <View style={styles.input}>
-                  <select
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    disabled={!isAdmin}
-                    style={{
-                      width: "100%",
-                      padding: 12,
-                      fontSize: 16,
-                      borderRadius: 4,
-                      border: `1px solid ${theme.colors.outline}`,
-                      backgroundColor: theme.colors.surface,
-                      color: theme.colors.onSurface,
-                    }}
-                  >
-                    <option value="">Select container</option>
-                    {CONTAINER_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </View>
-              ) : (
-                <>
-                  {isAdmin ? (
-                    <Menu
-                      visible={locationMenuOpen}
-                      onDismiss={() => setLocationMenuOpen(false)}
-                      anchor={
-                        <Pressable
-                          onPress={() => setLocationMenuOpen(true)}
-                          style={[
-                            styles.typeTrigger,
-                            {
-                              borderColor: theme.colors.outline,
-                              backgroundColor: theme.colors.surface,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={{
-                              color: location
-                                ? theme.colors.onSurface
-                                : theme.colors.onSurfaceVariant,
-                            }}
-                          >
-                            {location
-                              ? (CONTAINER_OPTIONS.find(
-                                  (o) => o.value === location,
-                                )?.label ?? location)
-                              : "Select container"}
-                          </Text>
-                        </Pressable>
-                      }
-                    >
-                      {CONTAINER_OPTIONS.map((o) => (
-                        <Menu.Item
-                          key={o.value}
-                          onPress={() => {
-                            setLocation(o.value);
-                            setLocationMenuOpen(false);
-                          }}
-                          title={o.label}
-                        />
-                      ))}
-                    </Menu>
-                  ) : (
-                    <View style={{ marginBottom: 16 }}>
-                      <Text style={styles.itemId}>
-                        {location
-                          ? (CONTAINER_OPTIONS.find((o) => o.value === location)
-                              ?.label ?? location)
-                          : "—"}
-                      </Text>
-                    </View>
-                  )}
-                </>
-              )}
-
-              <Text style={styles.label}>Quantity (Gallons)</Text>
-              <View style={styles.quantityContainer}>
-                <IconButton
-                  icon="minus"
-                  size={24}
-                  onPress={() => handleQuantityAdjust(-1)}
-                  disabled={!isAdmin}
-                />
-                <TextInput
-                  value={quantity}
-                  onChangeText={setQuantity}
-                  mode="outlined"
-                  keyboardType="numeric"
-                  style={styles.quantityInput}
-                  right={<TextInput.Affix text="gal" />}
-                  disabled={!isAdmin}
-                  editable={isAdmin}
-                />
-                <IconButton
-                  icon="plus"
-                  size={24}
-                  onPress={() => handleQuantityAdjust(1)}
-                  disabled={!isAdmin}
-                />
-              </View>
-              {(() => {
-                const id = item?.id != null ? item.id : null;
-                const orderInfo =
-                  id != null &&
-                  (onOrderSummary[id] || onOrderSummary[String(id)]);
-                if (orderInfo && orderInfo.quantity > 0) {
-                  const exp = orderInfo.expectedDate
-                    ? new Date(orderInfo.expectedDate).toLocaleDateString(
-                        "en-US",
-                        {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        },
-                      )
-                    : "";
-                  return (
-                    <Text
-                      style={[
-                        styles.onOrderText,
-                        { color: theme.colors.primary, marginBottom: 12 },
-                      ]}
-                    >
-                      On order: {orderInfo.quantity} gal
-                      {exp ? ` · Expected ~${exp}` : ""}
-                    </Text>
-                  );
-                }
-                return null;
-              })()}
-
-              {type !== "custom_paint" && type !== "custom_stain" && (
-                <>
-                  <Text style={styles.label}>Minimum quantity (low stock)</Text>
-                  {isAdmin ? (
-                    <TextInput
-                      label="Min quantity"
-                      value={minQuantityInput}
-                      onChangeText={setMinQuantityInput}
-                      mode="outlined"
-                      keyboardType="number-pad"
-                      style={styles.input}
-                      placeholder="Blank = 0"
-                    />
-                  ) : (
-                    <Text style={styles.itemId}>
-                      {item?.minQuantity != null
-                        ? String(item.minQuantity)
-                        : "Use app default"}
-                    </Text>
-                  )}
-                </>
-              )}
-
-              <Text style={styles.label}>Unit price</Text>
-              {isAdmin ? (
-                <TextInput
-                  label="Price"
-                  value={priceInput}
-                  onChangeText={setPriceInput}
-                  mode="outlined"
-                  keyboardType="decimal-pad"
-                  style={styles.input}
-                  placeholder="Defaults to 55.56 when blank"
-                  left={<TextInput.Affix text="$" />}
-                />
-              ) : (
-                <Text style={styles.itemId}>
-                  {item?.price != null && item?.price !== ""
-                    ? `$${Number(item.price).toFixed(2)}`
-                    : "—"}
-                </Text>
-              )}
-
-              {isAdmin && type === "paint" && (
-                <>
-                  <Text style={styles.label}>
-                    Display order (for True order list)
-                  </Text>
+            <Card style={[styles.card, isDesktop && styles.webCard]}>
+              <Card.Content>
+                <Text style={styles.label}>Paint ID</Text>
+                {isAdmin ? (
                   <TextInput
-                    label="Order number"
-                    value={displayOrderInput}
-                    onChangeText={setDisplayOrderInput}
+                    label="Paint ID"
+                    value={idInput}
+                    onChangeText={setIdInput}
                     mode="outlined"
-                    keyboardType="number-pad"
                     style={styles.input}
-                    placeholder="0"
+                    placeholder="Any format"
                   />
-                </>
-              )}
+                ) : (
+                  <Text style={styles.itemId}>
+                    {item?.id?.toString() || "N/A"}
+                  </Text>
+                )}
 
-              <Text style={styles.label}>Paint color (optional)</Text>
-              {isAdmin ? (
-                <View style={styles.colorRow}>
+                <Text style={styles.label}>External code</Text>
+                {isAdmin ? (
                   <TextInput
-                    label="Hex code"
-                    value={hexColorInput}
-                    onChangeText={setHexColorInput}
+                    label="External code (optional)"
+                    value={externalCodeInput}
+                    onChangeText={setExternalCodeInput}
                     mode="outlined"
-                    style={[styles.input, styles.colorInput]}
-                    placeholder="#aabbcc or aabbcc"
+                    style={styles.input}
+                    placeholder="Barcode text or alternate code"
                     autoCapitalize="none"
                     autoCorrect={false}
                   />
-                  {isWeb && isDesktop && (
-                    <View style={styles.colorPickerWrap}>
-                      <input
-                        type="color"
-                        value={
-                          hexColorInput &&
-                          /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim())
-                            ? hexColorInput.trim().startsWith("#")
-                              ? hexColorInput.trim()
-                              : "#" + hexColorInput.trim()
-                            : "#808080"
+                ) : (
+                  <Text style={styles.itemId}>
+                    {item?.external_code != null &&
+                    String(item.external_code).trim() !== ""
+                      ? String(item.external_code)
+                      : "—"}
+                  </Text>
+                )}
+              </Card.Content>
+            </Card>
+
+            <Card style={[styles.card, isDesktop && styles.webCard]}>
+              <Card.Content>
+                <TextInput
+                  label="Paint Name"
+                  value={name}
+                  onChangeText={setName}
+                  mode="outlined"
+                  style={styles.input}
+                  disabled={!isAdmin}
+                  editable={isAdmin}
+                />
+
+                <Text style={styles.label}>Type</Text>
+                {isWeb && isDesktop ? (
+                  <View style={styles.input}>
+                    <select
+                      value={type}
+                      onChange={(e) => setType(e.target.value)}
+                      disabled={!isAdmin}
+                      style={{
+                        width: "100%",
+                        padding: 12,
+                        fontSize: 16,
+                        borderRadius: 4,
+                        border: `1px solid ${theme.colors.outline}`,
+                        backgroundColor: theme.colors.surface,
+                        color:
+                          type === "catalyst"
+                            ? "#9a7b00"
+                            : theme.colors.onSurface,
+                      }}
+                    >
+                      <option value="">Select type</option>
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </View>
+                ) : (
+                  <>
+                    {isAdmin ? (
+                      <Menu
+                        visible={typeMenuOpen}
+                        onDismiss={() => setTypeMenuOpen(false)}
+                        anchor={
+                          <Pressable
+                            onPress={() => isAdmin && setTypeMenuOpen(true)}
+                            style={[
+                              styles.typeTrigger,
+                              {
+                                borderColor: theme.colors.outline,
+                                backgroundColor: theme.colors.surface,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={{
+                                color:
+                                  type === "catalyst"
+                                    ? "#9a7b00"
+                                    : type
+                                      ? theme.colors.onSurface
+                                      : theme.colors.onSurfaceVariant,
+                              }}
+                            >
+                              {type
+                                ? (TYPE_OPTIONS.find((o) => o.value === type)
+                                    ?.label ?? type)
+                                : "Select type"}
+                            </Text>
+                          </Pressable>
                         }
-                        onChange={(e) =>
-                          e?.target?.value && setHexColorInput(e.target.value)
+                      >
+                        {TYPE_OPTIONS.map((o) => (
+                          <Menu.Item
+                            key={o.value}
+                            onPress={() => {
+                              setType(o.value);
+                              setTypeMenuOpen(false);
+                            }}
+                            title={o.label}
+                          />
+                        ))}
+                      </Menu>
+                    ) : (
+                      <View style={{ marginBottom: 16 }}>
+                        <Text
+                          style={[
+                            styles.itemId,
+                            type === "catalyst" && { color: "#9a7b00" },
+                          ]}
+                        >
+                          {type
+                            ? (TYPE_OPTIONS.find((o) => o.value === type)
+                                ?.label ?? type)
+                            : "—"}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                <Text style={styles.label}>Container</Text>
+                {isWeb && isDesktop ? (
+                  <View style={styles.input}>
+                    <select
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      disabled={!isAdmin}
+                      style={{
+                        width: "100%",
+                        padding: 12,
+                        fontSize: 16,
+                        borderRadius: 4,
+                        border: `1px solid ${theme.colors.outline}`,
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.onSurface,
+                      }}
+                    >
+                      <option value="">Select container</option>
+                      {CONTAINER_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </View>
+                ) : (
+                  <>
+                    {isAdmin ? (
+                      <Menu
+                        visible={locationMenuOpen}
+                        onDismiss={() => setLocationMenuOpen(false)}
+                        anchor={
+                          <Pressable
+                            onPress={() => setLocationMenuOpen(true)}
+                            style={[
+                              styles.typeTrigger,
+                              {
+                                borderColor: theme.colors.outline,
+                                backgroundColor: theme.colors.surface,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={{
+                                color: location
+                                  ? theme.colors.onSurface
+                                  : theme.colors.onSurfaceVariant,
+                              }}
+                            >
+                              {location
+                                ? (CONTAINER_OPTIONS.find(
+                                    (o) => o.value === location,
+                                  )?.label ?? location)
+                                : "Select container"}
+                            </Text>
+                          </Pressable>
                         }
-                        style={styles.nativeColorInput}
-                        title="Pick color"
-                      />
+                      >
+                        {CONTAINER_OPTIONS.map((o) => (
+                          <Menu.Item
+                            key={o.value}
+                            onPress={() => {
+                              setLocation(o.value);
+                              setLocationMenuOpen(false);
+                            }}
+                            title={o.label}
+                          />
+                        ))}
+                      </Menu>
+                    ) : (
+                      <View style={{ marginBottom: 16 }}>
+                        <Text style={styles.itemId}>
+                          {location
+                            ? (CONTAINER_OPTIONS.find(
+                                (o) => o.value === location,
+                              )?.label ?? location)
+                            : "—"}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                <Text style={styles.label}>Quantity (Gallons)</Text>
+                <View style={styles.quantityContainer}>
+                  <IconButton
+                    icon="minus"
+                    size={24}
+                    onPress={() => handleQuantityAdjust(-1)}
+                    disabled={!isAdmin}
+                  />
+                  <TextInput
+                    value={quantity}
+                    onChangeText={setQuantity}
+                    mode="outlined"
+                    keyboardType="numeric"
+                    style={styles.quantityInput}
+                    right={<TextInput.Affix text="gal" />}
+                    disabled={!isAdmin}
+                    editable={isAdmin}
+                  />
+                  <IconButton
+                    icon="plus"
+                    size={24}
+                    onPress={() => handleQuantityAdjust(1)}
+                    disabled={!isAdmin}
+                  />
+                </View>
+                {(() => {
+                  const id = item?.id != null ? item.id : null;
+                  const orderInfo =
+                    id != null &&
+                    (onOrderSummary[id] || onOrderSummary[String(id)]);
+                  if (orderInfo && orderInfo.quantity > 0) {
+                    const exp = orderInfo.expectedDate
+                      ? new Date(orderInfo.expectedDate).toLocaleDateString(
+                          "en-US",
+                          {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          },
+                        )
+                      : "";
+                    return (
                       <Text
                         style={[
-                          styles.colorPickerLabel,
-                          { color: theme.colors.onSurfaceVariant },
+                          styles.onOrderText,
+                          { color: theme.colors.primary, marginBottom: 12 },
                         ]}
                       >
-                        Pick
+                        On order: {orderInfo.quantity} gal
+                        {exp ? ` · Expected ~${exp}` : ""}
                       </Text>
-                    </View>
-                  )}
-                  {!isWeb && (
-                    <IconButton
-                      icon="camera"
-                      size={24}
-                      onPress={() => setCameraPickerVisible(true)}
-                      style={styles.colorCameraButton}
+                    );
+                  }
+                  return null;
+                })()}
+
+                {type !== "custom_paint" && type !== "custom_stain" && (
+                  <>
+                    <Text style={styles.label}>
+                      Minimum quantity (low stock)
+                    </Text>
+                    {isAdmin ? (
+                      <TextInput
+                        label="Min quantity"
+                        value={minQuantityInput}
+                        onChangeText={setMinQuantityInput}
+                        mode="outlined"
+                        keyboardType="number-pad"
+                        style={styles.input}
+                        placeholder="Blank = 0"
+                      />
+                    ) : (
+                      <Text style={styles.itemId}>
+                        {item?.minQuantity != null
+                          ? String(item.minQuantity)
+                          : "Use app default"}
+                      </Text>
+                    )}
+                  </>
+                )}
+
+                <Text style={styles.label}>Unit price</Text>
+                {isAdmin ? (
+                  <TextInput
+                    label="Price"
+                    value={priceInput}
+                    onChangeText={setPriceInput}
+                    mode="outlined"
+                    keyboardType="decimal-pad"
+                    style={styles.input}
+                    placeholder="Defaults to 55.56 when blank"
+                    left={<TextInput.Affix text="$" />}
+                  />
+                ) : (
+                  <Text style={styles.itemId}>
+                    {item?.price != null && item?.price !== ""
+                      ? `$${Number(item.price).toFixed(2)}`
+                      : "—"}
+                  </Text>
+                )}
+
+                {isAdmin && type === "paint" && (
+                  <>
+                    <Text style={styles.label}>
+                      Display order (for True order list)
+                    </Text>
+                    <TextInput
+                      label="Order number"
+                      value={displayOrderInput}
+                      onChangeText={setDisplayOrderInput}
+                      mode="outlined"
+                      keyboardType="number-pad"
+                      style={styles.input}
+                      placeholder="0"
                     />
-                  )}
-                </View>
-              ) : (
-                <View style={styles.colorPreviewReadOnly}>
-                  {hexColorInput ? (
-                    <>
-                      <View
-                        style={[
-                          styles.colorSwatch,
-                          {
-                            backgroundColor: /^#?[0-9A-Fa-f]{6}$/.test(
-                              hexColorInput.trim().replace(/^#/, ""),
-                            )
+                  </>
+                )}
+
+                <Text style={styles.label}>Paint color (optional)</Text>
+                {isAdmin ? (
+                  <View style={styles.colorRow}>
+                    <TextInput
+                      label="Hex code"
+                      value={hexColorInput}
+                      onChangeText={setHexColorInput}
+                      mode="outlined"
+                      style={[styles.input, styles.colorInput]}
+                      placeholder="#aabbcc or aabbcc"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    {isWeb && isDesktop && (
+                      <View style={styles.colorPickerWrap}>
+                        <input
+                          type="color"
+                          value={
+                            hexColorInput &&
+                            /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim())
                               ? hexColorInput.trim().startsWith("#")
                                 ? hexColorInput.trim()
                                 : "#" + hexColorInput.trim()
-                              : "#e0e0e0",
-                          },
-                        ]}
+                              : "#808080"
+                          }
+                          onChange={(e) =>
+                            e?.target?.value && setHexColorInput(e.target.value)
+                          }
+                          style={styles.nativeColorInput}
+                          title="Pick color"
+                        />
+                        <Text
+                          style={[
+                            styles.colorPickerLabel,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Pick
+                        </Text>
+                      </View>
+                    )}
+                    {!isWeb && (
+                      <IconButton
+                        icon="camera"
+                        size={24}
+                        onPress={() => setCameraPickerVisible(true)}
+                        style={styles.colorCameraButton}
                       />
-                      <Text style={styles.itemId}>{hexColorInput.trim()}</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.itemId}>—</Text>
-                  )}
-                </View>
-              )}
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.colorPreviewReadOnly}>
+                    {hexColorInput ? (
+                      <>
+                        <View
+                          style={[
+                            styles.colorSwatch,
+                            {
+                              backgroundColor: /^#?[0-9A-Fa-f]{6}$/.test(
+                                hexColorInput.trim().replace(/^#/, ""),
+                              )
+                                ? hexColorInput.trim().startsWith("#")
+                                  ? hexColorInput.trim()
+                                  : "#" + hexColorInput.trim()
+                                : "#e0e0e0",
+                            },
+                          ]}
+                        />
+                        <Text style={styles.itemId}>
+                          {hexColorInput.trim()}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={styles.itemId}>—</Text>
+                    )}
+                  </View>
+                )}
 
-              {isCustomType && (
-                <>
-                  <Text style={styles.label}>Recycle date</Text>
-                  <Text style={styles.itemId}>{recycleDateInput || "—"}</Text>
-                  <Text
-                    style={[
-                      styles.recycleHint,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Set automatically on each check-in (4 months from check-in
-                    date).
+                {isCustomType && (
+                  <>
+                    <Text style={styles.label}>Recycle date</Text>
+                    <Text style={styles.itemId}>{recycleDateInput || "—"}</Text>
+                    <Text
+                      style={[
+                        styles.recycleHint,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Set automatically on each check-in (4 months from check-in
+                      date).
+                    </Text>
+                  </>
+                )}
+
+                {item?.lastScanned && (
+                  <Text style={styles.lastScanned}>
+                    Last scanned:{" "}
+                    {new Date(item.lastScanned).toLocaleString("en-US", {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}{" "}
+                    by {item?.lastScannedBy || "unknown"}
                   </Text>
-                </>
-              )}
+                )}
+              </Card.Content>
+            </Card>
 
-              {item?.lastScanned && (
-                <Text style={styles.lastScanned}>
-                  Last scanned:{" "}
-                  {new Date(item.lastScanned).toLocaleString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}{" "}
-                  by {item?.lastScannedBy || "unknown"}
+            <View style={styles.actions}>
+              {isAdmin && (
+                <Button
+                  mode="contained"
+                  onPress={handleSave}
+                  style={styles.button}
+                  icon="content-save"
+                  disabled={saving}
+                  loading={saving}
+                >
+                  Save Changes
+                </Button>
+              )}
+              {!isAdmin && (
+                <Text
+                  style={[
+                    styles.readOnlyNotice,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  View only - Admin access required to make changes
                 </Text>
               )}
-            </Card.Content>
-          </Card>
 
-          <View style={styles.actions}>
-            {isAdmin && (
-              <Button
-                mode="contained"
-                onPress={handleSave}
-                style={styles.button}
-                icon="content-save"
-                disabled={saving}
-                loading={saving}
-              >
-                Save Changes
-              </Button>
-            )}
-            {!isAdmin && (
-              <Text
-                style={[
-                  styles.readOnlyNotice,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                View only - Admin access required to make changes
-              </Text>
-            )}
-
-            {isAdmin && item?.id && (
-              <Button
-                mode="outlined"
-                onPress={() => onDelete(item.id)}
-                style={[styles.button, styles.deleteButton]}
-                icon="delete"
-                textColor="#ff6b6b"
-              >
-                Delete Item
-              </Button>
-            )}
+              {isAdmin && item?.id && (
+                <Button
+                  mode="outlined"
+                  onPress={() => onDelete(item.id)}
+                  style={[styles.button, styles.deleteButton]}
+                  icon="delete"
+                  textColor="#ff6b6b"
+                >
+                  Delete Item
+                </Button>
+              )}
+            </View>
+            <CameraColorPickerModal
+              visible={cameraPickerVisible}
+              onClose={() => setCameraPickerVisible(false)}
+              onColorPicked={(hex) => {
+                setCameraPickerVisible(false);
+                if (hex) setHexColorInput(hex);
+              }}
+            />
           </View>
-          <CameraColorPickerModal
-            visible={cameraPickerVisible}
-            onClose={() => setCameraPickerVisible(false)}
-            onColorPicked={(hex) => {
-              setCameraPickerVisible(false);
-              if (hex) setHexColorInput(hex);
-            }}
-          />
-        </View>
         </ScrollView>
       </View>
     </>
