@@ -28,8 +28,10 @@ async function _fetch(endpoint, options = {}) {
 export default {
   async getOrders(limit = 100) {
     try {
-      const list = await _fetch(`/api/orders?limit=${limit}`);
-      return Array.isArray(list) ? list : [];
+      const data = await _fetch(`/api/orders?limit=${limit}`);
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.orders)) return data.orders;
+      return [];
     } catch (e) {
       console.error('OrderService getOrders:', e);
       return [];

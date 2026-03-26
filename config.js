@@ -12,8 +12,26 @@
 // Auto-detect: Use localhost for web, or set specific IP for mobile
 // For production hosting (Netlify/GitHub Pages), set REACT_APP_API_URL environment variable
 // or update the PRODUCTION_API_URL below
+import Constants from "expo-constants";
+
 const PRODUCTION_API_URL =
   process.env.REACT_APP_API_URL || "https://paintinventory.onrender.com"; // ← Update this with your hosted backend URL
+
+function getDevHostFromExpo() {
+  // Try to infer the LAN host from the running dev client / Expo environment.
+  // Examples:
+  // - hostUri: "192.168.1.50:8081"
+  // - debuggerHost: "192.168.1.50:8081"
+  const hostUri =
+    Constants?.expoConfig?.hostUri ||
+    Constants?.manifest2?.extra?.expoClient?.hostUri ||
+    Constants?.manifest?.debuggerHost ||
+    Constants?.manifest2?.extra?.expoGo?.debuggerHost ||
+    "";
+  const host = String(hostUri).split(":")[0].trim();
+  if (host && /^\d+\.\d+\.\d+\.\d+$/.test(host)) return host;
+  return null;
+}
 
 const getApiUrl = () => {
   if (typeof window !== "undefined") {
@@ -30,7 +48,9 @@ const getApiUrl = () => {
 
     // Localhost development
     if (hostname === "localhost" || hostname === "127.0.0.1") {
-      return "http://localhost:3000";
+      // If you're using Render/Supabase as the source of truth, prefer it even when running the UI on localhost.
+      // To use a local backend instead, set REACT_APP_API_URL to "http://localhost:3000" (or your LAN IP).
+      return PRODUCTION_API_URL;
     }
 
     // IP address (local network)
@@ -39,8 +59,12 @@ const getApiUrl = () => {
     }
   }
 
-  // Mobile apps - use production backend
-  return "https://paintinventory.onrender.com"; // ← Your backend URL
+  // Native/mobile: prefer local dev server when possible (same WiFi).
+  const devHost = getDevHostFromExpo();
+  if (devHost) return `http://${devHost}:3000`;
+
+  // Fallback to production backend.
+  return PRODUCTION_API_URL;
 };
 
 const API_URL = getApiUrl();

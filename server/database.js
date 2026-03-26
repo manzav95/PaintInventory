@@ -574,7 +574,7 @@ class Database {
 
   async getOnOrderSummary() {
     const result = await this.pool.query(
-      `SELECT ol.item_id, ol.quantity, ol.received_quantity, o.placed_at, o.lead_time_days
+      `SELECT ol.item_id, ol.quantity, ol.received_quantity, o.placed_at, o.lead_time_days, o.po_number
        FROM order_lines ol
        JOIN orders o ON o.id = ol.order_id
        WHERE o.status = 'open'
@@ -591,11 +591,49 @@ class Database {
       const days = parseInt(row.lead_time_days, 10) || 5;
       const expected = new Date(placed);
       expected.setDate(expected.getDate() + days);
+      const po =
+        row.po_number != null && String(row.po_number).trim() !== ""
+          ? String(row.po_number).trim()
+          : null;
+      const orderIsLate = (() => {
+        const s =
+          row.placed_at != null ? String(row.placed_at).trim().slice(0, 10) : "";
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+        const [y, m, d] = s.split("-").map(Number);
+        const placedUtc = Date.UTC(y, m - 1, d);
+        const lead = Math.max(0, parseInt(row.lead_time_days, 10) || 7);
+        const expectedUtc = new Date(placedUtc);
+        expectedUtc.setUTCDate(expectedUtc.getUTCDate() + lead);
+        const dayAfterExpectedUtc = Date.UTC(
+          expectedUtc.getUTCFullYear(),
+          expectedUtc.getUTCMonth(),
+          expectedUtc.getUTCDate() + 1,
+        );
+        const now = new Date();
+        const todayUtcDay = Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+        );
+        return todayUtcDay >= dayAfterExpectedUtc;
+      })();
+      const lineIsBackOrdered = received > 0 && remaining > 0;
       if (!byItem[id]) {
-        byItem[id] = { quantity: 0, expectedDate: expected.toISOString() };
+        byItem[id] = {
+          quantity: 0,
+          expectedDate: expected.toISOString(),
+          poNumber: po,
+          late: false,
+          backOrdered: false,
+        };
       }
       byItem[id].quantity += remaining;
-      if (expected > new Date(byItem[id].expectedDate)) byItem[id].expectedDate = expected.toISOString();
+      if (orderIsLate) byItem[id].late = true;
+      if (lineIsBackOrdered) byItem[id].backOrdered = true;
+      if (expected > new Date(byItem[id].expectedDate)) {
+        byItem[id].expectedDate = expected.toISOString();
+        byItem[id].poNumber = po;
+      }
     }
     return byItem;
   }

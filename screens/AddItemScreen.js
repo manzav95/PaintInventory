@@ -39,7 +39,7 @@ const CONTAINER_OPTIONS = [
   { label: "Custom Container", value: "Custom Container" },
 ];
 
-export default function AddItemScreen({ onSave, onCancel }) {
+export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
@@ -57,6 +57,10 @@ export default function AddItemScreen({ onSave, onCancel }) {
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({
+    itemId: false,
+    name: false,
+  });
 
   const isCustomType = CUSTOM_TYPES.includes(type);
 
@@ -85,12 +89,45 @@ export default function AddItemScreen({ onSave, onCancel }) {
   };
 
   const handleSave = () => {
-    if (!itemId.trim()) {
-      Alert.alert("Required Field", "ID is required.");
+    const tid = itemId.trim();
+    const nname = name.trim();
+    const nextErr = { itemId: !tid, name: !nname };
+    if (nextErr.itemId || nextErr.name) {
+      setFieldErrors(nextErr);
+      Alert.alert(
+        "Required",
+        "Please fill in all fields marked with *.",
+      );
       return;
     }
-    if (!name.trim()) {
-      Alert.alert("Required Field", "Paint name is required.");
+    setFieldErrors({ itemId: false, name: false });
+
+    const inv = Array.isArray(inventory) ? inventory : [];
+    const idDup = inv.some((i) => String(i?.id ?? "").trim() === tid);
+    const nameDup = inv.some(
+      (i) => (i?.name ?? "").trim().toLowerCase() === nname.toLowerCase(),
+    );
+    const extRaw = externalCode.trim();
+    const extDup =
+      extRaw !== "" &&
+      inv.some(
+        (i) =>
+          String(i?.external_code ?? "").trim().toLowerCase() ===
+          extRaw.toLowerCase(),
+      );
+
+    if (idDup || nameDup || extDup) {
+      const lines = [];
+      if (idDup) {
+        lines.push("An item with this Paint ID already exists.");
+      }
+      if (nameDup) {
+        lines.push("An item with this name already exists.");
+      }
+      if (extDup) {
+        lines.push("Another item already uses this external code.");
+      }
+      Alert.alert("Cannot add item", lines.join("\n\n"));
       return;
     }
 
@@ -105,11 +142,10 @@ export default function AddItemScreen({ onSave, onCancel }) {
       ? type
       : undefined;
     const hexVal = normalizeHex(hexColor);
-    const extCode = externalCode.trim();
     // Recycle date for custom types is set on first check-in (4 months from that date), not on add
     const item = {
-      id: itemId.trim(),
-      name: name.trim(),
+      id: tid,
+      name: nname,
       quantity: parseInt(quantity) || 0,
       location: location.trim(),
       createdAt: new Date().toISOString(),
@@ -119,7 +155,7 @@ export default function AddItemScreen({ onSave, onCancel }) {
         priceNum >= 0 && { price: priceNum }),
       ...(typeVal && { type: typeVal }),
       ...(hexVal && { hex_color: hexVal }),
-      ...(extCode && { external_code: extCode }),
+      ...(extRaw && { external_code: extRaw }),
     };
 
     onSave(item);
@@ -138,19 +174,27 @@ export default function AddItemScreen({ onSave, onCancel }) {
             <TextInput
               label="Paint ID *"
               value={itemId}
-              onChangeText={setItemId}
+              onChangeText={(t) => {
+                setItemId(t);
+                setFieldErrors((e) => ({ ...e, itemId: false }));
+              }}
               placeholder="Required – enter a custom ID"
               mode="outlined"
               style={styles.input}
+              error={fieldErrors.itemId}
             />
 
             <TextInput
               label="Paint Name *"
               value={name}
-              onChangeText={setName}
+              onChangeText={(t) => {
+                setName(t);
+                setFieldErrors((e) => ({ ...e, name: false }));
+              }}
               mode="outlined"
               style={styles.input}
               autoFocus={!itemId}
+              error={fieldErrors.name}
             />
 
             <TextInput
@@ -435,7 +479,6 @@ export default function AddItemScreen({ onSave, onCancel }) {
                 mode="contained"
                 onPress={handleSave}
                 style={[styles.button, styles.saveButton]}
-                disabled={!name.trim()}
               >
                 Save Item
               </Button>

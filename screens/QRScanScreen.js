@@ -88,7 +88,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
   const handleManualSubmit = () => {
     const trimmed = manualInput.trim();
     if (!trimmed) {
-      Alert.alert("Invalid Input", "Please enter a QR code value.");
+      Alert.alert("Invalid Input", "Please enter a Paint Code ID.");
       return;
     }
     onScanResult(trimmed);
@@ -163,38 +163,11 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
     );
   }
 
-  // Tablet/Mobile: Show both camera and manual options
-  // Always show mode selector and allow manual entry
+  // Tablet/Mobile: Camera / Manual toggle lives in the same card as manual entry
   return (
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <View style={styles.modeSelector}>
-        <SegmentedButtons
-          value={inputMode}
-          onValueChange={(value) => {
-            setInputMode(value);
-            // If switching to camera and permission not granted, try requesting again
-            if (value === "camera" && hasPermission !== true) {
-              requestCameraPermission();
-            }
-          }}
-          buttons={[
-            {
-              value: "camera",
-              label: "Camera",
-              icon: "camera",
-              disabled: isWebViaIP, // Disable camera button on web via IP
-            },
-            {
-              value: "manual",
-              label: "Manual",
-              icon: "keyboard",
-            },
-          ]}
-        />
-      </View>
-
       {/* Manual input mode */}
       {inputMode === "manual" && (
         <ScrollView contentContainerStyle={styles.manualContainer}>
@@ -202,8 +175,31 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
             style={[styles.card, { backgroundColor: theme.colors.surface }]}
           >
             <Card.Content>
+              <SegmentedButtons
+                value={inputMode}
+                onValueChange={(value) => {
+                  setInputMode(value);
+                  if (value === "camera" && hasPermission !== true) {
+                    requestCameraPermission();
+                  }
+                }}
+                style={styles.modeSegmented}
+                buttons={[
+                  {
+                    value: "camera",
+                    label: "Camera",
+                    icon: "camera",
+                    disabled: isWebViaIP,
+                  },
+                  {
+                    value: "manual",
+                    label: "Manual",
+                    icon: "keyboard",
+                  },
+                ]}
+              />
               <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-                Enter QR Code Manually
+                Enter Paint Code ID
               </Text>
               {isWebViaIP && (
                 <Text
@@ -220,17 +216,9 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
                   available.
                 </Text>
               )}
-              <Text
-                style={[
-                  styles.subtitle,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Type or scan the Paint Code ID below
-              </Text>
 
               <TextInput
-                label="Material"
+                label="Paint Code ID"
                 value={manualInput}
                 onChangeText={setManualInput}
                 mode="outlined"
@@ -276,6 +264,29 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
                 style={[styles.card, { backgroundColor: theme.colors.surface }]}
               >
                 <Card.Content style={styles.content}>
+                  <SegmentedButtons
+                    value={inputMode}
+                    onValueChange={(value) => {
+                      setInputMode(value);
+                      if (value === "camera" && hasPermission !== true) {
+                        requestCameraPermission();
+                      }
+                    }}
+                    style={styles.modeSegmented}
+                    buttons={[
+                      {
+                        value: "camera",
+                        label: "Camera",
+                        icon: "camera",
+                        disabled: isWebViaIP,
+                      },
+                      {
+                        value: "manual",
+                        label: "Manual",
+                        icon: "keyboard",
+                      },
+                    ]}
+                  />
                   <Text style={{ color: theme.colors.onSurface }}>
                     Requesting camera permission...
                   </Text>
@@ -290,6 +301,29 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
                 style={[styles.card, { backgroundColor: theme.colors.surface }]}
               >
                 <Card.Content style={styles.content}>
+                  <SegmentedButtons
+                    value={inputMode}
+                    onValueChange={(value) => {
+                      setInputMode(value);
+                      if (value === "camera" && hasPermission !== true) {
+                        requestCameraPermission();
+                      }
+                    }}
+                    style={styles.modeSegmented}
+                    buttons={[
+                      {
+                        value: "camera",
+                        label: "Camera",
+                        icon: "camera",
+                        disabled: isWebViaIP,
+                      },
+                      {
+                        value: "manual",
+                        label: "Manual",
+                        icon: "keyboard",
+                      },
+                    ]}
+                  />
                   <Text
                     style={[styles.message, { color: theme.colors.onSurface }]}
                   >
@@ -331,7 +365,39 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
           )}
 
           {hasPermission === true && (
-            <>
+            <View style={styles.cameraModeColumn}>
+              <Card
+                style={[
+                  styles.cardCameraHeader,
+                  { backgroundColor: theme.colors.surface },
+                ]}
+              >
+                <Card.Content style={styles.cardCameraHeaderContent}>
+                  <SegmentedButtons
+                    value={inputMode}
+                    onValueChange={(value) => {
+                      setInputMode(value);
+                      if (value === "camera" && hasPermission !== true) {
+                        requestCameraPermission();
+                      }
+                    }}
+                    style={styles.modeSegmented}
+                    buttons={[
+                      {
+                        value: "camera",
+                        label: "Camera",
+                        icon: "camera",
+                        disabled: isWebViaIP,
+                      },
+                      {
+                        value: "manual",
+                        label: "Manual",
+                        icon: "keyboard",
+                      },
+                    ]}
+                  />
+                </Card.Content>
+              </Card>
               <CameraView
                 style={styles.camera}
                 facing="back"
@@ -379,7 +445,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
                   </Button>
                 )}
               </View>
-            </>
+            </View>
           )}
         </>
       )}
@@ -392,9 +458,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
   },
-  modeSelector: {
-    padding: 16,
-    backgroundColor: "rgba(0,0,0,0.7)",
+  cameraModeColumn: {
+    flex: 1,
+    width: "100%",
+  },
+  cardCameraHeader: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 0,
+    elevation: 4,
+  },
+  cardCameraHeaderContent: {
+    paddingVertical: 4,
+  },
+  modeSegmented: {
+    marginBottom: 16,
   },
   camera: {
     flex: 1,
@@ -462,8 +540,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   content: {
-    alignItems: "center",
-    paddingVertical: 40,
+    alignItems: "stretch",
+    paddingVertical: 24,
   },
   message: {
     fontSize: 16,

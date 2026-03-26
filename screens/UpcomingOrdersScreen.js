@@ -33,13 +33,19 @@ const FILTER_COLORS = {
   completed: "#2e7d32",
 };
 
-// Lead time defaults by item type: clear, primer, catalyst, wiping stain base = 3 days; paint, spray dye base (and custom) = 7 days
-const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst", "stain"];
-const LEAD_TIME_7_DAY_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
+// Lead time defaults by item type: clear, primer, catalyst = 3 days (AP); paint, stain, dye, custom = 7 days (mixing)
+const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst"];
+const LEAD_TIME_7_DAY_TYPES = [
+  "paint",
+  "dye",
+  "custom_paint",
+  "custom_stain",
+  "stain",
+];
 
-// Category labels for PO cards: AP (clear, primer, catalyst, stain) and MIXING (paint, dye, custom_paint, custom_stain)
-const AP_TYPES = ["clear", "primer", "catalyst", "stain"];
-const MIXING_TYPES = ["paint", "dye", "custom_paint", "custom_stain"];
+// Category labels for PO cards: AP (clear, primer, catalyst) and MIXING (paint, stain, dye, custom_paint, custom_stain)
+const AP_TYPES = ["clear", "primer", "catalyst"];
+const MIXING_TYPES = ["paint", "dye", "custom_paint", "custom_stain", "stain"];
 
 function getOrderCategoryLabel(order, inventory) {
   if (!order?.lines?.length || !inventory?.length) return null;

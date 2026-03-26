@@ -173,6 +173,7 @@ export default function App() {
       const stored = await AsyncStorage.getItem('@inventory_user_name');
       if (stored) {
         setUserName(stored);
+        setCurrentScreen(stored === 'admin123' ? 'home' : 'list');
       } else {
         setCurrentScreen('login');
       }
@@ -187,7 +188,7 @@ export default function App() {
     if (!trimmed) return;
     await AsyncStorage.setItem('@inventory_user_name', trimmed);
     setUserName(trimmed);
-    setCurrentScreen('home');
+    setCurrentScreen('list');
   };
 
   const handleSwitchUser = async () => {
@@ -824,6 +825,7 @@ export default function App() {
       case 'add':
         return (
           <AddItemScreen
+            inventory={inventory}
             onSave={handleAddItem}
             onCancel={() => setCurrentScreen('home')}
           />
@@ -832,6 +834,7 @@ export default function App() {
         return (
           <ItemDetailScreen
             item={selectedItem}
+            inventory={inventory}
             onSave={handleSaveItem}
             onDelete={handleDeleteItem}
             onChangeId={handleChangeItemId}
@@ -871,6 +874,7 @@ export default function App() {
               setPreviousScreen('list');
               handleScanResult(code);
             }}
+            actorName={actorName}
             onBack={() => setCurrentScreen('home')}
           />
         );

@@ -42,6 +42,18 @@ export default function CheckInOutScreen({
   const [receiveQty, setReceiveQty] = useState("");
   const [receiveSubmitting, setReceiveSubmitting] = useState(false);
 
+  const quickQtyEnabledTypes = new Set([
+    "paint",
+    "stain",
+    "dye",
+    "clear",
+    "primer",
+    "catalyst",
+  ]);
+  const itemType = String(item?.type || "").toLowerCase().trim();
+  const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
+  const quickQtyOptions = [5, 10, 15, 20];
+
   const hasUpcomingOrder = item && (onOrderSummary[item.id]?.quantity > 0);
   const openOrdersWithItem = (orders || []).filter(
     (o) => o.status === "open" && (o.lines || []).some((l) => String(l.itemId) === String(item?.id)),
@@ -225,6 +237,31 @@ export default function CheckInOutScreen({
 
             {action && (
               <>
+                {showQuickQty && (
+                  <View style={styles.quickQtyWrap}>
+                    <Text
+                      style={[
+                        styles.quickQtyLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Quick quantity (gal)
+                    </Text>
+                    <View style={styles.quickQtyRow}>
+                      {quickQtyOptions.map((v) => (
+                        <Button
+                          key={String(v)}
+                          mode="outlined"
+                          compact
+                          onPress={() => setQuantity(String(v))}
+                          style={styles.quickQtyButton}
+                        >
+                          {v}
+                        </Button>
+                      ))}
+                    </View>
+                  </View>
+                )}
                 <TextInput
                   label={`Quantity to ${action === "in" ? "add" : "remove"} (gallons)`}
                   value={quantity}
@@ -233,7 +270,6 @@ export default function CheckInOutScreen({
                   keyboardType="decimal-pad"
                   style={styles.input}
                   right={<TextInput.Affix text="gal" />}
-                  autoFocus
                 />
                 <View style={styles.submitRow}>
                   <Button mode="outlined" onPress={onCancel} style={styles.button}>
@@ -383,6 +419,24 @@ const styles = StyleSheet.create({
   selectedButton: {},
   input: {
     marginBottom: 20,
+  },
+  quickQtyWrap: {
+    marginBottom: 12,
+  },
+  quickQtyLabel: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  quickQtyRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+  quickQtyButton: {
+    flexGrow: 1,
+    flexBasis: "24%",
+    minWidth: 92,
+    marginBottom: 10,
   },
   submitRow: {
     flexDirection: "row",

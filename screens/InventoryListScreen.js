@@ -9,6 +9,8 @@ import {
   ScrollView,
   Modal,
   Pressable,
+  Alert,
+  KeyboardAvoidingView,
 } from "react-native";
 import {
   Card,
@@ -24,6 +26,9 @@ import {
   TextInput,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
+import OrderService from "../services/orderService";
+import InventoryService from "../services/inventoryService";
+import config from "../config";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const STANDARD_TYPES = ["paint", "primer", "clear", "catalyst", "stain", "dye"];
@@ -40,6 +45,59 @@ function isRecycleDue(item) {
   return d.getTime() <= today.getTime();
 }
 
+/** Matches App.js handleScanResult normalization for comparing typed/scanned IDs to inventory. */
+function normalizeScanLookupKey(itemId) {
+  const raw = String(itemId ?? "")
+    .trim()
+    .toUpperCase();
+  if (!raw) return null;
+  if (/^\d{1,4}$/.test(raw)) return raw.padStart(4, "0");
+  if (/^H66[A-Z]{3}\d{5}$/.test(raw)) return raw;
+  return raw;
+}
+
+function inventoryMatchesScanQuery(inventory, query) {
+  const trimmed = query.trim();
+  if (!trimmed) return false;
+  const key = normalizeScanLookupKey(trimmed);
+  const inv = Array.isArray(inventory) ? inventory : [];
+  for (const item of inv) {
+    const idKey = normalizeScanLookupKey(item.id);
+    if (idKey && key && idKey === key) return true;
+    const ext =
+      item.external_code != null ? String(item.external_code).trim() : "";
+    if (ext && ext.toUpperCase() === trimmed.toUpperCase()) return true;
+  }
+  return false;
+}
+
+/** Enter in search: scan/check-in-out only when this looks like a material ID/barcode, not a name search. */
+function shouldSubmitSearchAsScan(query, inventory) {
+  const t = query.trim();
+  if (!t) return false;
+  if (inventoryMatchesScanQuery(inventory, t)) return true;
+  if (/^[a-zA-Z]+$/.test(t)) return false;
+  return true;
+}
+
+/** Parse order line qty from API (snake_case or camelCase, string or number). */
+function lineOrderedQty(line) {
+  const q = line?.quantity ?? line?.qty;
+  const n = Number(q);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function lineReceivedQty(line) {
+  const q = line?.received_quantity ?? line?.receivedQuantity;
+  if (q === undefined || q === null || q === "") return 0;
+  const n = Number(q);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function lineRemainingQty(line) {
+  return Math.max(0, lineOrderedQty(line) - lineReceivedQty(line));
+}
+
 export default function InventoryListScreen({
   inventory,
   minQuantity = 30,
@@ -52,6 +110,7 @@ export default function InventoryListScreen({
   recycleDueFilter = false,
   onClearRecycleDueFilter,
   onScanCode,
+  actorName = null,
   initialViewMode = "inventory",
   initialBookFilter,
   initialScrollOffset = 0,
@@ -78,8 +137,13 @@ export default function InventoryListScreen({
   const [bookFilter, setBookFilter] = useState(
     initialBookFilter || (recycleDueFilter ? "custom" : "standard"),
   ); // 'standard' | 'custom'
-  const [scanInput, setScanInput] = useState("");
-  const scanInputRef = useRef(null);
+  const [receivePoVisible, setReceivePoVisible] = useState(false);
+  const [receivePoStep, setReceivePoStep] = useState("list"); // 'list' | 'detail'
+  const [receiveOrdersList, setReceiveOrdersList] = useState([]);
+  const [receiveOrdersLoading, setReceiveOrdersLoading] = useState(false);
+  const [selectedReceiveOrder, setSelectedReceiveOrder] = useState(null);
+  const [lineReceiveQtys, setLineReceiveQtys] = useState({});
+  const [receiveSubmitting, setReceiveSubmitting] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(initialScrollOffset || 0);
   const listRef = useRef(null);
   const hasRestoredScrollRef = useRef(false);
@@ -92,6 +156,183 @@ export default function InventoryListScreen({
       scrollOffset,
       ...next,
     });
+  };
+
+  const handleSearchSubmit = () => {
+    if (!onScanCode) return;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
+    if (!shouldSubmitSearchAsScan(trimmed, inventory)) return;
+    onScanCode(trimmed);
+    setSearchQuery("");
+    notifyViewState();
+  };
+
+  const getItemNameForOrder = (itemId) => {
+    const id = String(itemId ?? "").trim();
+    const inv = inventory.find((i) => String(i.id) === id);
+    return inv?.name || `ID ${id}`;
+  };
+
+  const formatOrderColorsPreview = (order) => {
+    const lines = order?.lines || [];
+    const names = lines.map((l) =>
+      getItemNameForOrder(l.itemId ?? l.item_id),
+    );
+    if (names.length === 0) return "No lines";
+    if (names.length <= 3) return names.join(" · ");
+    return `${names.slice(0, 3).join(" · ")} · +${names.length - 3} more`;
+  };
+
+  const getOrderExpectedLabel = (order) => {
+    const placed = order?.placed_at;
+    const days = parseInt(order?.lead_time_days, 10) || 5;
+    if (!placed) return null;
+    const d = new Date(placed);
+    if (isNaN(d.getTime())) return null;
+    const exp = new Date(d);
+    exp.setDate(exp.getDate() + days);
+    return exp.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const openReceivePoModal = () => {
+    setReceivePoVisible(true);
+    setReceivePoStep("list");
+    setSelectedReceiveOrder(null);
+    setLineReceiveQtys({});
+    setReceiveOrdersLoading(true);
+    (async () => {
+      try {
+        // Use a direct fetch here so failures can't silently become "[]".
+        const url = `${config.API_URL}/api/orders?limit=200`;
+        const res = await fetch(url);
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(
+            `Orders API failed (${res.status}). ${text?.slice(0, 200) || ""}`,
+          );
+        }
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error(
+            `Orders API returned invalid JSON. ${text?.slice(0, 200) || ""}`,
+          );
+        }
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.orders)
+            ? data.orders
+            : [];
+        setReceiveOrdersList(list);
+      } catch (e) {
+        console.error("Receive PO load orders:", e);
+        Alert.alert("Error", e?.message || "Could not load orders. Try again.");
+        setReceiveOrdersList([]);
+      } finally {
+        setReceiveOrdersLoading(false);
+      }
+    })();
+  };
+
+  const closeReceivePoModal = () => {
+    if (receiveSubmitting) return;
+    setReceivePoVisible(false);
+    setReceivePoStep("list");
+    setSelectedReceiveOrder(null);
+    setReceiveOrdersList([]);
+    setLineReceiveQtys({});
+  };
+
+  const selectOrderForReceive = (order) => {
+    const init = {};
+    for (const line of order.lines || []) {
+      const itemId = String(line.itemId ?? line.item_id ?? "").trim();
+      if (!itemId) continue;
+      const remaining = lineRemainingQty(line);
+      if (remaining > 0) init[itemId] = String(remaining);
+    }
+    setLineReceiveQtys(init);
+    setSelectedReceiveOrder(order);
+    setReceivePoStep("detail");
+  };
+
+  const handleReceivePoSubmit = async () => {
+    if (!selectedReceiveOrder || !actorName) return;
+    setReceiveSubmitting(true);
+    try {
+      let totalGal = 0;
+      let lineCount = 0;
+      for (const line of selectedReceiveOrder.lines || []) {
+        const itemId = String(line.itemId ?? line.item_id ?? "").trim();
+        if (!itemId) continue;
+        const remaining = lineRemainingQty(line);
+        if (remaining <= 0) continue;
+        const raw = lineReceiveQtys[itemId];
+        const qty =
+          raw === undefined || raw === null || String(raw).trim() === ""
+            ? 0
+            : parseInt(String(raw).trim(), 10);
+        if (isNaN(qty) || qty <= 0) continue;
+        if (qty > remaining) {
+          Alert.alert(
+            "Invalid quantity",
+            `${getItemNameForOrder(itemId)}: you can receive at most ${remaining} gal remaining on this line.`,
+          );
+          return;
+        }
+        const receiveResult = await OrderService.receiveOrderLine(
+          selectedReceiveOrder.id,
+          itemId,
+          qty,
+        );
+        if (!receiveResult.success) {
+          throw new Error(receiveResult.error || "Failed to record PO receive");
+        }
+        const result = await InventoryService.updateQuantity(
+          itemId,
+          qty,
+          actorName,
+          "receiving",
+        );
+        if (!result.success) {
+          throw new Error(result.error || "Failed to update inventory");
+        }
+        await AuditService.log({
+          type: "receiving",
+          user: actorName,
+          itemId,
+          quantity: qty,
+          newQuantity: result.item.quantity,
+          orderId: selectedReceiveOrder.id,
+        });
+        totalGal += qty;
+        lineCount += 1;
+      }
+      if (lineCount === 0) {
+        Alert.alert(
+          "Nothing to receive",
+          "Enter a quantity greater than 0 for at least one line that still has stock due.",
+        );
+        return;
+      }
+      await onRefresh?.();
+      const po = selectedReceiveOrder.po_number || selectedReceiveOrder.id;
+      closeReceivePoModal();
+      Alert.alert(
+        "Receiving recorded",
+        `Received ${totalGal} gal on ${lineCount} line(s) for PO ${po}.`,
+      );
+    } catch (e) {
+      Alert.alert("Error", e?.message || "Failed to receive.");
+    } finally {
+      setReceiveSubmitting(false);
+    }
   };
 
   // Restore scroll position once when mounting
@@ -480,7 +721,11 @@ export default function InventoryListScreen({
                   <Text
                     style={[
                       styles.colorModalStainWatermarkText,
-                      { color: theme.dark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)" },
+                      {
+                        color: theme.dark
+                          ? "rgba(255,255,255,0.25)"
+                          : "rgba(0,0,0,0.2)",
+                      },
                     ]}
                   >
                     STAIN
@@ -536,10 +781,312 @@ export default function InventoryListScreen({
     );
   };
 
+  const ReceivePoModal = () => {
+    if (!actorName) return null;
+    const expLabel = selectedReceiveOrder
+      ? getOrderExpectedLabel(selectedReceiveOrder)
+      : null;
+    const isOpen = (o) =>
+      String(o?.status ?? "")
+        .toLowerCase()
+        .trim() === "open";
+    const openOrders = (receiveOrdersList || []).filter(isOpen);
+    const totalOrders = (receiveOrdersList || []).length;
+
+    return (
+      <Modal
+        visible={receivePoVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => !receiveSubmitting && closeReceivePoModal()}
+      >
+        <KeyboardAvoidingView
+          style={styles.receivePoKb}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.receivePoOverlayInner}>
+            <Pressable
+              style={styles.receivePoBackdrop}
+              // Don't close on backdrop press; prevents accidental closes and focus glitches.
+              onPress={() => {}}
+            />
+            <View
+              style={[
+                styles.receivePoBox,
+                { backgroundColor: theme.colors.surface },
+              ]}
+            >
+              <IconButton
+                icon="close"
+                size={20}
+                onPress={closeReceivePoModal}
+                disabled={receiveSubmitting}
+                style={{ position: "absolute", right: 6, top: 6, zIndex: 2 }}
+              />
+              {receivePoStep === "list" && (
+                <>
+                  <Text
+                    variant="titleMedium"
+                    style={[
+                      styles.receivePoTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    Receive from PO
+                  </Text>
+                  <Text
+                    style={[
+                      styles.receivePoHelp,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Choose an open order, then enter how many gallons you are
+                    receiving on each line (defaults to full remaining).
+                  </Text>
+                  <Text
+                    style={{
+                      color: theme.colors.onSurfaceVariant,
+                      fontSize: 12,
+                      marginBottom: 8,
+                    }}
+                  >
+                    Open POs: {openOrders.length}
+                  </Text>
+                  {receiveOrdersLoading ? (
+                    <ActivityIndicator style={{ marginVertical: 24 }} />
+                  ) : openOrders.length === 0 ? (
+                    <>
+                      <Text
+                        style={{
+                          color: theme.colors.onSurfaceVariant,
+                          marginVertical: 12,
+                        }}
+                      >
+                        No open purchase orders detected.
+                      </Text>
+                      <View style={styles.receivePoActions}>
+                        <Button
+                          mode="outlined"
+                          onPress={() => {
+                            if (!receiveOrdersLoading) openReceivePoModal();
+                          }}
+                          disabled={receiveOrdersLoading}
+                        >
+                          Reload
+                        </Button>
+                      </View>
+                    </>
+                  ) : (
+                    <ScrollView
+                      style={styles.receivePoListScroll}
+                      keyboardShouldPersistTaps="handled"
+                      showsVerticalScrollIndicator
+                    >
+                      {openOrders.map((order) => {
+                        const placed = order.placed_at
+                          ? new Date(order.placed_at).toLocaleDateString(
+                              "en-US",
+                              {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              },
+                            )
+                          : "";
+                        const exp = getOrderExpectedLabel(order);
+                        return (
+                          <Pressable
+                            key={String(order.id)}
+                            onPress={() => selectOrderForReceive(order)}
+                            style={({ pressed }) => [
+                              styles.receivePoOrderRow,
+                              {
+                                borderColor: theme.colors.outline,
+                                backgroundColor: pressed
+                                  ? theme.colors.surfaceVariant
+                                  : theme.colors.surface,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.receivePoOrderPo,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              PO {order.po_number || order.id}
+                            </Text>
+                            {placed ? (
+                              <Text
+                                style={[
+                                  styles.receivePoOrderMeta,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Placed {placed}
+                                {exp ? ` · Expected ~${exp}` : ""}
+                              </Text>
+                            ) : null}
+                            <Text
+                              style={[
+                                styles.receivePoOrderPreview,
+                                { color: theme.colors.onSurface },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {formatOrderColorsPreview(order)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                </>
+              )}
+
+              {receivePoStep === "detail" && selectedReceiveOrder && (
+                <>
+                  <View style={styles.receivePoDetailHeader}>
+                    <IconButton
+                      icon="arrow-left"
+                      size={22}
+                      onPress={() => {
+                        if (!receiveSubmitting) {
+                          setReceivePoStep("list");
+                          setSelectedReceiveOrder(null);
+                          setLineReceiveQtys({});
+                        }
+                      }}
+                      disabled={receiveSubmitting}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        variant="titleMedium"
+                        style={[
+                          styles.receivePoTitle,
+                          { color: theme.colors.onSurface, marginBottom: 0 },
+                        ]}
+                      >
+                        PO {selectedReceiveOrder.po_number || selectedReceiveOrder.id}
+                      </Text>
+                      {expLabel ? (
+                        <Text
+                          style={{
+                            color: theme.colors.onSurfaceVariant,
+                            fontSize: 12,
+                            marginTop: 4,
+                          }}
+                        >
+                          Expected ~{expLabel}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  <ScrollView
+                    style={styles.receivePoDetailScroll}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator
+                  >
+                    {(selectedReceiveOrder.lines || []).map((line, idx) => {
+                      const itemId = String(
+                        line.itemId ?? line.item_id ?? "",
+                      ).trim();
+                      const ordered = lineOrderedQty(line);
+                      const received = lineReceivedQty(line);
+                      const remaining = lineRemainingQty(line);
+                      const name = getItemNameForOrder(itemId);
+                      return (
+                        <View
+                          key={`${itemId}-${idx}`}
+                          style={[
+                            styles.receivePoLineCard,
+                            { borderColor: theme.colors.outline },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.receivePoLineName,
+                              { color: theme.colors.onSurface },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {name}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 12,
+                              color: theme.colors.onSurfaceVariant,
+                              marginBottom: 8,
+                            }}
+                          >
+                            Ordered {ordered} gal · Received {received} gal
+                            {remaining > 0
+                              ? ` · ${remaining} remaining`
+                              : " · Complete"}
+                          </Text>
+                          {remaining > 0 ? (
+                            <TextInput
+                              label="Receive now (gal)"
+                              value={lineReceiveQtys[itemId] ?? ""}
+                              onChangeText={(t) =>
+                                setLineReceiveQtys((prev) => ({
+                                  ...prev,
+                                  [itemId]: t,
+                                }))
+                              }
+                              mode="outlined"
+                              dense
+                              keyboardType="number-pad"
+                              placeholder={String(remaining)}
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <View style={styles.receivePoActions}>
+                    <Button
+                      mode="outlined"
+                      onPress={() => {
+                        if (!receiveSubmitting) {
+                          setReceivePoStep("list");
+                          setSelectedReceiveOrder(null);
+                          setLineReceiveQtys({});
+                        }
+                      }}
+                      disabled={receiveSubmitting}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      mode="contained"
+                      onPress={handleReceivePoSubmit}
+                      loading={receiveSubmitting}
+                      disabled={receiveSubmitting}
+                    >
+                      Record receiving
+                    </Button>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
+
   const renderItem = ({ item }) => {
     const isLowStock =
       (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
     const itemId = item.id?.toString() || "N/A";
+    const orderInfo = onOrderSummary[item.id] || onOrderSummary[itemId];
+    const hasOpen = !!(orderInfo && orderInfo.quantity > 0);
+    const isLate = !!(orderInfo && orderInfo.late);
+    const isBackOrdered = !!(orderInfo && orderInfo.backOrdered);
 
     // Theme-aware low stock card style
     const lowStockCardStyle = isLowStock
@@ -572,6 +1119,35 @@ export default function InventoryListScreen({
                 >
                   {item.quantity || 0} gal
                 </Text>
+                {hasOpen && (
+                  <View style={styles.itemBadgeRow}>
+                    <View style={styles.itemBadge}>
+                      <Text style={[styles.itemBadgeText, { color: "#1976d2" }]}>
+                        Open
+                      </Text>
+                    </View>
+                    {isLate && (
+                      <View style={[styles.itemBadge, styles.itemBadgeLate]}>
+                        <Text
+                          style={[styles.itemBadgeText, { color: "#c62828" }]}
+                        >
+                          Late
+                        </Text>
+                      </View>
+                    )}
+                    {isBackOrdered && (
+                      <View
+                        style={[styles.itemBadge, styles.itemBadgeBackOrder]}
+                      >
+                        <Text
+                          style={[styles.itemBadgeText, { color: "#e65100" }]}
+                        >
+                          Back ordered
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
             </View>
             {item.location && (
@@ -594,6 +1170,7 @@ export default function InventoryListScreen({
                   : "";
                 const isLate = expDate && expDate.getTime() < Date.now();
                 const textColor = isLate ? "#c62828" : theme.colors.primary;
+                const po = orderInfo.poNumber || orderInfo.po_number || "";
                 return (
                   <View style={styles.onOrderBlock}>
                     <Text style={[styles.onOrderText, { color: textColor }]}>
@@ -604,6 +1181,13 @@ export default function InventoryListScreen({
                         style={[styles.onOrderDateText, { color: textColor }]}
                       >
                         {exp}
+                      </Text>
+                    ) : null}
+                    {po ? (
+                      <Text
+                        style={[styles.onOrderPoText, { color: textColor }]}
+                      >
+                        PO {po}
                       </Text>
                     ) : null}
                   </View>
@@ -779,11 +1363,15 @@ export default function InventoryListScreen({
               style={[styles.webContentCentered, styles.webContentCenteredFlex]}
             >
               <Searchbar
-                placeholder="Search colors by name or ID..."
+                placeholder="Search colors by name or ID — Enter scans ID/barcode for check in/out"
                 onChangeText={setSearchQuery}
                 value={searchQuery}
                 style={styles.colorBookSearchbar}
                 inputStyle={styles.searchbarInput}
+                onSubmitEditing={handleSearchSubmit}
+                blurOnSubmit={false}
+                autoCorrect={false}
+                autoCapitalize="none"
               />
               {colorBookItems.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -886,9 +1474,7 @@ export default function InventoryListScreen({
                         <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Out of Stock
-                            {stockFilter === "outOfStock"
-                              ? " (filtering)"
-                              : ""}
+                            {stockFilter === "outOfStock" ? " (filtering)" : ""}
                           </Text>
                           <Title
                             style={[
@@ -903,10 +1489,7 @@ export default function InventoryListScreen({
                     </Pressable>
                   )}
                   <Pressable
-                    style={[
-                      styles.analyticsCard,
-                      styles.analyticsCardFilter,
-                    ]}
+                    style={[styles.analyticsCard, styles.analyticsCardFilter]}
                     onPress={() => setGalPeriodWeek((prev) => !prev)}
                   >
                     <Card style={styles.analyticsCardInner}>
@@ -914,29 +1497,26 @@ export default function InventoryListScreen({
                         <Text style={styles.analyticsLabel}>
                           Checked out this {galPeriodWeek ? "week" : "month"}
                         </Text>
-                      <Title style={styles.analyticsValue}>
-                        {galPeriodWeek
-                          ? gallonsUsedThisWeek
-                          : gallonsUsedThisMonth}
-                        <Text style={styles.analyticsValueUnit}> gal</Text>
-                      </Title>
-                      <Text style={styles.analyticsSubtext}>
-                        {galPeriodWeek
-                          ? thisWeekRange.label
-                          : thisMonthRange.label}
-                      </Text>
-                      <Text style={styles.analyticsSubtext}>
-                        Tap for {galPeriodWeek ? "month" : "week"}
-                      </Text>
-                    </Card.Content>
+                        <Title style={styles.analyticsValue}>
+                          {galPeriodWeek
+                            ? gallonsUsedThisWeek
+                            : gallonsUsedThisMonth}
+                          <Text style={styles.analyticsValueUnit}> gal</Text>
+                        </Title>
+                        <Text style={styles.analyticsSubtext}>
+                          {galPeriodWeek
+                            ? thisWeekRange.label
+                            : thisMonthRange.label}
+                        </Text>
+                        <Text style={styles.analyticsSubtext}>
+                          Tap for {galPeriodWeek ? "month" : "week"}
+                        </Text>
+                      </Card.Content>
                     </Card>
                   </Pressable>
                   {mostUsedColor && (
                     <Pressable
-                      style={[
-                        styles.analyticsCard,
-                        styles.analyticsCardFilter,
-                      ]}
+                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
                       onPress={() => setMostUsedByWeek((prev) => !prev)}
                     >
                       <Card style={styles.analyticsCardInner}>
@@ -944,24 +1524,24 @@ export default function InventoryListScreen({
                           <Text style={styles.analyticsLabel}>
                             Most gallons checked out
                           </Text>
-                        <Title
-                          style={[styles.analyticsValue, { fontSize: 18 }]}
-                          numberOfLines={1}
-                        >
-                          {mostUsedColor.name}
-                        </Title>
-                        <Text style={styles.analyticsSubtext}>
-                          {mostUsedColor.totalGal} gal —{" "}
-                          {mostUsedColor.isWeek
-                            ? `week of ${mostUsedColor.periodLabel}`
-                            : mostUsedColor.periodLabel}
-                        </Text>
-                        <Text style={styles.analyticsSubtext}>
-                          Tap for {mostUsedByWeek ? "month" : "week"}
-                        </Text>
-                      </Card.Content>
-                    </Card>
-                  </Pressable>
+                          <Title
+                            style={[styles.analyticsValue, { fontSize: 18 }]}
+                            numberOfLines={1}
+                          >
+                            {mostUsedColor.name}
+                          </Title>
+                          <Text style={styles.analyticsSubtext}>
+                            {mostUsedColor.totalGal} gal —{" "}
+                            {mostUsedColor.isWeek
+                              ? `week of ${mostUsedColor.periodLabel}`
+                              : mostUsedColor.periodLabel}
+                          </Text>
+                          <Text style={styles.analyticsSubtext}>
+                            Tap for {mostUsedByWeek ? "month" : "week"}
+                          </Text>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
                   )}
                 </View>
 
@@ -1008,16 +1588,12 @@ export default function InventoryListScreen({
                                 compact
                                 onPress={() =>
                                   setBookFilter((prev) =>
-                                    prev === "standard"
-                                      ? "custom"
-                                      : "standard",
+                                    prev === "standard" ? "custom" : "standard",
                                   )
                                 }
                                 style={styles.viewModeButton}
                               >
-                                {bookFilter === "standard"
-                                  ? "Stock"
-                                  : "Custom"}
+                                {bookFilter === "standard" ? "Stock" : "Custom"}
                               </Button>
                             </View>
                           )}
@@ -1037,36 +1613,27 @@ export default function InventoryListScreen({
                         </View>
                         <View style={styles.tableHeaderSearchRow}>
                           <Searchbar
-                            placeholder="Search by name, ID, location, or type..."
+                            placeholder="Search or Scan"
                             onChangeText={setSearchQuery}
                             value={searchQuery}
                             style={styles.webSearchbar}
                             inputStyle={styles.searchbarInput}
+                            onSubmitEditing={handleSearchSubmit}
+                            blurOnSubmit={false}
+                            autoCorrect={false}
+                            autoCapitalize="none"
                           />
-                          {onScanCode && (
-                            <TextInput
-                              label="Scan material code"
-                              value={scanInput}
-                              onChangeText={setScanInput}
-                              ref={scanInputRef}
+                          {actorName ? (
+                            <Button
                               mode="outlined"
-                              dense
-                              style={styles.scanInput}
-                              autoCapitalize="none"
-                              autoCorrect={false}
-                              placeholder="Ready for scanner input"
-                              onSubmitEditing={() => {
-                                const trimmed = scanInput.trim();
-                                if (trimmed && onScanCode) {
-                                  onScanCode(trimmed);
-                                  setScanInput("");
-                                  notifyViewState();
-                                }
-                              }}
-                              blurOnSubmit={false}
-                              keyboardType="default"
-                            />
-                          )}
+                              compact
+                              icon="truck-delivery"
+                              onPress={openReceivePoModal}
+                              style={styles.receivePoButton}
+                            >
+                              Receive PO
+                            </Button>
+                          ) : null}
                         </View>
                       </View>
 
@@ -1114,10 +1681,7 @@ export default function InventoryListScreen({
                                   Quantity
                                 </DataTable.Title>
                                 <DataTable.Title
-                                  style={[
-                                    styles.tableCell,
-                                    styles.idColCell,
-                                  ]}
+                                  style={[styles.tableCell, styles.idColCell]}
                                 >
                                   ID
                                 </DataTable.Title>
@@ -1165,7 +1729,9 @@ export default function InventoryListScreen({
                             </DataTable>
                             <ScrollView
                               style={styles.tableScrollOuter}
-                              contentContainerStyle={styles.tableScrollOuterContent}
+                              contentContainerStyle={
+                                styles.tableScrollOuterContent
+                              }
                               showsVerticalScrollIndicator={true}
                               nestedScrollEnabled
                               refreshControl={
@@ -1178,309 +1744,334 @@ export default function InventoryListScreen({
                             >
                               <DataTable style={styles.dataTable}>
                                 {filteredAndSortedInventory.map((item) => {
-                                const isLowStock =
-                                  (item.quantity || 0) <
-                                  (item.minQuantity ?? minQuantity ?? 30);
-                                const isOutOfStock = (item.quantity || 0) === 0;
-                                return (
-                                  <DataTable.Row
-                                    key={item.id}
-                                    onPress={() => onItemSelect(item)}
-                                    style={
-                                      isLowStock
-                                        ? {
-                                            backgroundColor: theme.dark
-                                              ? "#3a3a3a"
-                                              : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
-                                            borderLeftWidth: 4,
-                                            borderLeftColor: "#ff6b6b",
-                                          }
-                                        : undefined
-                                    }
-                                  >
-                                    <DataTable.Cell style={styles.tableCell}>
-                                      <Text
-                                        style={[
-                                          styles.itemNameText,
-                                          {
-                                            color:
-                                              theme.dark && !isLowStock
-                                                ? "#fff"
-                                                : undefined,
-                                          },
-                                          isLowStock && styles.lowStockText,
-                                        ]}
-                                      >
-                                        {item.name || "Unnamed"}
-                                      </Text>
-                                    </DataTable.Cell>
-                                    <DataTable.Cell style={styles.tableCell}>
-                                      <Text
-                                        style={[
-                                          styles.quantityText,
-                                          {
-                                            color:
-                                              theme.dark && !isLowStock
-                                                ? "#fff"
-                                                : theme.dark
-                                                  ? undefined
-                                                  : theme.colors.onSurface,
-                                          },
-                                          isLowStock && styles.lowStockText,
-                                        ]}
-                                      >
-                                        {item.quantity || 0} gal
-                                      </Text>
-                                    </DataTable.Cell>
-                                    <DataTable.Cell
-                                      style={[
-                                        styles.tableCell,
-                                        styles.idColCell,
-                                      ]}
+                                  const isLowStock =
+                                    (item.quantity || 0) <
+                                    (item.minQuantity ?? minQuantity ?? 30);
+                                  const isOutOfStock =
+                                    (item.quantity || 0) === 0;
+                                  return (
+                                    <DataTable.Row
+                                      key={item.id}
+                                      onPress={() => onItemSelect(item)}
+                                      style={
+                                        isLowStock
+                                          ? {
+                                              backgroundColor: theme.dark
+                                                ? "#3a3a3a"
+                                                : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
+                                              borderLeftWidth: 4,
+                                              borderLeftColor: "#ff6b6b",
+                                            }
+                                          : undefined
+                                      }
                                     >
-                                      <Text
-                                        style={[
-                                          styles.idText,
-                                          {
-                                            color: theme.dark ? "#fff" : "#666",
-                                          },
-                                        ]}
-                                      >
-                                        {item.id || "N/A"}
-                                      </Text>
-                                    </DataTable.Cell>
-                                    <DataTable.Cell style={styles.tableCell}>
-                                      {(() => {
-                                        const t = item.type
-                                          ? String(item.type).toLowerCase()
-                                          : "";
-                                        const label =
-                                          t === "custom_paint"
-                                            ? "Custom Paint"
-                                            : t === "custom_stain"
-                                              ? "Custom Stain"
-                                              : item.type
-                                                ? String(item.type)
-                                                    .charAt(0)
-                                                    .toUpperCase() +
-                                                  String(item.type)
-                                                    .slice(1)
-                                                    .toLowerCase()
-                                                : "";
-                                        const materialTypeColor =
-                                          t === "paint" || t === "custom_paint"
-                                            ? "#1565c0"
-                                            : t === "clear"
-                                              ? "#e65100"
-                                              : t === "stain" ||
-                                                  t === "custom_stain"
-                                                ? "#2e7d32"
-                                                : t === "primer"
-                                                  ? theme.dark
-                                                    ? "#f5f5dc"
-                                                    : "#5d4037"
-                                                  : t === "dye"
-                                                    ? "#7e57c2"
-                                                    : t === "catalyst"
-                                                      ? "#9a7b00"
-                                                      : theme.dark
-                                                        ? "#fff"
-                                                        : "#666";
-                                        return (
-                                          <Text
-                                            style={[
-                                              styles.materialTypeText,
-                                              { color: materialTypeColor },
-                                            ]}
-                                          >
-                                            {label}
-                                          </Text>
-                                        );
-                                      })()}
-                                    </DataTable.Cell>
-                                    <DataTable.Cell
-                                      style={[
-                                        styles.tableCell,
-                                        styles.locationColCell,
-                                      ]}
-                                    >
-                                      <Text
-                                        style={[
-                                          styles.locationText,
-                                          {
-                                            color: theme.dark ? "#fff" : "#666",
-                                          },
-                                        ]}
-                                      >
-                                        {item.location || "-"}
-                                      </Text>
-                                    </DataTable.Cell>
-                                    <DataTable.Cell
-                                      style={[
-                                        styles.tableCell,
-                                        styles.colorColCell,
-                                      ]}
-                                    >
-                                      {getValidHex(item.hex_color) ? (
-                                        <Pressable
-                                          onPress={() =>
-                                            setColorPreviewItem(item)
-                                          }
+                                      <DataTable.Cell style={styles.tableCell}>
+                                        <Text
                                           style={[
-                                            styles.inventoryColorSwatch,
+                                            styles.itemNameText,
                                             {
-                                              backgroundColor:
-                                                getValidHex(item.hex_color),
+                                              color:
+                                                theme.dark && !isLowStock
+                                                  ? "#fff"
+                                                  : undefined,
+                                            },
+                                            isLowStock && styles.lowStockText,
+                                          ]}
+                                        >
+                                          {item.name || "Unnamed"}
+                                        </Text>
+                                      </DataTable.Cell>
+                                      <DataTable.Cell style={styles.tableCell}>
+                                        <Text
+                                          style={[
+                                            styles.quantityText,
+                                            {
+                                              color:
+                                                theme.dark && !isLowStock
+                                                  ? "#fff"
+                                                  : theme.dark
+                                                    ? undefined
+                                                    : theme.colors.onSurface,
+                                            },
+                                            isLowStock && styles.lowStockText,
+                                          ]}
+                                        >
+                                          {item.quantity || 0} gal
+                                        </Text>
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={[
+                                          styles.tableCell,
+                                          styles.idColCell,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.idText,
+                                            {
+                                              color: theme.dark
+                                                ? "#fff"
+                                                : "#666",
                                             },
                                           ]}
-                                        />
-                                      ) : null}
-                                    </DataTable.Cell>
-                                    <DataTable.Cell
-                                      style={[
-                                        styles.tableCell,
-                                        styles.onOrderColCell,
-                                      ]}
-                                    >
-                                      {(() => {
-                                        const orderInfo =
-                                          onOrderSummary[item.id] ||
-                                          onOrderSummary[String(item.id)];
-                                        if (
-                                          orderInfo &&
-                                          orderInfo.quantity > 0
-                                        ) {
-                                          const expDate = orderInfo.expectedDate
-                                            ? new Date(orderInfo.expectedDate)
-                                            : null;
-                                          const exp = expDate
-                                            ? expDate.toLocaleDateString(
-                                                "en-US",
-                                                {
-                                                  month: "short",
-                                                  day: "numeric",
-                                                  year: "numeric",
-                                                },
-                                              )
+                                        >
+                                          {item.id || "N/A"}
+                                        </Text>
+                                      </DataTable.Cell>
+                                      <DataTable.Cell style={styles.tableCell}>
+                                        {(() => {
+                                          const t = item.type
+                                            ? String(item.type).toLowerCase()
                                             : "";
-                                          const isLate =
-                                            expDate &&
-                                            expDate.getTime() < Date.now();
-                                          const textColor = isLate
-                                            ? "#c62828"
-                                            : theme.colors.primary;
+                                          const label =
+                                            t === "custom_paint"
+                                              ? "Custom Paint"
+                                              : t === "custom_stain"
+                                                ? "Custom Stain"
+                                                : item.type
+                                                  ? String(item.type)
+                                                      .charAt(0)
+                                                      .toUpperCase() +
+                                                    String(item.type)
+                                                      .slice(1)
+                                                      .toLowerCase()
+                                                  : "";
+                                          const materialTypeColor =
+                                            t === "paint" ||
+                                            t === "custom_paint"
+                                              ? "#1565c0"
+                                              : t === "clear"
+                                                ? "#e65100"
+                                                : t === "stain" ||
+                                                    t === "custom_stain"
+                                                  ? "#2e7d32"
+                                                  : t === "primer"
+                                                    ? theme.dark
+                                                      ? "#f5f5dc"
+                                                      : "#5d4037"
+                                                    : t === "dye"
+                                                      ? "#7e57c2"
+                                                      : t === "catalyst"
+                                                        ? "#9a7b00"
+                                                        : theme.dark
+                                                          ? "#fff"
+                                                          : "#666";
                                           return (
-                                            <View>
-                                              <Text
-                                                style={{
-                                                  fontSize: 12,
-                                                  color: textColor,
-                                                }}
-                                              >
-                                                {orderInfo.quantity} gal
-                                              </Text>
-                                              {exp ? (
-                                                <Text
-                                                  style={{
-                                                    fontSize: 11,
-                                                    color: textColor,
-                                                    marginTop: 2,
-                                                  }}
-                                                >
-                                                  {exp}
-                                                </Text>
-                                              ) : null}
-                                            </View>
+                                            <Text
+                                              style={[
+                                                styles.materialTypeText,
+                                                { color: materialTypeColor },
+                                              ]}
+                                            >
+                                              {label}
+                                            </Text>
                                           );
-                                        }
-                                        return null;
-                                      })()}
-                                    </DataTable.Cell>
-                                    <DataTable.Cell
-                                      style={styles.lastScannedCell}
-                                    >
-                                      {(() => {
-                                        const log =
-                                          lastLogByItemId[
-                                            item.id != null
-                                              ? String(item.id)
-                                              : ""
-                                          ];
-                                        if (log) {
-                                          const ts = log.timestamp
-                                            ? new Date(
-                                                log.timestamp,
-                                              ).toLocaleString("en-US", {
-                                                month: "short",
-                                                day: "numeric",
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                              })
-                                            : "—";
-                                          const user =
-                                            log.userName || "Unknown";
-                                          const actionLabel =
-                                            getActionLabel(log);
-                                          return (
-                                            <View>
-                                              <Text
-                                                style={[
-                                                  styles.timeText,
-                                                  {
-                                                    color: theme.dark
-                                                      ? "#fff"
-                                                      : "#666",
-                                                  },
-                                                ]}
-                                              >
-                                                {ts}
-                                              </Text>
-                                              <Text
-                                                style={[
-                                                  styles.lastScannedByText,
-                                                  {
-                                                    color: theme.dark
-                                                      ? "#fff"
-                                                      : "#333",
-                                                  },
-                                                ]}
-                                              >
-                                                {user}
-                                              </Text>
-                                              <Text
-                                                style={[
-                                                  styles.timeText,
-                                                  {
-                                                    color: theme.dark
-                                                      ? "#aaa"
-                                                      : "#666",
-                                                  },
-                                                ]}
-                                              >
-                                                {actionLabel}
-                                              </Text>
-                                            </View>
-                                          );
-                                        }
-                                        return (
-                                          <Text
+                                        })()}
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={[
+                                          styles.tableCell,
+                                          styles.locationColCell,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.locationText,
+                                            {
+                                              color: theme.dark
+                                                ? "#fff"
+                                                : "#666",
+                                            },
+                                          ]}
+                                        >
+                                          {item.location || "-"}
+                                        </Text>
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={[
+                                          styles.tableCell,
+                                          styles.colorColCell,
+                                        ]}
+                                      >
+                                        {getValidHex(item.hex_color) ? (
+                                          <Pressable
+                                            onPress={() =>
+                                              setColorPreviewItem(item)
+                                            }
                                             style={[
-                                              styles.timeText,
+                                              styles.inventoryColorSwatch,
                                               {
-                                                color: theme.dark
-                                                  ? "#fff"
-                                                  : "#666",
+                                                backgroundColor: getValidHex(
+                                                  item.hex_color,
+                                                ),
                                               },
                                             ]}
-                                          >
-                                            Never
-                                          </Text>
-                                        );
-                                      })()}
-                                    </DataTable.Cell>
-                                  </DataTable.Row>
-                                );
-                              })}
+                                          />
+                                        ) : null}
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={[
+                                          styles.tableCell,
+                                          styles.onOrderColCell,
+                                        ]}
+                                      >
+                                        {(() => {
+                                          const orderInfo =
+                                            onOrderSummary[item.id] ||
+                                            onOrderSummary[String(item.id)];
+                                          if (
+                                            orderInfo &&
+                                            orderInfo.quantity > 0
+                                          ) {
+                                            const expDate =
+                                              orderInfo.expectedDate
+                                                ? new Date(
+                                                    orderInfo.expectedDate,
+                                                  )
+                                                : null;
+                                            const exp = expDate
+                                              ? expDate.toLocaleDateString(
+                                                  "en-US",
+                                                  {
+                                                    month: "short",
+                                                    day: "numeric",
+                                                    year: "numeric",
+                                                  },
+                                                )
+                                              : "";
+                                            const isLate =
+                                              expDate &&
+                                              expDate.getTime() < Date.now();
+                                            const textColor = isLate
+                                              ? "#c62828"
+                                              : theme.colors.primary;
+                                            const po =
+                                              orderInfo.poNumber ||
+                                              orderInfo.po_number ||
+                                              "";
+                                            return (
+                                              <View>
+                                                <Text
+                                                  style={{
+                                                    fontSize: 12,
+                                                    color: textColor,
+                                                  }}
+                                                >
+                                                  {orderInfo.quantity} gal
+                                                </Text>
+                                                {exp ? (
+                                                  <Text
+                                                    style={{
+                                                      fontSize: 11,
+                                                      color: textColor,
+                                                      marginTop: 2,
+                                                    }}
+                                                  >
+                                                    {exp}
+                                                  </Text>
+                                                ) : null}
+                                                {po ? (
+                                                  <Text
+                                                    style={{
+                                                      fontSize: 11,
+                                                      color: textColor,
+                                                      marginTop: 2,
+                                                    }}
+                                                  >
+                                                    PO {po}
+                                                  </Text>
+                                                ) : null}
+                                              </View>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={styles.lastScannedCell}
+                                      >
+                                        {(() => {
+                                          const log =
+                                            lastLogByItemId[
+                                              item.id != null
+                                                ? String(item.id)
+                                                : ""
+                                            ];
+                                          if (log) {
+                                            const ts = log.timestamp
+                                              ? new Date(
+                                                  log.timestamp,
+                                                ).toLocaleString("en-US", {
+                                                  month: "short",
+                                                  day: "numeric",
+                                                  hour: "2-digit",
+                                                  minute: "2-digit",
+                                                })
+                                              : "—";
+                                            const user =
+                                              log.userName || "Unknown";
+                                            const actionLabel =
+                                              getActionLabel(log);
+                                            return (
+                                              <View>
+                                                <Text
+                                                  style={[
+                                                    styles.timeText,
+                                                    {
+                                                      color: theme.dark
+                                                        ? "#fff"
+                                                        : "#666",
+                                                    },
+                                                  ]}
+                                                >
+                                                  {ts}
+                                                </Text>
+                                                <Text
+                                                  style={[
+                                                    styles.lastScannedByText,
+                                                    {
+                                                      color: theme.dark
+                                                        ? "#fff"
+                                                        : "#333",
+                                                    },
+                                                  ]}
+                                                >
+                                                  {user}
+                                                </Text>
+                                                <Text
+                                                  style={[
+                                                    styles.timeText,
+                                                    {
+                                                      color: theme.dark
+                                                        ? "#aaa"
+                                                        : "#666",
+                                                    },
+                                                  ]}
+                                                >
+                                                  {actionLabel}
+                                                </Text>
+                                              </View>
+                                            );
+                                          }
+                                          return (
+                                            <Text
+                                              style={[
+                                                styles.timeText,
+                                                {
+                                                  color: theme.dark
+                                                    ? "#fff"
+                                                    : "#666",
+                                                },
+                                              ]}
+                                            >
+                                              Never
+                                            </Text>
+                                          );
+                                        })()}
+                                      </DataTable.Cell>
+                                    </DataTable.Row>
+                                  );
+                                })}
                               </DataTable>
                             </ScrollView>
                           </View>
@@ -1492,6 +2083,7 @@ export default function InventoryListScreen({
               </View>
             </View>
           )}
+          <ReceivePoModal />
           <ColorPreviewModal />
         </View>
       </View>
@@ -1597,9 +2189,7 @@ export default function InventoryListScreen({
           </View>
           <Searchbar
             placeholder={
-              viewMode === "colorBook"
-                ? "Search colors by name or ID..."
-                : "Search by name, ID, location, or type..."
+              viewMode === "colorBook" ? "Search colors" : "Search or Scan"
             }
             onChangeText={setSearchQuery}
             value={searchQuery}
@@ -1607,31 +2197,19 @@ export default function InventoryListScreen({
             autoCorrect={false}
             autoCapitalize="none"
             blurOnSubmit={false}
+            onSubmitEditing={handleSearchSubmit}
           />
-          {onScanCode && (
-            <TextInput
-              label="Scan material code"
-              value={scanInput}
-              onChangeText={setScanInput}
-              ref={scanInputRef}
+          {actorName ? (
+            <Button
               mode="outlined"
-              dense
-              style={styles.scanInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="Ready for scanner input"
-              onSubmitEditing={() => {
-                const trimmed = scanInput.trim();
-                if (trimmed && onScanCode) {
-                  onScanCode(trimmed);
-                  setScanInput("");
-                  notifyViewState();
-                }
-              }}
-              blurOnSubmit={false}
-              keyboardType="default"
-            />
-          )}
+              compact
+              icon="truck-delivery"
+              onPress={openReceivePoModal}
+              style={styles.receivePoButtonMobile}
+            >
+              Receive PO
+            </Button>
+          ) : null}
           {recycleDueFilter && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
@@ -1806,21 +2384,21 @@ export default function InventoryListScreen({
                           styles.analyticsCardMobileContentLandscape,
                       ]}
                     >
-                    <Text style={styles.analyticsLabelMobile}>
-                      Most checked out
-                    </Text>
-                    <Title
-                      style={[styles.analyticsValueMobile, { fontSize: 14 }]}
-                      numberOfLines={1}
-                    >
-                      {mostUsedColor.name}
-                    </Title>
-                    <Text style={styles.analyticsSubtextMobile}>
-                      {mostUsedColor.totalGal} gal
-                    </Text>
-                  </Card.Content>
-                </Card>
-              </Pressable>
+                      <Text style={styles.analyticsLabelMobile}>
+                        Most checked out
+                      </Text>
+                      <Title
+                        style={[styles.analyticsValueMobile, { fontSize: 14 }]}
+                        numberOfLines={1}
+                      >
+                        {mostUsedColor.name}
+                      </Title>
+                      <Text style={styles.analyticsSubtextMobile}>
+                        {mostUsedColor.totalGal} gal
+                      </Text>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
               )}
             </View>
           )}
@@ -1873,6 +2451,7 @@ export default function InventoryListScreen({
             </View>
           )}
         </ScrollView>
+        <ReceivePoModal />
         <ColorPreviewModal />
       </>
     );
@@ -1907,9 +2486,7 @@ export default function InventoryListScreen({
                 style={[styles.viewModeButtonMobile, styles.viewModeButtonLong]}
                 disabled={bookFilter === "custom"}
               >
-                {listOrderMode === "trueOrder"
-                  ? "True Order"
-                  : "Alphabetical"}
+                {listOrderMode === "trueOrder" ? "True Order" : "Alphabetical"}
               </Button>
             )}
             <Button
@@ -1930,7 +2507,9 @@ export default function InventoryListScreen({
               mode={viewMode === "colorBook" ? "contained" : "outlined"}
               compact
               onPress={() =>
-                setViewMode(viewMode === "colorBook" ? "inventory" : "colorBook")
+                setViewMode(
+                  viewMode === "colorBook" ? "inventory" : "colorBook",
+                )
               }
               style={[
                 styles.viewModeButtonMobile,
@@ -1960,9 +2539,7 @@ export default function InventoryListScreen({
         </View>
         <Searchbar
           placeholder={
-            viewMode === "colorBook"
-              ? "Search colors by name or ID..."
-              : "Search by name, ID, location, or type..."
+            viewMode === "colorBook" ? "Search colors" : "Search or Scan"
           }
           onChangeText={setSearchQuery}
           value={searchQuery}
@@ -1970,31 +2547,19 @@ export default function InventoryListScreen({
           autoCorrect={false}
           autoCapitalize="none"
           blurOnSubmit={false}
+          onSubmitEditing={handleSearchSubmit}
         />
-        {onScanCode && (
-          <TextInput
-            label="Scan material code"
-            value={scanInput}
-            onChangeText={setScanInput}
-            ref={scanInputRef}
+        {actorName ? (
+          <Button
             mode="outlined"
-            dense
-            style={styles.scanInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="Ready for scanner input"
-            onSubmitEditing={() => {
-              const trimmed = scanInput.trim();
-              if (trimmed && onScanCode) {
-                onScanCode(trimmed);
-                setScanInput("");
-                notifyViewState();
-              }
-            }}
-            blurOnSubmit={false}
-            keyboardType="default"
-          />
-        )}
+            compact
+            icon="truck-delivery"
+            onPress={openReceivePoModal}
+            style={styles.receivePoButtonMobile}
+          >
+            Receive PO
+          </Button>
+        ) : null}
       </View>
       {recycleDueFilter && (
         <View style={styles.recycleDueBanner}>
@@ -2072,6 +2637,7 @@ export default function InventoryListScreen({
           />
         )}
       </View>
+      <ReceivePoModal />
       <ColorPreviewModal />
     </View>
   );
@@ -2157,9 +2723,93 @@ const styles = StyleSheet.create({
     alignItems: "center",
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
-  scanInput: {
-    marginTop: 6,
-    ...(Platform.OS === "web" && { minHeight: 40 }),
+  receivePoButton: {
+    flexShrink: 0,
+  },
+  receivePoButtonMobile: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  receivePoKb: {
+    flex: 1,
+  },
+  receivePoOverlayInner: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  receivePoBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  receivePoBox: {
+    width: "100%",
+    maxWidth: 440,
+    maxHeight: "88%",
+    borderRadius: 12,
+    padding: 20,
+    elevation: 4,
+    zIndex: 1,
+  },
+  receivePoTitle: {
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  receivePoHelp: {
+    fontSize: 14,
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  receivePoListScroll: {
+    maxHeight: 320,
+    marginBottom: 8,
+  },
+  receivePoOrderRow: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+  },
+  receivePoOrderPo: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  receivePoOrderMeta: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  receivePoOrderPreview: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  receivePoActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  receivePoDetailHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 12,
+  },
+  receivePoDetailScroll: {
+    maxHeight: 360,
+    marginBottom: 8,
+  },
+  receivePoLineCard: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  receivePoLineName: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
   },
   filterSummaryRow: {
     marginBottom: 4,
@@ -2191,6 +2841,33 @@ const styles = StyleSheet.create({
   },
   itemHeaderRight: {
     alignItems: "flex-end",
+  },
+  itemBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 6,
+    marginTop: 6,
+  },
+  itemBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+  },
+  itemBadgeLate: {
+    backgroundColor: "#ffebee",
+    borderColor: "#ffcdd2",
+  },
+  itemBadgeBackOrder: {
+    backgroundColor: "#fff3e0",
+    borderColor: "#ffe0b2",
+  },
+  itemBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
   cardBottomRow: {
     flexDirection: "row",
@@ -2258,6 +2935,10 @@ const styles = StyleSheet.create({
   onOrderDateText: {
     fontSize: 11,
     marginTop: 0,
+  },
+  onOrderPoText: {
+    fontSize: 11,
+    marginTop: 2,
   },
   lastScanned: {
     fontSize: 12,

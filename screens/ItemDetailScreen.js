@@ -42,6 +42,7 @@ const CONTAINER_OPTIONS = [
 
 export default function ItemDetailScreen({
   item,
+  inventory = [],
   onSave,
   onDelete,
   onChangeId,
@@ -132,12 +133,68 @@ export default function ItemDetailScreen({
     );
   }, [item?.id, item?.external_code]);
 
+  useEffect(() => {
+    setFieldErrors({});
+  }, [item?.id]);
+
   const handleSave = async () => {
     if (!isAdmin) {
       Alert.alert(
         "Not Allowed",
         "Only admin can make changes to inventory items.",
       );
+      return;
+    }
+
+    const trimmedName = name.trim();
+    const trimmedId = idInput.trim();
+    const nextErr = {};
+    if (!trimmedName) nextErr.name = true;
+    if (!trimmedId) nextErr.id = true;
+    if (Object.keys(nextErr).length > 0) {
+      setFieldErrors(nextErr);
+      Alert.alert(
+        "Required",
+        "Please fill in all fields marked with *.",
+      );
+      return;
+    }
+    setFieldErrors({});
+
+    const selfId = String(item?.id ?? "");
+    const inv = Array.isArray(inventory) ? inventory : [];
+    const extTrim = externalCodeInput.trim();
+    const otherHasId = inv.some(
+      (i) =>
+        String(i.id) !== selfId &&
+        String(i?.id ?? "").trim() === trimmedId,
+    );
+    const otherHasName = inv.some(
+      (i) =>
+        String(i.id) !== selfId &&
+        (i?.name ?? "").trim().toLowerCase() === trimmedName.toLowerCase(),
+    );
+    const otherHasExt =
+      extTrim !== "" &&
+      inv.some(
+        (i) =>
+          String(i.id) !== selfId &&
+          String(i?.external_code ?? "").trim().toLowerCase() ===
+            extTrim.toLowerCase(),
+      );
+
+    if (otherHasId || otherHasName || otherHasExt) {
+      const lines = [];
+      if (otherHasId) {
+        lines.push("Another item already uses this Paint ID.");
+      }
+      if (otherHasName) {
+        lines.push("Another item already uses this name.");
+      }
+      if (otherHasExt) {
+        lines.push("Another item already uses this external code.");
+      }
+      Alert.alert("Cannot save", lines.join("\n\n"));
       return;
     }
 
@@ -182,8 +239,8 @@ export default function ItemDetailScreen({
       : null;
     const updatedItem = {
       ...item,
-      id: idInput.trim() || item?.id,
-      name,
+      id: trimmedId || item?.id,
+      name: trimmedName,
       quantity: quantity.trim() === "" ? 0 : parseInt(quantity, 10) || 0,
       location,
       ...(type !== "custom_paint" &&
@@ -276,15 +333,21 @@ export default function ItemDetailScreen({
           <View style={isDesktop && styles.webWrapper}>
             <Card style={[styles.card, isDesktop && styles.webCard]}>
               <Card.Content>
-                <Text style={styles.label}>Paint ID</Text>
+                <Text style={styles.label}>
+                  Paint ID{isAdmin ? " *" : ""}
+                </Text>
                 {isAdmin ? (
                   <TextInput
-                    label="Paint ID"
+                    label="Paint ID *"
                     value={idInput}
-                    onChangeText={setIdInput}
+                    onChangeText={(t) => {
+                      setIdInput(t);
+                      setFieldErrors((e) => ({ ...e, id: false }));
+                    }}
                     mode="outlined"
                     style={styles.input}
                     placeholder="Any format"
+                    error={!!fieldErrors.id}
                   />
                 ) : (
                   <Text style={styles.itemId}>
@@ -318,13 +381,17 @@ export default function ItemDetailScreen({
             <Card style={[styles.card, isDesktop && styles.webCard]}>
               <Card.Content>
                 <TextInput
-                  label="Paint Name"
+                  label={isAdmin ? "Paint Name *" : "Paint Name"}
                   value={name}
-                  onChangeText={setName}
+                  onChangeText={(t) => {
+                    setName(t);
+                    setFieldErrors((e) => ({ ...e, name: false }));
+                  }}
                   mode="outlined"
                   style={styles.input}
                   disabled={!isAdmin}
                   editable={isAdmin}
+                  error={!!fieldErrors.name}
                 />
 
                 <Text style={styles.label}>Type</Text>
