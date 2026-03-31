@@ -109,6 +109,24 @@ app.put('/api/items/:id', async (req, res) => {
     delete updates._actionType;
     delete updates._quantityChange;
 
+    // Backward-compatible: mirror is_mixing into legacy PO fields (if they exist in DB).
+    // This makes "AP" persist even on deployments still reading po_label_*.
+    if (Object.prototype.hasOwnProperty.call(updates, 'is_mixing')) {
+      const v = updates.is_mixing;
+      const isMixing =
+        v === true || v === false
+          ? v
+          : v === 'true' || v === 1 || v === '1'
+            ? true
+            : v === 'false' || v === 0 || v === '0'
+              ? false
+              : null;
+      if (isMixing === true || isMixing === false) {
+        updates.po_label_ap = isMixing === false;
+        updates.po_label_mixing = isMixing === true;
+      }
+    }
+
     // On check-in, set recycle_date to 4 months from now for custom paint/stain (replaces previous date)
     const customTypes = ['custom_paint', 'custom_stain'];
     const itemType = (currentItem?.type || '').toLowerCase();
@@ -120,7 +138,7 @@ app.put('/api/items/:id', async (req, res) => {
 
     const result = await db.updateItem(id, updates);
     if (result.success) {
-      // PO lane is persisted via po_lane directly (or the dedicated PATCH endpoint).
+      // AP vs mixing is persisted via boolean is_mixing (default true).
       // Determine action type for audit log
       let auditActionType = 'update';
       
@@ -184,32 +202,6 @@ app.put('/api/items/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating item:', error);
     res.status(500).json({ error: 'Failed to update item' });
-  }
-});
-
-// PATCH only AP vs mixing (authoritative po_lane + boolean columns)
-app.patch('/api/items/:id/po-lane', async (req, res) => {
-  try {
-    const id = decodeURIComponent(req.params.id).trim();
-    const laneRaw = req.body?.lane != null ? String(req.body.lane).toLowerCase().trim() : '';
-    if (laneRaw !== 'ap' && laneRaw !== 'mixing') {
-      return res.status(400).json({
-        success: false,
-        error: 'lane must be "ap" or "mixing"',
-      });
-    }
-    await db.updateItemPoLane(id, laneRaw);
-    const item = await db.getItem(id);
-    res.json({ success: true, item });
-  } catch (error) {
-    console.error('Error patching po-lane:', error);
-    if (error.message === 'Item not found') {
-      return res.status(404).json({ success: false, error: 'Item not found' });
-    }
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to update PO lane',
-    });
   }
 });
 

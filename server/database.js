@@ -16,18 +16,22 @@ const pool = new Pool({
     : false,
 });
 
-/** Fill missing po_lane for API JSON — DB may have NULLs on legacy rows. Derive legacy booleans from po_lane so responses stay consistent. */
+/** Normalize API row for AP vs mixing: single boolean is_mixing (default true). */
 function normalizeItemPoFields(row) {
   if (!row) return row;
-  if (row.po_lane === "ap" || row.po_lane === "mixing") {
-    const ap = row.po_lane === "ap";
-    return { ...row, po_label_ap: ap, po_label_mixing: !ap };
+  // Strip legacy PO fields from all API responses.
+  // (Columns may still exist in DB, but we don't want them in JSON.)
+  // eslint-disable-next-line no-unused-vars
+  const { po_label_ap, po_label_mixing, po_lane, ...rest } = row;
+  if (rest.is_mixing === true || rest.is_mixing === false) return rest;
+  // If legacy booleans exist, derive is_mixing from them (AP => is_mixing=false).
+  if (po_label_ap === true && po_label_mixing !== true) {
+    return { ...rest, is_mixing: false };
   }
-  const t = row.type ? String(row.type).toLowerCase() : "";
-  if (["clear", "primer", "catalyst"].includes(t)) {
-    return { ...row, po_lane: "ap", po_label_ap: true, po_label_mixing: false };
+  if (po_label_mixing === true && po_label_ap !== true) {
+    return { ...rest, is_mixing: true };
   }
-  return { ...row, po_lane: "mixing", po_label_ap: false, po_label_mixing: true };
+  return { ...rest, is_mixing: true };
 }
 
 class Database {
@@ -40,7 +44,7 @@ class Database {
       const client = await this.pool.connect();
       await this.initTables(client);
       client.release();
-      await this.backfillPoLaneDefaults();
+      await this.backfillMixingDefaults();
       console.log("Connected to PostgreSQL database");
     } catch (err) {
       console.error("Error connecting to database:", err);
@@ -48,26 +52,38 @@ class Database {
     }
   }
 
-  /** Fill NULL po_lane / po_label_* so API responses are never all-null for legacy rows. */
-  async backfillPoLaneDefaults() {
+  /**
+   * Backfill is_mixing for legacy rows, then wipe old per-item PO fields.
+   * Rule: default mixing (true). If legacy AP flag exists, set is_mixing=false.
+   */
+  async backfillMixingDefaults() {
     const now = new Date().toISOString();
     try {
       await this.pool.query(
         `UPDATE items
-         SET po_lane = 'ap', "updatedAt" = $1
-         WHERE po_lane IS NULL
-           AND lower(COALESCE("type", '')) IN ('clear', 'primer', 'catalyst')`,
+         SET is_mixing = false, "updatedAt" = $1
+         WHERE is_mixing IS NULL AND po_label_ap = true`,
         [now],
       );
       await this.pool.query(
         `UPDATE items
-         SET po_lane = 'mixing', "updatedAt" = $1
-         WHERE po_lane IS NULL`,
+         SET is_mixing = true, "updatedAt" = $1
+         WHERE is_mixing IS NULL`,
         [now],
       );
-      console.log("[DB] po_lane / po_label columns backfilled where NULL");
+      // Wipe legacy PO fields so items don't carry old AP/mixing data anymore.
+      await this.pool.query(
+        `UPDATE items
+         SET po_label_ap = NULL,
+             po_label_mixing = NULL,
+             po_lane = NULL,
+             "updatedAt" = $1
+         WHERE po_label_ap IS NOT NULL OR po_label_mixing IS NOT NULL OR po_lane IS NOT NULL`,
+        [now],
+      );
+      console.log("[DB] is_mixing backfilled and legacy PO fields cleared");
     } catch (e) {
-      console.error("[DB] po_lane backfill failed:", e?.message || e);
+      console.error("[DB] is_mixing backfill failed:", e?.message || e);
     }
   }
 
@@ -153,6 +169,13 @@ class Database {
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'po_lane') THEN
           ALTER TABLE items ADD COLUMN po_lane TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'is_mixing') THEN
+          ALTER TABLE items ADD COLUMN is_mixing BOOLEAN DEFAULT NULL;
         END IF;
       END $$
     `);
@@ -273,7 +296,10 @@ class Database {
 
     // First try direct match on id or external_code
     let result = await this.pool.query(
-      "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
+      `SELECT * FROM items
+       WHERE id = $1 OR external_code = $1
+          OR lower(id) = lower($1) OR lower(COALESCE(external_code, '')) = lower($1)
+       LIMIT 1`,
       [raw],
     );
     if (result.rows[0]) return normalizeItemPoFields(result.rows[0]);
@@ -281,11 +307,14 @@ class Database {
     // If not found, and a global paint suffix is configured, try stripping it
     const suffix = await this.getSetting("paint_external_suffix");
     const trimmedSuffix = suffix != null ? String(suffix).trim() : "";
-    if (trimmedSuffix && raw.endsWith(trimmedSuffix)) {
+    if (trimmedSuffix && raw.toLowerCase().endsWith(trimmedSuffix.toLowerCase())) {
       const base = raw.slice(0, -trimmedSuffix.length);
       if (base) {
         result = await this.pool.query(
-          "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
+          `SELECT * FROM items
+           WHERE id = $1 OR external_code = $1
+              OR lower(id) = lower($1) OR lower(COALESCE(external_code, '')) = lower($1)
+           LIMIT 1`,
           [base],
         );
         if (result.rows[0]) return normalizeItemPoFields(result.rows[0]);
@@ -317,14 +346,12 @@ class Database {
         externalCode = String(item.id).trim() + trimmed;
       }
     }
-    const poLane =
-      item.po_lane === "ap"
-        ? "ap"
-        : item.po_lane === "mixing"
-          ? "mixing"
-          : "mixing";
+    const isMixing =
+      item.is_mixing === true || item.is_mixing === false
+        ? item.is_mixing
+        : true;
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, po_lane)
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, is_mixing)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         item.id,
@@ -343,12 +370,12 @@ class Database {
         hexColor,
         recycleDate,
         externalCode,
-        poLane,
+        isMixing,
       ],
     );
     return {
       success: true,
-      item: {
+      item: normalizeItemPoFields({
         ...item,
         updatedAt: now,
         price,
@@ -357,8 +384,8 @@ class Database {
         hex_color: hexColor,
         recycle_date: recycleDate,
         external_code: externalCode,
-        po_lane: poLane,
-      },
+        is_mixing: isMixing,
+      }),
     };
   }
 
@@ -380,7 +407,10 @@ class Database {
       "hex_color",
       "recycle_date",
       "external_code",
-      "po_lane",
+      "is_mixing",
+      // Legacy PO fields (kept for backward compatibility)
+      "po_label_ap",
+      "po_label_mixing",
     ];
     const fields = [];
     const values = [];
@@ -420,10 +450,18 @@ class Database {
         } else if (key === "external_code") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
-        } else if (key === "po_lane") {
+        } else if (key === "is_mixing") {
           const v = updates[key];
-          const s = v != null ? String(v).toLowerCase().trim() : "";
-          values.push(s === "ap" || s === "mixing" ? s : null);
+          if (v === true || v === false) values.push(v);
+          else if (v === "true" || v === 1 || v === "1") values.push(true);
+          else if (v === "false" || v === 0 || v === "0") values.push(false);
+          else values.push(null);
+        } else if (key === "po_label_ap" || key === "po_label_mixing") {
+          const v = updates[key];
+          if (v === true || v === false) values.push(v);
+          else if (v === "true" || v === 1 || v === "1") values.push(true);
+          else if (v === "false" || v === 0 || v === "0") values.push(false);
+          else values.push(null);
         } else {
           values.push(updates[key]);
         }
@@ -450,22 +488,7 @@ class Database {
     return { success: true, item };
   }
 
-  /**
-   * Authoritative PO lane: sets po_lane (TEXT) plus boolean columns in one UPDATE.
-   * lane must be 'ap' or 'mixing'.
-   */
-  async updateItemPoLane(itemId, lane) {
-    const now = new Date().toISOString();
-    const id = String(itemId).trim();
-    const laneNorm = lane === "ap" ? "ap" : "mixing";
-    const r = await this.pool.query(
-      `UPDATE items SET po_lane = $1, "updatedAt" = $2 WHERE id = $3`,
-      [laneNorm, now, id],
-    );
-    if (r.rowCount === 0) {
-      throw new Error("Item not found");
-    }
-  }
+  // AP vs mixing is now handled via boolean is_mixing.
 
   async deleteItem(itemId) {
     const result = await this.pool.query("DELETE FROM items WHERE id = $1", [

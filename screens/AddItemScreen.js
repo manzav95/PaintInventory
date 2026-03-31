@@ -156,8 +156,11 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
       quantity: parseInt(quantity) || 0,
       location: location.trim(),
       createdAt: new Date().toISOString(),
+      // IMPORTANT: AP => is_mixing=false
+      is_mixing: poCategory !== "ap",
+      // Backward-compatible fallback (older servers)
       po_label_ap: poCategory === "ap",
-      po_label_mixing: poCategory === "mixing",
+      po_label_mixing: poCategory !== "ap",
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
       ...(priceNum != null &&
         !isNaN(priceNum) &&

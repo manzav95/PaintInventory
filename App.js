@@ -492,11 +492,13 @@ export default function App() {
         quantity: item.quantity,
         location: item.location,
         userName: actorName,
-        ...(Object.prototype.hasOwnProperty.call(item, 'po_label_ap') && {
-          po_label_ap: item.po_label_ap,
+        ...(Object.prototype.hasOwnProperty.call(item, 'is_mixing') && {
+          is_mixing: item.is_mixing,
         }),
-        ...(Object.prototype.hasOwnProperty.call(item, 'po_label_mixing') && {
-          po_label_mixing: item.po_label_mixing,
+        // Backward-compatible fallback: older servers might not persist is_mixing yet.
+        ...(Object.prototype.hasOwnProperty.call(item, 'is_mixing') && {
+          po_label_ap: item.is_mixing === false,
+          po_label_mixing: item.is_mixing !== false,
         }),
         ...(Object.prototype.hasOwnProperty.call(item, 'minQuantity') && {
           minQuantity: item.minQuantity,

@@ -24,13 +24,9 @@ export function inferApMixingFromType(type) {
  */
 export function getItemApMixingFlags(item) {
   if (!item) return { hasAp: false, hasMixing: true };
-  // Per-item override (if present), else infer from type.
-  const ap = item.po_label_ap;
-  const mix = item.po_label_mixing;
-  if (ap === true && mix !== true) return { hasAp: true, hasMixing: false };
-  if (mix === true && ap !== true) return { hasAp: false, hasMixing: true };
-  if (ap != null || mix != null) return { hasAp: false, hasMixing: true };
-  return inferApMixingFromType(item.type);
+  // Simple rule: everything is mixing unless is_mixing is explicitly false (AP).
+  if (item.is_mixing === false) return { hasAp: true, hasMixing: false };
+  return { hasAp: false, hasMixing: true };
 }
 
 /** Lead time: AP-only lines → 3 days; mixing or mixed → 7 days. */

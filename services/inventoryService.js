@@ -211,7 +211,9 @@ class InventoryService {
         ...(item.hex_color && { hex_color: item.hex_color }),
         ...(item.recycle_date && { recycle_date: item.recycle_date }),
         ...(item.external_code && { external_code: item.external_code }),
-        ...(item.po_lane && { po_lane: item.po_lane }),
+        ...(item.is_mixing === true || item.is_mixing === false
+          ? { is_mixing: item.is_mixing }
+          : {}),
       };
 
       const result = await _fetch('/api/items', {
@@ -246,25 +248,7 @@ class InventoryService {
     }
   }
 
-  /** Persist AP vs mixing via dedicated PATCH (sets po_lane + booleans on server). */
-  async updateItemPoLane(itemId, lane) {
-    try {
-      const encodedId = encodeURIComponent(String(itemId));
-      const result = await _fetch(`/api/items/${encodedId}/po-lane`, {
-        method: 'PATCH',
-        body: JSON.stringify({ lane }),
-      });
-      return result;
-    } catch (error) {
-      // Many deployments won't have this route; treat as non-fatal.
-      const msg = error?.message || String(error);
-      if (msg.includes('HTTP 404')) {
-        return { success: false, error: 'PO lane endpoint not available on server (404).' };
-      }
-      console.error('Error updating PO lane:', error);
-      return { success: false, error: msg };
-    }
-  }
+  // AP vs mixing is now handled via boolean is_mixing on add/update.
 
   async deleteItem(itemId, userName) {
     try {

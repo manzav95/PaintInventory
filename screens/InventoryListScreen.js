@@ -129,6 +129,7 @@ export default function InventoryListScreen({
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc', 'desc'
   const [listOrderMode, setListOrderMode] = useState("alphabetical"); // 'alphabetical' | 'trueOrder'
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
+  const [apOnly, setApOnly] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
@@ -557,6 +558,10 @@ export default function InventoryListScreen({
         item.location?.toLowerCase().includes(query) ||
         item.type?.toLowerCase().includes(query);
       if (!matchesSearch) return false;
+      if (isAdmin && apOnly) {
+        // AP-only: is_mixing=false
+        if (item.is_mixing !== false) return false;
+      }
       const qty = item.quantity || 0;
       if (stockFilter === "outOfStock") return qty === 0;
       if (stockFilter === "inStock")
@@ -635,6 +640,8 @@ export default function InventoryListScreen({
     listOrderMode,
     bookFilter,
     recycleDueFilter,
+    isAdmin,
+    apOnly,
   ]);
 
   // Paint/custom items with valid hex for color book grid (filtered by bookFilter)
@@ -713,7 +720,10 @@ export default function InventoryListScreen({
               />
               {isStain && (
                 <View
-                  style={[styles.colorModalStainWatermark, { pointerEvents: "none" }]}
+                  style={[
+                    styles.colorModalStainWatermark,
+                    { pointerEvents: "none" },
+                  ]}
                 >
                   <Text
                     style={[
@@ -1325,7 +1335,7 @@ export default function InventoryListScreen({
                     }
                     style={styles.viewModeButton}
                   >
-                    {bookFilter === "standard" ? "Stock" : "Custom"}
+                    {bookFilter === "standard" ? "Custom" : "Stock"}
                   </Button>
                 </View>
               )}
@@ -1597,8 +1607,18 @@ export default function InventoryListScreen({
                                 }
                                 style={styles.viewModeButton}
                               >
-                                {bookFilter === "standard" ? "Stock" : "Custom"}
+                                {bookFilter === "standard" ? "Custom" : "Stock"}
                               </Button>
+                              {isAdmin && (
+                                <Button
+                                  mode={apOnly ? "contained" : "outlined"}
+                                  compact
+                                  onPress={() => setApOnly((v) => !v)}
+                                  style={styles.viewModeButton}
+                                >
+                                  AP
+                                </Button>
+                              )}
                             </View>
                           )}
                           <View style={styles.tableHeaderTopRight}>
@@ -2158,6 +2178,16 @@ export default function InventoryListScreen({
                 >
                   {bookFilter === "standard" ? "Stock" : "Custom"}
                 </Button>
+                {isAdmin && (
+                  <Button
+                    mode={apOnly ? "contained" : "outlined"}
+                    compact
+                    onPress={() => setApOnly((v) => !v)}
+                    style={styles.viewModeButtonMobile}
+                  >
+                    AP
+                  </Button>
+                )}
               </View>
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
