@@ -1631,10 +1631,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 16,
     elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 2px 8px rgba(0,0,0,0.25)" }
+      : {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 4,
+        }),
   },
   colorModalTitle: {
     fontSize: 18,
@@ -1738,10 +1742,14 @@ const styles = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.08)",
     backgroundColor: "rgba(0,0,0,0.02)",
     elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 1px 6px rgba(0,0,0,0.06)" }
+      : {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 3,
+        }),
     position: "relative",
   },
   logCardInnerRow: {

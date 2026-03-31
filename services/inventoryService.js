@@ -14,13 +14,24 @@ async function _fetch(endpoint, options = {}) {
 
   try {
     const response = await fetch(url, { ...defaultOptions, ...options });
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
+    const rawText = await response.text();
+    let data = null;
+    if (rawText) {
+      try {
+        data = JSON.parse(rawText);
+      } catch (e) {
+        data = null;
+      }
     }
     
-    return data;
+    if (!response.ok) {
+      const msg =
+        (data && data.error) ||
+        `HTTP ${response.status}${rawText ? `: ${rawText.slice(0, 200)}` : ''}`;
+      throw new Error(msg);
+    }
+    
+    return data ?? {};
   } catch (error) {
     console.error(`API error (${endpoint}):`, error);
     throw error;
@@ -200,6 +211,7 @@ class InventoryService {
         ...(item.hex_color && { hex_color: item.hex_color }),
         ...(item.recycle_date && { recycle_date: item.recycle_date }),
         ...(item.external_code && { external_code: item.external_code }),
+        ...(item.po_lane && { po_lane: item.po_lane }),
       };
 
       const result = await _fetch('/api/items', {
@@ -231,6 +243,26 @@ class InventoryService {
     } catch (error) {
       console.error('Error updating item:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /** Persist AP vs mixing via dedicated PATCH (sets po_lane + booleans on server). */
+  async updateItemPoLane(itemId, lane) {
+    try {
+      const encodedId = encodeURIComponent(String(itemId));
+      const result = await _fetch(`/api/items/${encodedId}/po-lane`, {
+        method: 'PATCH',
+        body: JSON.stringify({ lane }),
+      });
+      return result;
+    } catch (error) {
+      // Many deployments won't have this route; treat as non-fatal.
+      const msg = error?.message || String(error);
+      if (msg.includes('HTTP 404')) {
+        return { success: false, error: 'PO lane endpoint not available on server (404).' };
+      }
+      console.error('Error updating PO lane:', error);
+      return { success: false, error: msg };
     }
   }
 

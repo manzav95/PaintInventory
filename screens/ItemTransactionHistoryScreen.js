@@ -20,6 +20,25 @@ import AuditService from "../services/auditService";
 
 const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000;
 
+function getDayKey(ts) {
+  if (!ts) return null;
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDayHeader(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  // Example: "Monday 3/22"
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  const md = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
+  return `${weekday} ${md}`;
+}
+
 function getActionColor(action, details) {
   if (action === "update" && details?._actionType) {
     if (details._actionType === "check_in") return "#81c784";
@@ -206,6 +225,14 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
                 </Text>
               ) : (
                 logs.map((log, index) => {
+                  const showDayDividers = isAdmin && isDesktop;
+                  const dayKey = showDayDividers ? getDayKey(log.timestamp) : null;
+                  const prevKey =
+                    showDayDividers && index > 0
+                      ? getDayKey(logs[index - 1]?.timestamp)
+                      : null;
+                  const startsNewDay =
+                    showDayDividers && dayKey && dayKey !== prevKey;
                   const actionText = formatAction(log.action, log.details);
                   const color = getActionColor(log.action, log.details);
                   const qty = getQuantity(log.action, log.details);
@@ -220,32 +247,74 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
                       })
                     : "—";
                   return (
-                    <View
-                      key={`${log.timestamp}-${index}`}
-                      style={[
-                        styles.row,
-                        index < logs.length - 1 && styles.rowBorder,
-                        { borderBottomColor: theme.dark ? "#333" : "#eee" },
-                      ]}
-                    >
-                      <View style={styles.rowLeft}>
-                        <Text style={[styles.time, { color: theme.colors.onSurfaceVariant }]}>
-                          {dateStr}
+                    <React.Fragment key={`${log.timestamp}-${index}`}>
+                      {startsNewDay && (
+                        <View style={styles.dayDivider}>
+                          <Text
+                            style={[
+                              styles.dayDividerText,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {formatDayHeader(log.timestamp)}
+                          </Text>
+                          <View
+                            style={[
+                              styles.dayDividerLine,
+                              {
+                                backgroundColor: theme.dark
+                                  ? "rgba(255,255,255,0.18)"
+                                  : "rgba(0,0,0,0.12)",
+                              },
+                            ]}
+                          />
+                        </View>
+                      )}
+                      <View
+                        style={[
+                          styles.row,
+                          index < logs.length - 1 && styles.rowBorder,
+                          { borderBottomColor: theme.dark ? "#333" : "#eee" },
+                        ]}
+                      >
+                        <View style={styles.rowLeft}>
+                          <Text
+                            style={[
+                              styles.time,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {dateStr}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.user,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {getDisplayUserName(log)}
+                          </Text>
+                        </View>
+                        <View
+                          style={[
+                            styles.actionChip,
+                            { backgroundColor: color + "22" },
+                          ]}
+                        >
+                          <Text style={[styles.actionText, { color }]}>
+                            {actionText}
+                          </Text>
+                        </View>
+                        <Text style={[styles.qty, { color: theme.colors.onSurface }]}>
+                          {qty !== "-" ? `${qty}` : "-"}
                         </Text>
-                        <Text style={[styles.user, { color: theme.colors.onSurfaceVariant }]}>
-                          {getDisplayUserName(log)}
+                        <Text
+                          style={[styles.total, { color: theme.colors.onSurface }]}
+                        >
+                          {total !== "-" ? `${total} gal` : "-"}
                         </Text>
                       </View>
-                      <View style={[styles.actionChip, { backgroundColor: color + "22" }]}>
-                        <Text style={[styles.actionText, { color }]}>{actionText}</Text>
-                      </View>
-                      <Text style={[styles.qty, { color: theme.colors.onSurface }]}>
-                        {qty !== "-" ? `${qty}` : "-"}
-                      </Text>
-                      <Text style={[styles.total, { color: theme.colors.onSurface }]}>
-                        {total !== "-" ? `${total} gal` : "-"}
-                      </Text>
-                    </View>
+                    </React.Fragment>
                   );
                 })
               )}
@@ -339,6 +408,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     paddingHorizontal: 4,
+  },
+  dayDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: 14,
+    paddingBottom: 8,
+    paddingHorizontal: 4,
+  },
+  dayDividerText: {
+    fontSize: 13,
+    fontWeight: "700",
+    marginRight: 12,
+  },
+  dayDividerLine: {
+    height: 1,
+    flex: 1,
+    borderRadius: 1,
   },
   rowBorder: {
     borderBottomWidth: 1,

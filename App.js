@@ -483,7 +483,8 @@ export default function App() {
     }
 
     const isExistingItem = !!selectedItem;
-    
+    const idForApi = String(item.id ?? selectedItem?.id ?? '').trim();
+
     let result;
     if (isExistingItem) {
       const updates = {
@@ -491,15 +492,31 @@ export default function App() {
         quantity: item.quantity,
         location: item.location,
         userName: actorName,
-        ...(item.hasOwnProperty('minQuantity') && { minQuantity: item.minQuantity }),
-        ...(item.hasOwnProperty('price') && { price: item.price }),
-        ...(item.hasOwnProperty('type') && { type: item.type }),
-        ...(item.hasOwnProperty('display_order') && { display_order: item.display_order }),
-        ...(item.hasOwnProperty('hex_color') && { hex_color: item.hex_color }),
-        ...(item.hasOwnProperty('recycle_date') && { recycle_date: item.recycle_date }),
-        ...(item.hasOwnProperty('external_code') && { external_code: item.external_code }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'po_label_ap') && {
+          po_label_ap: item.po_label_ap,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'po_label_mixing') && {
+          po_label_mixing: item.po_label_mixing,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'minQuantity') && {
+          minQuantity: item.minQuantity,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'price') && { price: item.price }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'type') && { type: item.type }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'display_order') && {
+          display_order: item.display_order,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'hex_color') && {
+          hex_color: item.hex_color,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'recycle_date') && {
+          recycle_date: item.recycle_date,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'external_code') && {
+          external_code: item.external_code,
+        }),
       };
-      result = await InventoryService.updateItem(item.id || selectedItem?.id, updates);
+      result = await InventoryService.updateItem(idForApi, updates);
     } else {
       result = await InventoryService.addItem({
         ...item,
@@ -510,7 +527,18 @@ export default function App() {
     if (result.success) {
       await loadInventory();
       setCurrentScreen(previousScreen);
-      if (result.item) {
+      if (isExistingItem && idForApi) {
+        try {
+          const fresh = await InventoryService.getItem(idForApi);
+          if (fresh) {
+            setSelectedItem(fresh);
+          } else if (result.item) {
+            setSelectedItem(result.item);
+          }
+        } catch (e) {
+          if (result.item) setSelectedItem(result.item);
+        }
+      } else if (result.item) {
         setSelectedItem(result.item);
       }
       Alert.alert('Success', 'Item saved successfully.');
@@ -943,7 +971,7 @@ export default function App() {
         <StatusBar style="auto" />
         {renderScreen()}
         {isActionLoading && (
-          <View style={styles.loadingOverlay} pointerEvents="auto">
+          <View style={[styles.loadingOverlay, { pointerEvents: "auto" }]}>
             <View style={styles.loadingCard}>
               <ActivityIndicator size="large" color={paperTheme.colors.primary} />
               {!!actionLoadingMessage && (
@@ -953,7 +981,7 @@ export default function App() {
           </View>
         )}
         {scanLookupLoading && (
-          <View style={styles.loadingOverlay} pointerEvents="auto">
+          <View style={[styles.loadingOverlay, { pointerEvents: "auto" }]}>
             <View style={styles.loadingCard}>
               <ActivityIndicator size="large" color={paperTheme.colors.primary} />
               <Text style={styles.loadingText}>Looking up material…</Text>

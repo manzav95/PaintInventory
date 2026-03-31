@@ -21,6 +21,10 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import OrderService from "../services/orderService";
+import {
+  getItemApMixingFlags,
+  itemLeadTimePrefers7Days,
+} from "../utils/poItemLabels";
 
 const MAX_AUTOCOMPLETE = 20;
 
@@ -33,29 +37,16 @@ const FILTER_COLORS = {
   completed: "#2e7d32",
 };
 
-// Lead time defaults by item type: clear, primer, catalyst = 3 days (AP); paint, stain, dye, custom = 7 days (mixing)
-const LEAD_TIME_3_DAY_TYPES = ["clear", "primer", "catalyst"];
-const LEAD_TIME_7_DAY_TYPES = [
-  "paint",
-  "dye",
-  "custom_paint",
-  "custom_stain",
-  "stain",
-];
-
-// Category labels for PO cards: AP (clear, primer, catalyst) and MIXING (paint, stain, dye, custom_paint, custom_stain)
-const AP_TYPES = ["clear", "primer", "catalyst"];
-const MIXING_TYPES = ["paint", "dye", "custom_paint", "custom_stain", "stain"];
-
+/** PO card labels use per-item AP / mixing flags (Item Details), with legacy fallback to material type. */
 function getOrderCategoryLabel(order, inventory) {
   if (!order?.lines?.length || !inventory?.length) return null;
   let hasAp = false;
   let hasMixing = false;
   for (const line of order.lines) {
-    const item = inventory.find((i) => String(i.id) === String(line.itemId));
-    const t = item?.type ? String(item.type).toLowerCase() : "";
-    if (AP_TYPES.includes(t)) hasAp = true;
-    if (MIXING_TYPES.includes(t)) hasMixing = true;
+    const invItem = inventory.find((i) => String(i.id) === String(line.itemId));
+    const { hasAp: a, hasMixing: m } = getItemApMixingFlags(invItem);
+    if (a) hasAp = true;
+    if (m) hasMixing = true;
   }
   if (hasAp && hasMixing) return "AP · MIXING";
   if (hasAp) return "AP";
@@ -71,10 +62,10 @@ function getDefaultLeadTimeDays(lines, inventory) {
   let has7Day = false;
   let all3Day = true;
   for (const id of itemIds) {
-    const item = inventory.find((i) => String(i.id) === String(id));
-    const t = item?.type ? String(item.type).toLowerCase() : "";
-    if (LEAD_TIME_7_DAY_TYPES.includes(t)) has7Day = true;
-    if (t && !LEAD_TIME_3_DAY_TYPES.includes(t)) all3Day = false;
+    const invItem = inventory.find((i) => String(i.id) === String(id));
+    const seven = itemLeadTimePrefers7Days(invItem);
+    if (seven) has7Day = true;
+    if (seven) all3Day = false;
   }
   if (has7Day) return 7;
   if (all3Day && itemIds.length > 0) return 3;
@@ -1654,10 +1645,14 @@ const styles = StyleSheet.create({
     maxHeight: 200,
     zIndex: 10001,
     elevation: 10001,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 2px 8px rgba(0,0,0,0.2)" }
+      : {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.2,
+          shadowRadius: 4,
+        }),
     overflow: "hidden",
   },
   dropdownScroll: {

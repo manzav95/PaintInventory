@@ -477,7 +477,7 @@ export default function HomeScreen({
           style={styles.button}
           icon="plus-circle"
         >
-          Add Item Manually
+          Add Item
         </Button>
       )}
       <Button

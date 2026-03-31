@@ -16,6 +16,20 @@ const pool = new Pool({
     : false,
 });
 
+/** Fill missing po_lane for API JSON — DB may have NULLs on legacy rows. Derive legacy booleans from po_lane so responses stay consistent. */
+function normalizeItemPoFields(row) {
+  if (!row) return row;
+  if (row.po_lane === "ap" || row.po_lane === "mixing") {
+    const ap = row.po_lane === "ap";
+    return { ...row, po_label_ap: ap, po_label_mixing: !ap };
+  }
+  const t = row.type ? String(row.type).toLowerCase() : "";
+  if (["clear", "primer", "catalyst"].includes(t)) {
+    return { ...row, po_lane: "ap", po_label_ap: true, po_label_mixing: false };
+  }
+  return { ...row, po_lane: "mixing", po_label_ap: false, po_label_mixing: true };
+}
+
 class Database {
   constructor() {
     this.pool = pool;
@@ -26,10 +40,34 @@ class Database {
       const client = await this.pool.connect();
       await this.initTables(client);
       client.release();
+      await this.backfillPoLaneDefaults();
       console.log("Connected to PostgreSQL database");
     } catch (err) {
       console.error("Error connecting to database:", err);
       throw err;
+    }
+  }
+
+  /** Fill NULL po_lane / po_label_* so API responses are never all-null for legacy rows. */
+  async backfillPoLaneDefaults() {
+    const now = new Date().toISOString();
+    try {
+      await this.pool.query(
+        `UPDATE items
+         SET po_lane = 'ap', "updatedAt" = $1
+         WHERE po_lane IS NULL
+           AND lower(COALESCE("type", '')) IN ('clear', 'primer', 'catalyst')`,
+        [now],
+      );
+      await this.pool.query(
+        `UPDATE items
+         SET po_lane = 'mixing', "updatedAt" = $1
+         WHERE po_lane IS NULL`,
+        [now],
+      );
+      console.log("[DB] po_lane / po_label columns backfilled where NULL");
+    } catch (e) {
+      console.error("[DB] po_lane backfill failed:", e?.message || e);
     }
   }
 
@@ -94,6 +132,27 @@ class Database {
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'external_code') THEN
           ALTER TABLE items ADD COLUMN external_code TEXT UNIQUE DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'po_label_ap') THEN
+          ALTER TABLE items ADD COLUMN po_label_ap BOOLEAN DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'po_label_mixing') THEN
+          ALTER TABLE items ADD COLUMN po_label_mixing BOOLEAN DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'po_lane') THEN
+          ALTER TABLE items ADD COLUMN po_lane TEXT DEFAULT NULL;
         END IF;
       END $$
     `);
@@ -205,7 +264,7 @@ class Database {
 
   async getAllItems() {
     const result = await this.pool.query("SELECT * FROM items ORDER BY id");
-    return result.rows;
+    return result.rows.map(normalizeItemPoFields);
   }
 
   async getItem(itemId) {
@@ -217,7 +276,7 @@ class Database {
       "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
       [raw],
     );
-    if (result.rows[0]) return result.rows[0];
+    if (result.rows[0]) return normalizeItemPoFields(result.rows[0]);
 
     // If not found, and a global paint suffix is configured, try stripping it
     const suffix = await this.getSetting("paint_external_suffix");
@@ -229,7 +288,7 @@ class Database {
           "SELECT * FROM items WHERE id = $1 OR external_code = $1 LIMIT 1",
           [base],
         );
-        if (result.rows[0]) return result.rows[0];
+        if (result.rows[0]) return normalizeItemPoFields(result.rows[0]);
       }
     }
 
@@ -258,9 +317,15 @@ class Database {
         externalCode = String(item.id).trim() + trimmed;
       }
     }
+    const poLane =
+      item.po_lane === "ap"
+        ? "ap"
+        : item.po_lane === "mixing"
+          ? "mixing"
+          : "mixing";
     await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, po_lane)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         item.id,
         item.name,
@@ -278,6 +343,7 @@ class Database {
         hexColor,
         recycleDate,
         externalCode,
+        poLane,
       ],
     );
     return {
@@ -291,6 +357,7 @@ class Database {
         hex_color: hexColor,
         recycle_date: recycleDate,
         external_code: externalCode,
+        po_lane: poLane,
       },
     };
   }
@@ -313,6 +380,7 @@ class Database {
       "hex_color",
       "recycle_date",
       "external_code",
+      "po_lane",
     ];
     const fields = [];
     const values = [];
@@ -352,6 +420,10 @@ class Database {
         } else if (key === "external_code") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
+        } else if (key === "po_lane") {
+          const v = updates[key];
+          const s = v != null ? String(v).toLowerCase().trim() : "";
+          values.push(s === "ap" || s === "mixing" ? s : null);
         } else {
           values.push(updates[key]);
         }
@@ -362,7 +434,8 @@ class Database {
     fields.push(`"updatedAt" = $${paramIndex}`);
     values.push(now);
     paramIndex++;
-    values.push(itemId);
+    const idForWhere = String(itemId).trim();
+    values.push(idForWhere);
 
     const result = await this.pool.query(
       `UPDATE items SET ${fields.join(", ")} WHERE id = $${paramIndex}`,
@@ -373,8 +446,25 @@ class Database {
       return { success: false, error: "Item not found" };
     }
 
-    const item = await this.getItem(itemId);
+    const item = await this.getItem(idForWhere);
     return { success: true, item };
+  }
+
+  /**
+   * Authoritative PO lane: sets po_lane (TEXT) plus boolean columns in one UPDATE.
+   * lane must be 'ap' or 'mixing'.
+   */
+  async updateItemPoLane(itemId, lane) {
+    const now = new Date().toISOString();
+    const id = String(itemId).trim();
+    const laneNorm = lane === "ap" ? "ap" : "mixing";
+    const r = await this.pool.query(
+      `UPDATE items SET po_lane = $1, "updatedAt" = $2 WHERE id = $3`,
+      [laneNorm, now, id],
+    );
+    if (r.rowCount === 0) {
+      throw new Error("Item not found");
+    }
   }
 
   async deleteItem(itemId) {

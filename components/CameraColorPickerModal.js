@@ -79,7 +79,7 @@ export default function CameraColorPickerModal({
                   ref={cameraRef}
                   facing="back"
                 />
-                <View style={styles.sampleBox} pointerEvents="none" />
+                <View style={[styles.sampleBox, { pointerEvents: "none" }]} />
               </View>
               <View style={styles.sampleRow}>
                 <View

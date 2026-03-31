@@ -176,9 +176,7 @@ export default function InventoryListScreen({
 
   const formatOrderColorsPreview = (order) => {
     const lines = order?.lines || [];
-    const names = lines.map((l) =>
-      getItemNameForOrder(l.itemId ?? l.item_id),
-    );
+    const names = lines.map((l) => getItemNameForOrder(l.itemId ?? l.item_id));
     if (names.length === 0) return "No lines";
     if (names.length <= 3) return names.join(" · ");
     return `${names.slice(0, 3).join(" · ")} · +${names.length - 3} more`;
@@ -715,8 +713,7 @@ export default function InventoryListScreen({
               />
               {isStain && (
                 <View
-                  style={styles.colorModalStainWatermark}
-                  pointerEvents="none"
+                  style={[styles.colorModalStainWatermark, { pointerEvents: "none" }]}
                 >
                   <Text
                     style={[
@@ -968,7 +965,9 @@ export default function InventoryListScreen({
                           { color: theme.colors.onSurface, marginBottom: 0 },
                         ]}
                       >
-                        PO {selectedReceiveOrder.po_number || selectedReceiveOrder.id}
+                        PO{" "}
+                        {selectedReceiveOrder.po_number ||
+                          selectedReceiveOrder.id}
                       </Text>
                       {expLabel ? (
                         <Text
@@ -1067,7 +1066,7 @@ export default function InventoryListScreen({
                       loading={receiveSubmitting}
                       disabled={receiveSubmitting}
                     >
-                      Record receiving
+                      Receive
                     </Button>
                   </View>
                 </>
@@ -1122,7 +1121,9 @@ export default function InventoryListScreen({
                 {hasOpen && (
                   <View style={styles.itemBadgeRow}>
                     <View style={styles.itemBadge}>
-                      <Text style={[styles.itemBadgeText, { color: "#1976d2" }]}>
+                      <Text
+                        style={[styles.itemBadgeText, { color: "#1976d2" }]}
+                      >
                         Open
                       </Text>
                     </View>
@@ -1555,11 +1556,8 @@ export default function InventoryListScreen({
                             <View style={styles.headerFilterGroup}>
                               {isAdmin && (
                                 <Button
-                                  mode={
-                                    listOrderMode === "trueOrder"
-                                      ? "contained"
-                                      : "outlined"
-                                  }
+                                  // Keep mode constant to avoid layout shift between outlined/contained
+                                  mode="outlined"
                                   compact
                                   onPress={() =>
                                     setListOrderMode((prev) =>
@@ -1571,7 +1569,13 @@ export default function InventoryListScreen({
                                   style={[
                                     styles.viewModeButton,
                                     styles.viewModeButtonLong,
+                                    listOrderMode === "trueOrder" && {
+                                      backgroundColor: theme.dark
+                                        ? "rgba(255,255,255,0.08)"
+                                        : "rgba(0,0,0,0.06)",
+                                    },
                                   ]}
+                                  contentStyle={styles.viewModeButtonContent}
                                   disabled={bookFilter === "custom"}
                                 >
                                   {listOrderMode === "trueOrder"
@@ -2476,14 +2480,24 @@ export default function InventoryListScreen({
           <View style={styles.headerFilterGroup}>
             {isAdmin && viewMode !== "colorBook" && (
               <Button
-                mode={listOrderMode === "trueOrder" ? "contained" : "outlined"}
+                // Keep mode constant to avoid layout shift between outlined/contained
+                mode="outlined"
                 compact
                 onPress={() =>
                   setListOrderMode((prev) =>
                     prev === "trueOrder" ? "alphabetical" : "trueOrder",
                   )
                 }
-                style={[styles.viewModeButtonMobile, styles.viewModeButtonLong]}
+                style={[
+                  styles.viewModeButtonMobile,
+                  styles.viewModeButtonLong,
+                  listOrderMode === "trueOrder" && {
+                    backgroundColor: theme.dark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.06)",
+                  },
+                ]}
+                contentStyle={styles.viewModeButtonContent}
                 disabled={bookFilter === "custom"}
               >
                 {listOrderMode === "trueOrder" ? "True Order" : "Alphabetical"}
@@ -2748,7 +2762,7 @@ const styles = StyleSheet.create({
     maxWidth: 440,
     maxHeight: "88%",
     borderRadius: 12,
-    padding: 20,
+    padding: 18,
     elevation: 4,
     zIndex: 1,
   },
@@ -2768,7 +2782,8 @@ const styles = StyleSheet.create({
   receivePoOrderRow: {
     borderWidth: 1,
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     marginBottom: 10,
   },
   receivePoOrderPo: {
@@ -2783,6 +2798,7 @@ const styles = StyleSheet.create({
   receivePoOrderPreview: {
     fontSize: 13,
     lineHeight: 18,
+    marginTop: 2,
   },
   receivePoActions: {
     flexDirection: "row",
@@ -2977,10 +2993,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: "hidden",
     elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 4px 16px rgba(0,0,0,0.3)" }
+      : {
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+        }),
   },
   colorModalSwatchWrapper: {
     position: "relative",
@@ -3272,7 +3292,6 @@ const styles = StyleSheet.create({
   resultCount: {
     fontSize: 12,
     color: "#666",
-    whiteSpace: "nowrap",
   },
   orderToggleButton: {
     alignSelf: "center",
@@ -3399,6 +3418,9 @@ const styles = StyleSheet.create({
     minWidth: 68,
     paddingHorizontal: 10,
     paddingVertical: 2,
+  },
+  viewModeButtonContent: {
+    height: 36,
   },
   viewModeButtonColorBook: {
     marginLeft: 6,

@@ -20,6 +20,7 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
+import { getItemApMixingFlags, inferApMixingFromType } from "../utils/poItemLabels";
 
 const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
@@ -38,6 +39,11 @@ const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
   { label: "Stock Container", value: "Stock Container" },
   { label: "Custom Container", value: "Custom Container" },
+];
+
+const PO_CATEGORY_OPTIONS = [
+  { label: "Mixing", value: "mixing" },
+  { label: "AP", value: "ap" },
 ];
 
 export default function ItemDetailScreen({
@@ -81,9 +87,11 @@ export default function ItemDetailScreen({
   );
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+  const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
-
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [poCategory, setPoCategory] = useState("mixing");
   const isCustomType = CUSTOM_TYPES.includes(type);
 
   const normalizeHex = (raw) => {
@@ -135,6 +143,26 @@ export default function ItemDetailScreen({
 
   useEffect(() => {
     setFieldErrors({});
+  }, [item?.id]);
+
+  useEffect(() => {
+    // Initialize from stored per-item override if available, else infer from type.
+    const ap = item?.po_label_ap;
+    const mix = item?.po_label_mixing;
+    if (ap === true && mix !== true) {
+      setPoCategory("ap");
+      return;
+    }
+    if (mix === true && ap !== true) {
+      setPoCategory("mixing");
+      return;
+    }
+    if (ap != null || mix != null) {
+      setPoCategory("mixing");
+      return;
+    }
+    const { hasAp, hasMixing } = inferApMixingFromType(item?.type);
+    setPoCategory(hasAp && !hasMixing ? "ap" : "mixing");
   }, [item?.id]);
 
   const handleSave = async () => {
@@ -254,6 +282,8 @@ export default function ItemDetailScreen({
       hex_color: hexVal || null,
       recycle_date: recycleVal,
       external_code: externalCodeVal,
+      po_label_ap: poCategory === "ap",
+      po_label_mixing: poCategory === "mixing",
     };
 
     setSaving(true);
@@ -480,6 +510,80 @@ export default function ItemDetailScreen({
                             ? (TYPE_OPTIONS.find((o) => o.value === type)
                                 ?.label ?? type)
                             : "—"}
+                        </Text>
+                      </View>
+                    )}
+                  </>
+                )}
+
+                <Text style={styles.label}>PO / delivery category</Text>
+                {isWeb && isDesktop ? (
+                  <View style={styles.input}>
+                    <select
+                      value={poCategory}
+                      onChange={(e) => setPoCategory(e.target.value)}
+                      disabled={!isAdmin}
+                      style={{
+                        width: "100%",
+                        padding: 12,
+                        fontSize: 16,
+                        borderRadius: 4,
+                        border: `1px solid ${theme.colors.outline}`,
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.onSurface,
+                      }}
+                    >
+                      {PO_CATEGORY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </View>
+                ) : (
+                  <>
+                    {isAdmin ? (
+                      <Menu
+                        visible={poCategoryMenuOpen}
+                        onDismiss={() => setPoCategoryMenuOpen(false)}
+                        anchor={
+                          <Pressable
+                            onPress={() => setPoCategoryMenuOpen(true)}
+                            style={[
+                              styles.typeTrigger,
+                              {
+                                borderColor: theme.colors.outline,
+                                backgroundColor: theme.colors.surface,
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: theme.colors.onSurface }}>
+                              {PO_CATEGORY_OPTIONS.find((o) => o.value === poCategory)?.label ??
+                                poCategory}
+                            </Text>
+                          </Pressable>
+                        }
+                      >
+                        {PO_CATEGORY_OPTIONS.map((o) => (
+                          <Menu.Item
+                            key={o.value}
+                            onPress={() => {
+                              setPoCategory(o.value);
+                              setPoCategoryMenuOpen(false);
+                            }}
+                            title={o.label}
+                          />
+                        ))}
+                      </Menu>
+                    ) : (
+                      <View style={{ marginBottom: 16 }}>
+                        <Text style={styles.itemId}>
+                          {(() => {
+                            const { hasAp, hasMixing } = getItemApMixingFlags(item);
+                            if (hasAp && hasMixing) return "AP · Mixing";
+                            if (hasAp) return "AP";
+                            return "Mixing";
+                          })()}
                         </Text>
                       </View>
                     )}
@@ -898,6 +1002,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 8,
     color: "#666",
+  },
+  helperText: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   itemId: {
     fontSize: 16,

@@ -88,7 +88,7 @@ app.post('/api/items', async (req, res) => {
 // Update item
 app.put('/api/items/:id', async (req, res) => {
   try {
-    const id = decodeURIComponent(req.params.id);
+    const id = decodeURIComponent(req.params.id).trim();
     const updates = req.body;
     const auditUserName = (updates && updates.userName && String(updates.userName).trim()) || 'unknown';
     delete updates.id; // Don't allow ID change via this endpoint
@@ -120,6 +120,7 @@ app.put('/api/items/:id', async (req, res) => {
 
     const result = await db.updateItem(id, updates);
     if (result.success) {
+      // PO lane is persisted via po_lane directly (or the dedicated PATCH endpoint).
       // Determine action type for audit log
       let auditActionType = 'update';
       
@@ -183,6 +184,32 @@ app.put('/api/items/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating item:', error);
     res.status(500).json({ error: 'Failed to update item' });
+  }
+});
+
+// PATCH only AP vs mixing (authoritative po_lane + boolean columns)
+app.patch('/api/items/:id/po-lane', async (req, res) => {
+  try {
+    const id = decodeURIComponent(req.params.id).trim();
+    const laneRaw = req.body?.lane != null ? String(req.body.lane).toLowerCase().trim() : '';
+    if (laneRaw !== 'ap' && laneRaw !== 'mixing') {
+      return res.status(400).json({
+        success: false,
+        error: 'lane must be "ap" or "mixing"',
+      });
+    }
+    await db.updateItemPoLane(id, laneRaw);
+    const item = await db.getItem(id);
+    res.json({ success: true, item });
+  } catch (error) {
+    console.error('Error patching po-lane:', error);
+    if (error.message === 'Item not found') {
+      return res.status(404).json({ success: false, error: 'Item not found' });
+    }
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to update PO lane',
+    });
   }
 });
 

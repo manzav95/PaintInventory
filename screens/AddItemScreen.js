@@ -39,6 +39,11 @@ const CONTAINER_OPTIONS = [
   { label: "Custom Container", value: "Custom Container" },
 ];
 
+const PO_CATEGORY_OPTIONS = [
+  { label: "Mixing", value: "mixing" },
+  { label: "AP", value: "ap" },
+];
+
 export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -56,6 +61,8 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
   const [externalCode, setExternalCode] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
+  const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
+  const [poCategory, setPoCategory] = useState("mixing");
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({
     itemId: false,
@@ -149,6 +156,8 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
       quantity: parseInt(quantity) || 0,
       location: location.trim(),
       createdAt: new Date().toISOString(),
+      po_label_ap: poCategory === "ap",
+      po_label_mixing: poCategory === "mixing",
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
       ...(priceNum != null &&
         !isNaN(priceNum) &&
@@ -311,6 +320,71 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
                   ))}
                 </Menu>
               </>
+            )}
+
+            <Text
+              style={[
+                styles.typeLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              PO / delivery category
+            </Text>
+            {isWeb && isDesktop ? (
+              <View style={styles.input}>
+                <select
+                  value={poCategory}
+                  onChange={(e) => setPoCategory(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: 12,
+                    fontSize: 16,
+                    borderRadius: 4,
+                    border: `1px solid ${theme.colors.outline}`,
+                    backgroundColor: theme.colors.surface,
+                    color: theme.colors.onSurface,
+                  }}
+                >
+                  {PO_CATEGORY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </View>
+            ) : (
+              <Menu
+                visible={poCategoryMenuOpen}
+                onDismiss={() => setPoCategoryMenuOpen(false)}
+                anchor={
+                  <Pressable
+                    onPress={() => setPoCategoryMenuOpen(true)}
+                    style={[
+                      styles.typeTrigger,
+                      {
+                        borderColor: theme.colors.outline,
+                        backgroundColor: theme.colors.surface,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: theme.colors.onSurface }}>
+                      {PO_CATEGORY_OPTIONS.find((o) => o.value === poCategory)
+                        ?.label ?? poCategory}
+                    </Text>
+                  </Pressable>
+                }
+              >
+                {PO_CATEGORY_OPTIONS.map((o) => (
+                  <Menu.Item
+                    key={o.value}
+                    onPress={() => {
+                      setPoCategory(o.value);
+                      setPoCategoryMenuOpen(false);
+                    }}
+                    title={o.label}
+                  />
+                ))}
+              </Menu>
             )}
 
             <Text
