@@ -462,9 +462,7 @@ export default function UpcomingOrdersScreen({
 
     // RN Web's Alert often breaks multi-button + destructive; use native confirm on web.
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      const ok = window.confirm(
-        `Delete purchase order?\n\n${detail}`,
-      );
+      const ok = window.confirm(`Delete purchase order?\n\n${detail}`);
       if (ok) void runDelete();
       return;
     }
@@ -695,7 +693,7 @@ export default function UpcomingOrdersScreen({
                 >
                   {order.po_number && String(order.po_number).trim()
                     ? `PO #${order.po_number}`
-                    : "No PO (add in edit)"}
+                    : "No PO Yet"}
                 </Text>
                 {categoryLabel != null && (
                   <View
@@ -845,8 +843,7 @@ export default function UpcomingOrdersScreen({
                 mode="outlined"
                 onPress={() => handleMarkReceived(order.id)}
                 disabled={
-                  markingId === order.id ||
-                  deletingId === Number(order.id)
+                  markingId === order.id || deletingId === Number(order.id)
                 }
                 loading={markingId === order.id}
                 style={styles.markReceivedBtn}
@@ -857,8 +854,7 @@ export default function UpcomingOrdersScreen({
                 mode="outlined"
                 onPress={() => confirmDeleteOrder(order)}
                 disabled={
-                  deletingId === Number(order.id) ||
-                  markingId === order.id
+                  deletingId === Number(order.id) || markingId === order.id
                 }
                 loading={deletingId === Number(order.id)}
                 style={styles.deleteOrderBtn}
@@ -1159,9 +1155,7 @@ export default function UpcomingOrdersScreen({
               {lines.map((line, index) => {
                 const selInv =
                   line.itemId &&
-                  inventory.find(
-                    (i) => String(i.id) === String(line.itemId),
-                  );
+                  inventory.find((i) => String(i.id) === String(line.itemId));
                 const showJobLine =
                   selInv && isCustomColorInventoryItem(selInv);
                 return (
@@ -1169,121 +1163,126 @@ export default function UpcomingOrdersScreen({
                     <View
                       style={[
                         styles.lineRow,
-                        focusedLineIndex === index && styles.lineRowDropdownOpen,
+                        focusedLineIndex === index &&
+                          styles.lineRowDropdownOpen,
                       ]}
                     >
-                  <View style={styles.lineItemIdWrap}>
-                    <TextInput
-                      label="Item"
-                      value={line.searchQuery}
-                      onChangeText={(v) => updateLine(index, "searchQuery", v)}
-                      onFocus={() => setFocusedLineIndex(index)}
-                      onBlur={() =>
-                        setTimeout(() => setFocusedLineIndex(null), 180)
-                      }
-                      mode="outlined"
-                      style={[styles.input, styles.lineItemId]}
-                      placeholder="Type to search..."
-                      right={<TextInput.Icon icon="menu-down" />}
-                    />
-                    {focusedLineIndex === index && (
-                      <View
-                        style={[
-                          styles.dropdown,
-                          {
-                            backgroundColor:
-                              theme && theme.dark ? "#2d2d2d" : "#ffffff",
-                            borderColor: theme && theme.dark ? "#444" : "#ccc",
-                          },
-                        ]}
-                        collapsable={false}
-                      >
-                        <ScrollView
-                          keyboardShouldPersistTaps="handled"
-                          nestedScrollEnabled
-                          style={styles.dropdownScroll}
-                        >
-                          {getFilteredInventory(line.searchQuery).length ===
-                          0 ? (
-                            <Text
-                              style={[
-                                styles.dropdownItem,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
+                      <View style={styles.lineItemIdWrap}>
+                        <TextInput
+                          label="Item"
+                          value={line.searchQuery}
+                          onChangeText={(v) =>
+                            updateLine(index, "searchQuery", v)
+                          }
+                          onFocus={() => setFocusedLineIndex(index)}
+                          onBlur={() =>
+                            setTimeout(() => setFocusedLineIndex(null), 180)
+                          }
+                          mode="outlined"
+                          style={[styles.input, styles.lineItemId]}
+                          placeholder="Type to search..."
+                          right={<TextInput.Icon icon="menu-down" />}
+                        />
+                        {focusedLineIndex === index && (
+                          <View
+                            style={[
+                              styles.dropdown,
+                              {
+                                backgroundColor:
+                                  theme && theme.dark ? "#2d2d2d" : "#ffffff",
+                                borderColor:
+                                  theme && theme.dark ? "#444" : "#ccc",
+                              },
+                            ]}
+                            collapsable={false}
+                          >
+                            <ScrollView
+                              keyboardShouldPersistTaps="handled"
+                              nestedScrollEnabled
+                              style={styles.dropdownScroll}
                             >
-                              No matches
-                            </Text>
-                          ) : (
-                            getFilteredInventory(line.searchQuery).map(
-                              (invItem) => (
-                                <Pressable
-                                  key={invItem.id}
-                                  onPress={() => {
-                                    setLineItemSelection(index, invItem);
-                                    setFocusedLineIndex(null);
-                                    Keyboard.dismiss();
-                                  }}
-                                  style={({ pressed }) => [
-                                    styles.dropdownItemWrap,
-                                    {
-                                      backgroundColor: pressed
-                                        ? theme && theme.dark
-                                          ? "#3d3d3d"
-                                          : "#eee"
-                                        : "transparent",
-                                    },
+                              {getFilteredInventory(line.searchQuery).length ===
+                              0 ? (
+                                <Text
+                                  style={[
+                                    styles.dropdownItem,
+                                    { color: theme.colors.onSurfaceVariant },
                                   ]}
                                 >
-                                  <Text
-                                    style={[
-                                      styles.dropdownItem,
-                                      { color: theme.colors.onSurface },
-                                    ]}
-                                    numberOfLines={1}
-                                  >
-                                    {invItem.name || invItem.id}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.dropdownItemId,
-                                      { color: theme.colors.onSurfaceVariant },
-                                    ]}
-                                  >
-                                    {invItem.id}
-                                  </Text>
-                                </Pressable>
-                              ),
-                            )
-                          )}
-                        </ScrollView>
+                                  No matches
+                                </Text>
+                              ) : (
+                                getFilteredInventory(line.searchQuery).map(
+                                  (invItem) => (
+                                    <Pressable
+                                      key={invItem.id}
+                                      onPress={() => {
+                                        setLineItemSelection(index, invItem);
+                                        setFocusedLineIndex(null);
+                                        Keyboard.dismiss();
+                                      }}
+                                      style={({ pressed }) => [
+                                        styles.dropdownItemWrap,
+                                        {
+                                          backgroundColor: pressed
+                                            ? theme && theme.dark
+                                              ? "#3d3d3d"
+                                              : "#eee"
+                                            : "transparent",
+                                        },
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.dropdownItem,
+                                          { color: theme.colors.onSurface },
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {invItem.name || invItem.id}
+                                      </Text>
+                                      <Text
+                                        style={[
+                                          styles.dropdownItemId,
+                                          {
+                                            color:
+                                              theme.colors.onSurfaceVariant,
+                                          },
+                                        ]}
+                                      >
+                                        {invItem.id}
+                                      </Text>
+                                    </Pressable>
+                                  ),
+                                )
+                              )}
+                            </ScrollView>
+                          </View>
+                        )}
                       </View>
-                    )}
-                  </View>
-                  <TextInput
-                    label="Qty"
-                    value={line.quantity}
-                    onChangeText={(v) => updateLine(index, "quantity", v)}
-                    mode="outlined"
-                    keyboardType="number-pad"
-                    style={[styles.input, styles.lineQty]}
-                  />
-                  {lines.length > 1 ? (
-                    <IconButton
-                      icon="delete-outline"
-                      size={22}
-                      onPress={() => removeLine(index)}
-                      iconColor={theme.colors.error}
-                    />
-                  ) : null}
+                      <TextInput
+                        label="Qty"
+                        value={line.quantity}
+                        onChangeText={(v) => updateLine(index, "quantity", v)}
+                        mode="outlined"
+                        keyboardType="number-pad"
+                        style={[styles.input, styles.lineQty]}
+                      />
+                      {lines.length > 1 ? (
+                        <IconButton
+                          icon="delete-outline"
+                          size={22}
+                          onPress={() => removeLine(index)}
+                          iconColor={theme.colors.error}
+                        />
+                      ) : null}
                     </View>
                     {showJobLine ? (
                       <>
                         <TextInput
                           label="Job (optional)"
                           value={line.jobName}
-                          onChangeText={(v) =>
-                            updateLine(index, "jobName", v)
-                          }
+                          onChangeText={(v) => updateLine(index, "jobName", v)}
                           mode="outlined"
                           style={styles.input}
                           placeholder="e.g. 12345"
@@ -1478,15 +1477,15 @@ export default function UpcomingOrdersScreen({
                         {hasSearchFilter && "No POs match your search."}
                         {!hasSearchFilter &&
                           dateViewMode != null &&
-                          "No POs yet."}
+                          "No POs on order"}
                         {!hasSearchFilter &&
                           dateViewMode === null &&
                           orderFilter === "all" &&
-                          "No POs yet."}
+                          "No POs on order"}
                         {!hasSearchFilter &&
                           dateViewMode === null &&
                           orderFilter === "existing" &&
-                          "No open POs yet."}
+                          "No open POs"}
                         {!hasSearchFilter &&
                           dateViewMode === null &&
                           orderFilter === "back_orders" &&
@@ -1494,11 +1493,11 @@ export default function UpcomingOrdersScreen({
                         {!hasSearchFilter &&
                           dateViewMode === null &&
                           orderFilter === "late_orders" &&
-                          "No late orders."}
+                          "No late orders"}
                         {!hasSearchFilter &&
                           dateViewMode === null &&
                           orderFilter === "completed" &&
-                          "No completed POs yet."}
+                          "No completed POs yet"}
                       </Text>
                     </Card.Content>
                   </Card>

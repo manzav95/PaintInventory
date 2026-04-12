@@ -7,6 +7,7 @@ import {
   useWindowDimensions,
   Alert,
   KeyboardAvoidingView,
+  Pressable,
 } from "react-native";
 import {
   Card,
@@ -463,31 +464,77 @@ export default function PlaceOrderScreen({
             for accounting. Add a PO number later under Purchase Orders.
           </Text>
 
-          <View style={styles.filterRow}>
-            <Button
-              mode={filterTab === "all" ? "contained" : "outlined"}
-              compact
-              onPress={() => setFilterTab("all")}
-              style={styles.filterBtn}
-            >
-              All
-            </Button>
-            <Button
-              mode={filterTab === "ap" ? "contained" : "outlined"}
-              compact
-              onPress={() => setFilterTab("ap")}
-              style={styles.filterBtn}
-            >
-              AP
-            </Button>
-            <Button
-              mode={filterTab === "mixing" ? "contained" : "outlined"}
-              compact
-              onPress={() => setFilterTab("mixing")}
-              style={styles.filterBtn}
-            >
-              Mixing
-            </Button>
+          <View
+            style={[
+              styles.tabBar,
+              {
+                borderColor: theme.colors.outlineVariant,
+                backgroundColor: theme.dark
+                  ? "rgba(255,255,255,0.06)"
+                  : theme.colors.surfaceContainerHigh ?? theme.colors.surface,
+              },
+            ]}
+          >
+            {(
+              [
+                { key: "all", label: "All", accent: theme.colors.primary },
+                { key: "ap", label: "AP", accent: "#e65100" },
+                { key: "mixing", label: "Mixing", accent: "#1565c0" },
+              ]
+            ).map(({ key, label, accent }, i) => {
+              const selected = filterTab === key;
+              const selBg =
+                key === "all"
+                  ? theme.dark
+                    ? "rgba(187, 134, 252, 0.22)"
+                    : (theme.colors.primaryContainer ?? "rgba(103, 80, 164, 0.16)")
+                  : key === "ap"
+                    ? theme.dark
+                      ? "rgba(255, 152, 0, 0.22)"
+                      : "rgba(230, 81, 0, 0.14)"
+                    : theme.dark
+                      ? "rgba(100, 181, 246, 0.22)"
+                      : "rgba(21, 101, 192, 0.12)";
+              return (
+                <Pressable
+                  key={key}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected }}
+                  onPress={() => setFilterTab(key)}
+                  style={({ pressed }) => [
+                    styles.tabCell,
+                    ...(i > 0
+                      ? [
+                          styles.tabCellBorder,
+                          { borderLeftColor: theme.colors.outlineVariant },
+                        ]
+                      : []),
+                    selected && {
+                      backgroundColor: selBg,
+                      borderBottomWidth: 3,
+                      borderBottomColor: accent,
+                    },
+                    !selected && {
+                      borderBottomWidth: 3,
+                      borderBottomColor: "transparent",
+                    },
+                    pressed && { opacity: 0.92 },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      {
+                        color: selected ? accent : theme.colors.onSurfaceVariant,
+                        fontWeight: selected ? "800" : "600",
+                      },
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           <TextInput
@@ -695,16 +742,18 @@ export default function PlaceOrderScreen({
             },
           ]}
         >
-          <Button
-            mode="contained"
-            onPress={handleSubmit}
-            loading={submitting}
-            disabled={submitting}
-            icon="email"
-            style={styles.submitBtn}
-          >
-            Submit Order
-          </Button>
+          <View style={styles.submitBtnWrap}>
+            <Button
+              mode="contained"
+              onPress={handleSubmit}
+              loading={submitting}
+              disabled={submitting}
+              icon="email"
+              style={styles.submitBtn}
+            >
+              Submit Order
+            </Button>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -738,13 +787,29 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   intro: { fontSize: 13, marginBottom: 12, lineHeight: 18 },
-  filterRow: {
+  tabBar: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
+    width: "100%",
+    marginBottom: 14,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  filterBtn: { marginRight: 4 },
+  tabCell: {
+    flex: 1,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+  },
+  tabCellBorder: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+  },
+  tabLabel: {
+    fontSize: 15,
+    letterSpacing: 0.2,
+  },
   searchInput: { marginBottom: 12 },
   emptyList: { paddingVertical: 24, alignItems: "center" },
   bundleSection: {},
@@ -861,5 +926,12 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === "ios" ? 28 : 16,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  submitBtn: {},
+  /** Half of footer inner width; button fills it so it reads as a wide bar, not a tiny pill. */
+  submitBtnWrap: {
+    width: "50%",
+    alignSelf: "center",
+  },
+  submitBtn: {
+    width: "100%",
+  },
 });
