@@ -27,6 +27,12 @@ import {
 } from "../utils/poItemLabels";
 
 const MAX_AUTOCOMPLETE = 20;
+const CUSTOM_ORDER_TYPES = ["custom_paint", "custom_stain"];
+
+function isCustomColorInventoryItem(invItem) {
+  const t = (invItem?.type || "").toLowerCase();
+  return CUSTOM_ORDER_TYPES.includes(t);
+}
 
 // Filter button colors (match order badge colors)
 const FILTER_COLORS = {
@@ -225,11 +231,12 @@ export default function UpcomingOrdersScreen({
   const [placedDate, setPlacedDate] = useState("");
   const [leadTimeDays, setLeadTimeDays] = useState("7");
   const [lines, setLines] = useState([
-    { itemId: "", quantity: "", searchQuery: "" },
+    { itemId: "", quantity: "", searchQuery: "", jobName: "" },
   ]);
   const [focusedLineIndex, setFocusedLineIndex] = useState(null);
   const [saving, setSaving] = useState(false);
   const [markingId, setMarkingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [orderFilter, setOrderFilter] = useState(initialFilter || "existing");
   const [dateViewMode, setDateViewMode] = useState(null); // null | "week" | "month"
   const [editingReceivedOrder, setEditingReceivedOrder] = useState(null);
@@ -268,7 +275,7 @@ export default function UpcomingOrdersScreen({
   const addLine = () => {
     setLines((prev) => [
       ...prev,
-      { itemId: "", quantity: "", searchQuery: "" },
+      { itemId: "", quantity: "", searchQuery: "", jobName: "" },
     ]);
   };
 
@@ -283,7 +290,10 @@ export default function UpcomingOrdersScreen({
     setLines((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
-      if (field === "searchQuery") next[index].itemId = "";
+      if (field === "searchQuery") {
+        next[index].itemId = "";
+        next[index].jobName = "";
+      }
       return next;
     });
   };
@@ -296,6 +306,7 @@ export default function UpcomingOrdersScreen({
         ...next[index],
         itemId: item.id,
         searchQuery: item.name || item.id,
+        jobName: "",
       };
       return next;
     });
@@ -331,10 +342,21 @@ export default function UpcomingOrdersScreen({
       }
     }
     const validLines = lines
-      .map((l) => ({
-        itemId: (l.itemId || "").trim(),
-        quantity: parseInt(String(l.quantity).trim(), 10),
-      }))
+      .map((l) => {
+        const itemId = (l.itemId || "").trim();
+        const invItem = (inventory || []).find(
+          (i) => String(i.id) === String(itemId),
+        );
+        const jobTrim = (l.jobName || "").trim();
+        return {
+          itemId,
+          quantity: parseInt(String(l.quantity).trim(), 10),
+          job_name:
+            invItem && isCustomColorInventoryItem(invItem) && jobTrim
+              ? jobTrim
+              : "",
+        };
+      })
       .filter((l) => l.itemId && !isNaN(l.quantity) && l.quantity > 0);
     if (validLines.length === 0) {
       Alert.alert("Invalid", "Add at least one line (item + quantity).");
@@ -365,7 +387,7 @@ export default function UpcomingOrdersScreen({
       setPoNumber("");
       setPlacedDate("");
       setLeadTimeDays("7");
-      setLines([{ itemId: "", quantity: "", searchQuery: "" }]);
+      setLines([{ itemId: "", quantity: "", searchQuery: "", jobName: "" }]);
       setEditingOrder(null);
       setShowForm(false);
       setFocusedLineIndex(null);
@@ -389,6 +411,74 @@ export default function UpcomingOrdersScreen({
     } finally {
       setMarkingId(null);
     }
+  };
+
+  const confirmDeleteOrder = (order) => {
+    const id = Number(order.id);
+    if (!Number.isFinite(id) || id < 1) {
+      Alert.alert("Error", "Invalid order — cannot delete.");
+      return;
+    }
+    const poLabel =
+      order.po_number && String(order.po_number).trim()
+        ? `PO #${order.po_number}`
+        : `Order #${id}`;
+    const statusLabel = order.status === "open" ? "Open" : "Received";
+    const detail = `${poLabel} (${statusLabel}). This cannot be undone. On-order totals will update.`;
+
+    const runDelete = async () => {
+      setDeletingId(id);
+      try {
+        await OrderService.deleteOrder(id);
+        if (editingOrder && Number(editingOrder.id) === id) {
+          setShowForm(false);
+          setEditingOrder(null);
+          setPoNumber("");
+          setPlacedDate("");
+          setLeadTimeDays("7");
+          setLines([
+            {
+              itemId: "",
+              quantity: "",
+              searchQuery: "",
+              jobName: "",
+            },
+          ]);
+          setFocusedLineIndex(null);
+        }
+        if (editingReceivedOrder && Number(editingReceivedOrder.id) === id) {
+          setEditingReceivedOrder(null);
+          setReceivedLineQtys({});
+        }
+        setOrders((prev) => prev.filter((o) => Number(o.id) !== id));
+        await loadOrders();
+        onOrdersChanged?.();
+      } catch (e) {
+        Alert.alert("Error", e.message || "Failed to delete order.");
+      } finally {
+        setDeletingId(null);
+      }
+    };
+
+    // RN Web's Alert often breaks multi-button + destructive; use native confirm on web.
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const ok = window.confirm(
+        `Delete purchase order?\n\n${detail}`,
+      );
+      if (ok) void runDelete();
+      return;
+    }
+
+    Alert.alert("Delete purchase order?", detail, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          void runDelete();
+        },
+      },
+    ]);
   };
 
   const openEditReceived = (order) => {
@@ -453,6 +543,8 @@ export default function UpcomingOrdersScreen({
     if (po && po.includes(q)) return true;
     for (const line of order.lines || []) {
       const itemId = String(line.itemId || line.item_id || "");
+      const jn = (line.job_name || "").trim().toLowerCase();
+      if (jn && jn.includes(q)) return true;
       const item = (inv || []).find((i) => String(i.id) === itemId);
       if (!item) {
         if (itemId.toLowerCase().includes(q)) return true;
@@ -701,6 +793,17 @@ export default function UpcomingOrdersScreen({
                       >
                         {getItemName(line.itemId)}
                       </Text>
+                      {(line.job_name || "").trim() ? (
+                        <Text
+                          style={[
+                            styles.lineItemJob,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          Job: {(line.job_name || "").trim()}
+                        </Text>
+                      ) : null}
                       {showLineDate && (
                         <Text
                           style={[
@@ -734,17 +837,35 @@ export default function UpcomingOrdersScreen({
                 onPress={() => openEditOrder(order)}
                 style={styles.editOrderBtn}
                 icon="pencil"
+                disabled={deletingId === Number(order.id)}
               >
                 Edit
               </Button>
               <Button
                 mode="outlined"
                 onPress={() => handleMarkReceived(order.id)}
-                disabled={markingId === order.id}
+                disabled={
+                  markingId === order.id ||
+                  deletingId === Number(order.id)
+                }
                 loading={markingId === order.id}
                 style={styles.markReceivedBtn}
               >
                 Mark Received
+              </Button>
+              <Button
+                mode="outlined"
+                onPress={() => confirmDeleteOrder(order)}
+                disabled={
+                  deletingId === Number(order.id) ||
+                  markingId === order.id
+                }
+                loading={deletingId === Number(order.id)}
+                style={styles.deleteOrderBtn}
+                icon="delete-outline"
+                textColor={theme.colors.error}
+              >
+                Delete
               </Button>
             </View>
           )}
@@ -755,6 +876,7 @@ export default function UpcomingOrdersScreen({
                 onPress={() => openEditReceived(order)}
                 style={styles.editOrderBtn}
                 icon="pencil"
+                disabled={deletingId === Number(order.id)}
               >
                 Edit
               </Button>
@@ -768,6 +890,17 @@ export default function UpcomingOrdersScreen({
                   {getReceivedDateLine(order)}
                 </Text>
               ) : null}
+              <Button
+                mode="outlined"
+                onPress={() => confirmDeleteOrder(order)}
+                disabled={deletingId === Number(order.id)}
+                loading={deletingId === Number(order.id)}
+                style={styles.deleteOrderBtn}
+                icon="delete-outline"
+                textColor={theme.colors.error}
+              >
+                Delete
+              </Button>
             </View>
           )}
         </Card.Content>
@@ -830,7 +963,7 @@ export default function UpcomingOrdersScreen({
     const d = String(today.getDate()).padStart(2, "0");
     setPlacedDate(`${y}-${m}-${d}`);
     setLeadTimeDays("7");
-    setLines([{ itemId: "", quantity: "", searchQuery: "" }]);
+    setLines([{ itemId: "", quantity: "", searchQuery: "", jobName: "" }]);
     setFocusedLineIndex(null);
     setShowForm(true);
   };
@@ -845,6 +978,7 @@ export default function UpcomingOrdersScreen({
         itemId: l.itemId || "",
         quantity: String(l.quantity ?? ""),
         searchQuery: getItemName(l.itemId) || "",
+        jobName: l.job_name != null ? String(l.job_name) : "",
       })),
     );
     setFocusedLineIndex(null);
@@ -912,7 +1046,7 @@ export default function UpcomingOrdersScreen({
           <>
             <TextInput
               mode="outlined"
-              placeholder="Search by PO, name, ID, or external code"
+              placeholder="Search by PO, job, name, ID, or external code"
               value={poSearchQuery}
               onChangeText={setPoSearchQuery}
               style={styles.searchInput}
@@ -1022,14 +1156,22 @@ export default function UpcomingOrdersScreen({
               <Text style={[styles.label, { color: theme.colors.onSurface }]}>
                 Line items
               </Text>
-              {lines.map((line, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.lineRow,
-                    focusedLineIndex === index && styles.lineRowDropdownOpen,
-                  ]}
-                >
+              {lines.map((line, index) => {
+                const selInv =
+                  line.itemId &&
+                  inventory.find(
+                    (i) => String(i.id) === String(line.itemId),
+                  );
+                const showJobLine =
+                  selInv && isCustomColorInventoryItem(selInv);
+                return (
+                  <View key={index} style={styles.lineBlock}>
+                    <View
+                      style={[
+                        styles.lineRow,
+                        focusedLineIndex === index && styles.lineRowDropdownOpen,
+                      ]}
+                    >
                   <View style={styles.lineItemIdWrap}>
                     <TextInput
                       label="Item"
@@ -1133,8 +1275,32 @@ export default function UpcomingOrdersScreen({
                       iconColor={theme.colors.error}
                     />
                   ) : null}
-                </View>
-              ))}
+                    </View>
+                    {showJobLine ? (
+                      <>
+                        <TextInput
+                          label="Job (optional)"
+                          value={line.jobName}
+                          onChangeText={(v) =>
+                            updateLine(index, "jobName", v)
+                          }
+                          mode="outlined"
+                          style={styles.input}
+                          placeholder="e.g. 12345"
+                        />
+                        <Text
+                          style={[
+                            styles.jobLineHint,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Optional — link this custom color to a job for search.
+                        </Text>
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })}
               <Button
                 mode="outlined"
                 onPress={addLine}
@@ -1616,11 +1782,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 8,
   },
+  lineBlock: {
+    marginBottom: 8,
+  },
   lineRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 8,
     marginBottom: 8,
+  },
+  jobLineHint: {
+    fontSize: 11,
+    marginBottom: 4,
+    marginTop: -4,
   },
   lineRowDropdownOpen: {
     position: "relative",
@@ -1841,6 +2015,10 @@ const styles = StyleSheet.create({
   lineItemName: {
     fontSize: 14,
   },
+  lineItemJob: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   lineItemReceived: {
     fontSize: 12,
     marginTop: 2,
@@ -1849,6 +2027,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   markReceivedBtn: {
+    alignSelf: "flex-start",
+  },
+  deleteOrderBtn: {
     alignSelf: "flex-start",
   },
   receivedModalOverlay: {

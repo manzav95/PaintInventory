@@ -82,6 +82,9 @@ export default function ItemDetailScreen({
   const [externalCodeInput, setExternalCodeInput] = useState(
     item?.external_code != null ? String(item.external_code) : "",
   );
+  const [rexInput, setRexInput] = useState(
+    item?.rex != null ? String(item.rex) : "",
+  );
   const [recycleDateInput, setRecycleDateInput] = useState(
     item?.recycle_date ?? "",
   );
@@ -140,6 +143,10 @@ export default function ItemDetailScreen({
       item?.external_code != null ? String(item.external_code) : "",
     );
   }, [item?.id, item?.external_code]);
+
+  useEffect(() => {
+    setRexInput(item?.rex != null ? String(item.rex) : "");
+  }, [item?.id, item?.rex]);
 
   useEffect(() => {
     setFieldErrors({});
@@ -250,6 +257,7 @@ export default function ItemDetailScreen({
     const externalCodeVal = externalCodeInput.trim()
       ? externalCodeInput.trim()
       : null;
+    const rexVal = rexInput.trim() ? rexInput.trim() : null;
     const updatedItem = {
       ...item,
       id: trimmedId || item?.id,
@@ -267,6 +275,7 @@ export default function ItemDetailScreen({
       hex_color: hexVal || null,
       recycle_date: recycleVal,
       external_code: externalCodeVal,
+      rex: rexVal,
       // IMPORTANT: AP => is_mixing=false
       is_mixing: poCategory !== "ap",
       // Backward-compatible fallback (older servers)
@@ -391,6 +400,42 @@ export default function ItemDetailScreen({
                     String(item.external_code).trim() !== ""
                       ? String(item.external_code)
                       : "—"}
+                  </Text>
+                )}
+
+                <Text style={styles.label}>REX</Text>
+                {isAdmin ? (
+                  <>
+                    <TextInput
+                      label="REX (optional)"
+                      value={rexInput}
+                      onChangeText={setRexInput}
+                      mode="outlined"
+                      style={styles.input}
+                      placeholder="Order export code"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <Text
+                      style={[
+                        styles.helperText,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      If empty, exports use Paint ID + external code.
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.itemId}>
+                    {(() => {
+                      const r =
+                        item?.rex != null && String(item.rex).trim() !== ""
+                          ? String(item.rex).trim()
+                          : "";
+                      if (r) return r;
+                      const fb = `${String(item?.id ?? "")}${String(item?.external_code ?? "").trim()}`;
+                      return fb || "—";
+                    })()}
                   </Text>
                 )}
               </Card.Content>

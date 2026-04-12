@@ -59,6 +59,7 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
   const [price, setPrice] = useState("");
   const [hexColor, setHexColor] = useState("");
   const [externalCode, setExternalCode] = useState("");
+  const [rex, setRex] = useState("");
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
@@ -150,6 +151,7 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
       : undefined;
     const hexVal = normalizeHex(hexColor);
     // Recycle date for custom types is set on first check-in (4 months from that date), not on add
+    const rexRaw = rex.trim();
     const item = {
       id: tid,
       name: nname,
@@ -168,6 +170,7 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
       ...(typeVal && { type: typeVal }),
       ...(hexVal && { hex_color: hexVal }),
       ...(extRaw && { external_code: extRaw }),
+      ...(rexRaw && { rex: rexRaw }),
     };
 
     onSave(item);
@@ -216,6 +219,17 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
               mode="outlined"
               style={styles.input}
               placeholder="Barcode text or alternate code"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <TextInput
+              label="REX (optional)"
+              value={rex}
+              onChangeText={setRex}
+              mode="outlined"
+              style={styles.input}
+              placeholder="Order export code; if empty, uses Paint ID + external code"
               autoCapitalize="none"
               autoCorrect={false}
             />

@@ -69,6 +69,12 @@ const getApiUrl = () => {
 
 const API_URL = getApiUrl();
 
+// Optional legacy env; Place Order now opens mail with an Excel attachment and leaves To blank.
+const ACCOUNTING_EMAIL =
+  (typeof process !== "undefined" && process.env?.REACT_APP_ACCOUNTING_EMAIL) ||
+  "";
+
 export default {
   API_URL,
+  ACCOUNTING_EMAIL,
 };

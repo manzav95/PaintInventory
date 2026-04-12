@@ -153,6 +153,13 @@ class Database {
     `);
     await client.query(`
       DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'rex') THEN
+          ALTER TABLE items ADD COLUMN rex TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'po_label_ap') THEN
           ALTER TABLE items ADD COLUMN po_label_ap BOOLEAN DEFAULT NULL;
         END IF;
@@ -238,6 +245,13 @@ class Database {
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'received_at') THEN
           ALTER TABLE order_lines ADD COLUMN received_at TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'job_name') THEN
+          ALTER TABLE order_lines ADD COLUMN job_name TEXT NOT NULL DEFAULT '';
         END IF;
       END $$
     `);
@@ -350,29 +364,50 @@ class Database {
       item.is_mixing === true || item.is_mixing === false
         ? item.is_mixing
         : true;
-    await this.pool.query(
-      `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, is_mixing)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-      [
-        item.id,
-        item.name,
-        item.quantity || 0,
-        item.description || "",
-        item.location || "",
-        item.lastScanned || now,
-        item.lastScannedBy || "",
-        item.createdAt || now,
-        now,
-        item.minQuantity != null ? item.minQuantity : null,
-        price,
-        type,
-        displayOrder,
-        hexColor,
-        recycleDate,
-        externalCode,
-        isMixing,
-      ],
-    );
+    const rex =
+      item.rex != null && String(item.rex).trim() !== ""
+        ? String(item.rex).trim()
+        : null;
+    try {
+      await this.pool.query(
+        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, rex, is_mixing)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        [
+          item.id,
+          item.name,
+          item.quantity || 0,
+          item.description || "",
+          item.location || "",
+          item.lastScanned || now,
+          item.lastScannedBy || "",
+          item.createdAt || now,
+          now,
+          item.minQuantity != null ? item.minQuantity : null,
+          price,
+          type,
+          displayOrder,
+          hexColor,
+          recycleDate,
+          externalCode,
+          rex,
+          isMixing,
+        ],
+      );
+    } catch (e) {
+      // Friendly duplicate messages for UI
+      if (e && e.code === "23505") {
+        const msg = e.detail || e.message || "";
+        if (msg.includes("(id)")) {
+          return { success: false, error: "An item with this Paint ID already exists." };
+        }
+        if (msg.includes("(external_code)")) {
+          return { success: false, error: "Another item already uses this external code." };
+        }
+        return { success: false, error: "An item with this ID or external code already exists." };
+      }
+      console.error("DB addItem error:", e);
+      return { success: false, error: "Failed to add item." };
+    }
     return {
       success: true,
       item: normalizeItemPoFields({
@@ -384,6 +419,7 @@ class Database {
         hex_color: hexColor,
         recycle_date: recycleDate,
         external_code: externalCode,
+        rex,
         is_mixing: isMixing,
       }),
     };
@@ -407,6 +443,7 @@ class Database {
       "hex_color",
       "recycle_date",
       "external_code",
+      "rex",
       "is_mixing",
       // Legacy PO fields (kept for backward compatibility)
       "po_label_ap",
@@ -448,6 +485,9 @@ class Database {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else if (key === "external_code") {
+          const v = updates[key];
+          values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
+        } else if (key === "rex") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else if (key === "is_mixing") {
@@ -596,9 +636,15 @@ class Database {
       const itemId = line.itemId || line.item_id;
       const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
       if (!itemId || qty <= 0) continue;
+      const jobName =
+        line.job_name != null
+          ? String(line.job_name).trim()
+          : line.jobName != null
+            ? String(line.jobName).trim()
+            : "";
       await this.pool.query(
-        `INSERT INTO order_lines (order_id, item_id, quantity) VALUES ($1, $2, $3)`,
-        [orderId, String(itemId).trim(), qty],
+        `INSERT INTO order_lines (order_id, item_id, quantity, job_name) VALUES ($1, $2, $3, $4)`,
+        [orderId, String(itemId).trim(), qty, jobName],
       );
     }
     return this.getOrderById(orderId);
@@ -620,6 +666,7 @@ class Database {
       quantity: r.quantity,
       received_quantity: r.received_quantity != null ? r.received_quantity : 0,
       received_at: r.received_at || null,
+      job_name: r.job_name != null ? String(r.job_name) : "",
     }));
     return order;
   }
@@ -677,12 +724,30 @@ class Database {
       const itemId = line.itemId || line.item_id;
       const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
       if (!itemId || qty <= 0) continue;
+      const jobName =
+        line.job_name != null
+          ? String(line.job_name).trim()
+          : line.jobName != null
+            ? String(line.jobName).trim()
+            : "";
       await this.pool.query(
-        "INSERT INTO order_lines (order_id, item_id, quantity) VALUES ($1, $2, $3)",
-        [id, String(itemId).trim(), qty],
+        "INSERT INTO order_lines (order_id, item_id, quantity, job_name) VALUES ($1, $2, $3, $4)",
+        [id, String(itemId).trim(), qty, jobName],
       );
     }
     return { success: true, order: await this.getOrderById(id) };
+  }
+
+  async deleteOrder(orderId) {
+    const id =
+      typeof orderId === "string" ? parseInt(orderId, 10) : Number(orderId);
+    if (!Number.isInteger(id) || id < 1)
+      return { success: false, error: "Invalid order ID" };
+    const result = await this.pool.query("DELETE FROM orders WHERE id = $1", [
+      id,
+    ]);
+    if (result.rowCount === 0) return { success: false, error: "Order not found" };
+    return { success: true };
   }
 
   async getOnOrderSummary() {

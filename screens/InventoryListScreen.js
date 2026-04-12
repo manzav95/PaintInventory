@@ -944,6 +944,33 @@ export default function InventoryListScreen({
                             >
                               {formatOrderColorsPreview(order)}
                             </Text>
+                            {(() => {
+                              const jobs = [
+                                ...new Set(
+                                  (order.lines || [])
+                                    .map((l) =>
+                                      (l.job_name || "").trim(),
+                                    )
+                                    .filter(Boolean),
+                                ),
+                              ];
+                              if (jobs.length === 0) return null;
+                              return (
+                                <Text
+                                  style={[
+                                    styles.receivePoOrderMeta,
+                                    {
+                                      color: theme.colors.onSurfaceVariant,
+                                      marginTop: 4,
+                                    },
+                                  ]}
+                                  numberOfLines={2}
+                                >
+                                  Job
+                                  {jobs.length > 1 ? "s" : ""}: {jobs.join(", ")}
+                                </Text>
+                              );
+                            })()}
                           </Pressable>
                         );
                       })}
@@ -1035,6 +1062,17 @@ export default function InventoryListScreen({
                               ? ` · ${remaining} remaining`
                               : " · Complete"}
                           </Text>
+                          {(line.job_name || "").trim() ? (
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: theme.colors.onSurfaceVariant,
+                                marginBottom: 8,
+                              }}
+                            >
+                              Job: {(line.job_name || "").trim()}
+                            </Text>
+                          ) : null}
                           {remaining > 0 ? (
                             <TextInput
                               label="Receive now (gal)"

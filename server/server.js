@@ -580,6 +580,24 @@ app.put('/api/orders/:id/received-lines', async (req, res) => {
   }
 });
 
+const handleDeleteOrder = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id) || id < 1) return res.status(400).json({ success: false, error: 'Invalid order ID' });
+    const result = await db.deleteOrder(id);
+    if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);
+    console.log('[Orders] Deleted order id:', id);
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting order:', error);
+    res.status(500).json({ error: 'Failed to delete order', detail: error.message });
+  }
+};
+
+// POST preferred: some hosts/proxies return 404 for DELETE even when the app supports it.
+app.post('/api/orders/:id/delete', handleDeleteOrder);
+app.delete('/api/orders/:id', handleDeleteOrder);
+
 // Root route - helpful info
 app.get('/', (req, res) => {
   res.json({ 
@@ -590,6 +608,7 @@ app.get('/', (req, res) => {
       health: '/api/health',
       items: '/api/items',
       orders: '/api/orders',
+      'orders: delete (POST)': '/api/orders/:id/delete',
       'settings: next-id': '/api/settings/next-id',
       'settings: min-quantity': '/api/settings/min-quantity',
       audit: '/api/audit'

@@ -107,6 +107,7 @@ export default function HomeScreen({
   onRefresh,
   isRefreshing = false,
   onOpenSettings,
+  onOpenPlaceOrder,
   onOpenUpcomingOrders,
   onOpenBackOrders,
   onOpenLateOrders,
@@ -496,6 +497,16 @@ export default function HomeScreen({
       >
         View Inventory
       </Button>
+      {isAdmin && onOpenPlaceOrder && (
+        <Button
+          mode="contained"
+          onPress={onOpenPlaceOrder}
+          style={styles.button}
+          icon="cart-plus"
+        >
+          Place order
+        </Button>
+      )}
       {isAdmin && onOpenUpcomingOrders && (
         <Button
           mode="outlined"

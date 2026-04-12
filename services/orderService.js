@@ -4,15 +4,22 @@ const API_URL = config.API_URL;
 
 async function _fetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
-  console.log('[OrderService] Request:', (options.method || 'GET'), url);
+  const method = options.method || 'GET';
+  const hasBody = options.body != null && options.body !== '';
+  const headers = { ...(options.headers || {}) };
+  if (hasBody && !headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  console.log('[OrderService] Request:', method, url);
   try {
     const res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json' },
       ...options,
+      headers,
     });
     let data;
     try {
-      data = await res.json();
+      const text = await res.text();
+      data = text ? JSON.parse(text) : {};
     } catch (parseErr) {
       throw new Error(res.status === 0 ? 'Network error' : `Server error (${res.status})`);
     }
@@ -115,6 +122,14 @@ export default {
     return _fetch(`/api/orders/${orderId}/received-lines`, {
       method: 'PUT',
       body: JSON.stringify({ lines }),
+    });
+  },
+
+  async deleteOrder(orderId) {
+    // POST …/delete — avoids 404 on hosts that do not forward DELETE to Node (common on some PaaS/CDNs).
+    return _fetch(`/api/orders/${orderId}/delete`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   },
 };

@@ -24,12 +24,12 @@
       "bundleIdentifier": "com.manzav95.nfcinventorytracker"
     },
     "android": {
-  "permissions": [
-    "android.permission.NFC",
-    "android.permission.CAMERA"
-  ],
-  "package": "com.manzav95.nfcinventorytracker"
-},
+      "permissions": [
+        "android.permission.NFC",
+        "android.permission.CAMERA"
+      ],
+      "package": "com.manzav95.nfcinventorytracker"
+    },
     "web": {
       "favicon": "./assets/favicon.png",
       "name": "Paint Inventory Tracker",
@@ -47,6 +47,9 @@
       "eas": {
         "projectId": "fbf21a0b-882d-47b7-8af5-515fb028aa17"
       }
-    }
+    },
+    "plugins": [
+      "expo-mail-composer"
+    ]
   }
 }

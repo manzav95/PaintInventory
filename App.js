@@ -7,6 +7,7 @@ import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicat
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
 import AuditService from './services/auditService';
+import { enqueueQuantityAction, syncPendingQuantity } from './utils/offlineQueue';
 import OrderService from './services/orderService';
 import MaterialUsageService from './services/materialUsageService';
 import config from './config';
@@ -21,6 +22,7 @@ import ItemTransactionHistoryScreen from './screens/ItemTransactionHistoryScreen
 import InventoryListScreen from './screens/InventoryListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
+import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 
@@ -74,6 +76,21 @@ export default function App() {
   });
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
 
+  // When we have a logged-in user, try to sync any offline check-in/out actions.
+  useEffect(() => {
+    if (!actorName) return;
+    (async () => {
+      try {
+        const result = await syncPendingQuantity(actorName);
+        if (result.synced > 0) {
+          await loadInventory();
+        }
+      } catch (e) {
+        console.error('Error syncing offline transactions:', e);
+      }
+    })();
+  }, [actorName]);
+
   useEffect(() => {
     initializeApp();
     loadInventory();
@@ -86,6 +103,7 @@ export default function App() {
       const titles = {
         materialUsage: 'Material Usage',
         orders: 'Upcoming Deliveries',
+        placeOrder: 'Place Order',
         list: 'Inventory',
       };
       document.title = titles[currentScreen] || 'Paint Inventory';
@@ -314,14 +332,36 @@ export default function App() {
         return raw;
       })();
 
-      // Check if item exists
-      const item = await InventoryService.getItem(normalizedId);
+      let item = null;
+      try {
+        // Online lookup first
+        item = await InventoryService.getItem(normalizedId);
+      } catch (err) {
+        const msg = err?.message || String(err);
+        // Likely offline or server unreachable – fall back to local inventory
+        if (/Network request failed|Failed to fetch|TypeError|NetworkError|HTTP 502|HTTP 503|HTTP 504/i.test(msg)) {
+          const norm = normalizedId.toLowerCase();
+          item =
+            inventory.find(
+              (i) =>
+                String(i.id ?? '')
+                  .trim()
+                  .toLowerCase() === norm ||
+                String(i.external_code ?? '')
+                  .trim()
+                  .toLowerCase() === norm,
+            ) || null;
+        } else {
+          throw err;
+        }
+      }
 
       if (!item) {
         Alert.alert(
           'Paint Not Found',
-          `No paint found with ID: ${normalizedId}. Please add the paint manually first, then scan to update quantity.`,
-          [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }]
+          `No paint found with ID: ${normalizedId}.\n\n` +
+            'If you are offline, make sure the paint exists in this device’s inventory first (via a full sync while online).',
+          [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }],
         );
         return;
       }
@@ -337,50 +377,80 @@ export default function App() {
   const handleCheckIn = async (quantity) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-in...', async () => {
-      // All users can check in via QR scan
-      const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
-      if (result.success) {
-        await loadInventory();
-        Alert.alert(
-          'Success',
-          `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-        );
-        await AuditService.log({
-          type: 'check_in',
-          user: actorName,
+      try {
+        // All users can check in via QR scan
+        const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
+        if (result.success) {
+          await loadInventory();
+          Alert.alert(
+            'Success',
+            `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+          );
+          await AuditService.log({
+            type: 'check_in',
+            user: actorName,
+            itemId: scannedItem.id,
+            quantity: quantity,
+            newQuantity: result.item.quantity,
+          });
+        } else {
+          Alert.alert('Error', result.error || 'Failed to check in quantity.');
+          return;
+        }
+      } catch (err) {
+        // Likely offline – enqueue for later sync instead of failing the user flow
+        await enqueueQuantityAction({
           itemId: scannedItem.id,
-          quantity: quantity,
-          newQuantity: result.item.quantity,
+          change: quantity,
+          userName: actorName,
+          actionType: 'check_in',
         });
-        setScannedItem(null);
-        const target = previousScreen || 'list';
-        setCurrentScreen(target);
-      } else {
-        Alert.alert('Error', 'Failed to check in quantity.');
+        Alert.alert(
+          'Saved offline',
+          `Check-in for "${scannedItem.name}" will sync when you are back online.`
+        );
       }
+      setScannedItem(null);
+      const target = previousScreen || 'list';
+      setCurrentScreen(target);
     });
   };
 
   const handleReceiveDelivery = async (orderId, quantity) => {
     if (!scannedItem) return;
     await runWithLoading('Recording delivery...', async () => {
-      const receiveResult = await OrderService.receiveOrderLine(orderId, scannedItem.id, quantity);
-      if (!receiveResult.success) throw new Error(receiveResult.error || 'Failed to record PO receive');
-      const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
-      if (!result.success) throw new Error(result.error || 'Failed to update inventory');
-      await loadInventory();
-      Alert.alert(
-        'Success',
-        `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-      );
-      await AuditService.log({
-        type: 'receiving',
-        user: actorName,
-        itemId: scannedItem.id,
-        quantity,
-        newQuantity: result.item.quantity,
-        orderId,
-      });
+      try {
+        const receiveResult = await OrderService.receiveOrderLine(orderId, scannedItem.id, quantity);
+        if (!receiveResult.success) throw new Error(receiveResult.error || 'Failed to record PO receive');
+        const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
+        if (!result.success) throw new Error(result.error || 'Failed to update inventory');
+        await loadInventory();
+        Alert.alert(
+          'Success',
+          `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+        );
+        await AuditService.log({
+          type: 'receiving',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity,
+          newQuantity: result.item.quantity,
+          orderId,
+        });
+      } catch (err) {
+        // Likely offline – enqueue for later sync instead of failing the user flow
+        await enqueueQuantityAction({
+          itemId: scannedItem.id,
+          change: quantity,
+          userName: actorName,
+          actionType: 'receiving',
+          orderId,
+        });
+        Alert.alert(
+          'Saved offline',
+          `Receiving for "${scannedItem.name}" will sync when you are back online.`
+        );
+      }
       setScannedItem(null);
       const target = previousScreen || 'home';
       setCurrentScreen(target);
@@ -390,32 +460,47 @@ export default function App() {
   const handleCheckOut = async (quantity) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-out...', async () => {
-      // All users can check out via QR scan
-      const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
-      if (result.success) {
-        await loadInventory();
-        Alert.alert(
-          'Success',
-          `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-        );
-        await AuditService.log({
-          type: 'check_out',
-          user: actorName,
-          itemId: scannedItem.id,
-          quantity: quantity,
-          newQuantity: result.item.quantity,
-        });
-        setScannedItem(null);
-        const target = previousScreen || 'list';
-        setCurrentScreen(target);
-      } else {
-        const msg = result.error || 'Failed to check out quantity.';
-        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-          window.alert(`Cannot check out\n\n${msg}`);
+      try {
+        // All users can check out via QR scan
+        const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
+        if (result.success) {
+          await loadInventory();
+          Alert.alert(
+            'Success',
+            `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
+          );
+          await AuditService.log({
+            type: 'check_out',
+            user: actorName,
+            itemId: scannedItem.id,
+            quantity: quantity,
+            newQuantity: result.item.quantity,
+          });
         } else {
-          Alert.alert('Cannot check out', msg);
+          const msg = result.error || 'Failed to check out quantity.';
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+            window.alert(`Cannot check out\n\n${msg}`);
+          } else {
+            Alert.alert('Cannot check out', msg);
+          }
+          return;
         }
+      } catch (err) {
+        // Likely offline – enqueue for later sync instead of failing the user flow
+        await enqueueQuantityAction({
+          itemId: scannedItem.id,
+          change: -quantity,
+          userName: actorName,
+          actionType: 'check_out',
+        });
+        Alert.alert(
+          'Saved offline',
+          `Check-out for "${scannedItem.name}" will sync when you are back online.`
+        );
       }
+      setScannedItem(null);
+      const target = previousScreen || 'list';
+      setCurrentScreen(target);
     });
   };
 
@@ -516,6 +601,9 @@ export default function App() {
         }),
         ...(Object.prototype.hasOwnProperty.call(item, 'external_code') && {
           external_code: item.external_code,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'rex') && {
+          rex: item.rex,
         }),
       };
       result = await InventoryService.updateItem(idForApi, updates);
@@ -738,6 +826,10 @@ export default function App() {
                     setPreviousScreen('home');
                     setCurrentScreen('settings');
                   }}
+                  onOpenPlaceOrder={isAdmin ? () => {
+                    setPreviousScreen('home');
+                    setCurrentScreen('placeOrder');
+                  } : undefined}
                   onOpenUpcomingOrders={isAdmin ? () => {
                     setOrdersInitialFilter(null);
                     setPreviousScreen('home');
@@ -802,6 +894,10 @@ export default function App() {
               setPreviousScreen('home');
               setCurrentScreen('settings');
             }}
+            onOpenPlaceOrder={isAdmin ? () => {
+              setPreviousScreen('home');
+              setCurrentScreen('placeOrder');
+            } : undefined}
             onOpenUpcomingOrders={isAdmin ? () => {
               setOrdersInitialFilter(null);
               setPreviousScreen('home');
@@ -930,6 +1026,17 @@ export default function App() {
               if (isAdmin) OrderService.getBackOrderCount().then((c) => {}); // HomeScreen will refresh on return
             }}
             initialFilter={ordersInitialFilter}
+          />
+        );
+      case 'placeOrder':
+        return (
+          <PlaceOrderScreen
+            inventory={inventory}
+            userName={actorName}
+            onBack={() => setCurrentScreen('home')}
+            onOrderCreated={() => {
+              loadInventory();
+            }}
           />
         );
       case 'materialUsage':

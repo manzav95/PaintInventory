@@ -211,6 +211,8 @@ class InventoryService {
         ...(item.hex_color && { hex_color: item.hex_color }),
         ...(item.recycle_date && { recycle_date: item.recycle_date }),
         ...(item.external_code && { external_code: item.external_code }),
+        ...(item.rex != null &&
+          String(item.rex).trim() !== "" && { rex: String(item.rex).trim() }),
         ...(item.is_mixing === true || item.is_mixing === false
           ? { is_mixing: item.is_mixing }
           : {}),
