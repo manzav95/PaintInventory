@@ -752,7 +752,7 @@ class Database {
 
   async getOnOrderSummary() {
     const result = await this.pool.query(
-      `SELECT ol.item_id, ol.quantity, ol.received_quantity, o.placed_at, o.lead_time_days, o.po_number
+      `SELECT ol.item_id, ol.quantity, ol.received_quantity, ol.job_name, o.placed_at, o.lead_time_days, o.po_number
        FROM order_lines ol
        JOIN orders o ON o.id = ol.order_id
        WHERE o.status = 'open'
@@ -803,14 +803,28 @@ class Database {
           poNumber: po,
           late: false,
           backOrdered: false,
+          jobs: [],
         };
       }
       byItem[id].quantity += remaining;
       if (orderIsLate) byItem[id].late = true;
       if (lineIsBackOrdered) byItem[id].backOrdered = true;
+      const job = row.job_name != null ? String(row.job_name).trim() : "";
+      if (job) {
+        const arr = byItem[id].jobs;
+        if (Array.isArray(arr) && !arr.includes(job)) arr.push(job);
+      }
       if (expected > new Date(byItem[id].expectedDate)) {
         byItem[id].expectedDate = expected.toISOString();
         byItem[id].poNumber = po;
+      }
+    }
+    // Stable display: jobs sorted (numeric-ish strings sort OK lexicographically for same length).
+    for (const k of Object.keys(byItem)) {
+      if (Array.isArray(byItem[k].jobs)) {
+        byItem[k].jobs.sort((a, b) => String(a).localeCompare(String(b)));
+      } else {
+        byItem[k].jobs = [];
       }
     }
     return byItem;

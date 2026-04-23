@@ -1787,6 +1787,14 @@ export default function InventoryListScreen({
                                 >
                                   Last Action
                                 </DataTable.Title>
+                                {viewMode === "inventory" &&
+                                bookFilter === "custom" ? (
+                                  <DataTable.Title
+                                    style={[styles.tableCell, styles.jobsColCell]}
+                                  >
+                                    Jobs
+                                  </DataTable.Title>
+                                ) : null}
                               </DataTable.Header>
                             </DataTable>
                             <ScrollView
@@ -2131,6 +2139,47 @@ export default function InventoryListScreen({
                                           );
                                         })()}
                                       </DataTable.Cell>
+                                      {viewMode === "inventory" &&
+                                      bookFilter === "custom" ? (
+                                        <DataTable.Cell
+                                          style={[
+                                            styles.tableCell,
+                                            styles.jobsColCell,
+                                          ]}
+                                        >
+                                          {(() => {
+                                            const orderInfo =
+                                              onOrderSummary[item.id] ||
+                                              onOrderSummary[String(item.id)];
+                                            const jobs = Array.isArray(
+                                              orderInfo?.jobs,
+                                            )
+                                              ? orderInfo.jobs
+                                              : [];
+                                            if (jobs.length === 0) return null;
+                                            const shown = jobs.slice(0, 3).join(
+                                              ", ",
+                                            );
+                                            const more =
+                                              jobs.length > 3
+                                                ? ` +${jobs.length - 3}`
+                                                : "";
+                                            return (
+                                              <Text
+                                                style={{
+                                                  fontSize: 12,
+                                                  color:
+                                                    theme.colors.onSurfaceVariant,
+                                                }}
+                                                numberOfLines={2}
+                                              >
+                                                {shown}
+                                                {more}
+                                              </Text>
+                                            );
+                                          })()}
+                                        </DataTable.Cell>
+                                      ) : null}
                                     </DataTable.Row>
                                   );
                                 })}
@@ -3135,6 +3184,11 @@ const styles = StyleSheet.create({
   },
   onOrderColCell: {
     paddingLeft: 6,
+  },
+  jobsColCell: {
+    minWidth: 160,
+    paddingLeft: 6,
+    paddingRight: 12,
   },
   // Web/Dashboard Styles
   webDesktopRoot: {

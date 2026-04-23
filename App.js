@@ -357,12 +357,20 @@ export default function App() {
       }
 
       if (!item) {
-        Alert.alert(
-          'Paint Not Found',
+        const title = 'Paint Not Found';
+        const msg =
           `No paint found with ID: ${normalizedId}.\n\n` +
-            'If you are offline, make sure the paint exists in this device’s inventory first (via a full sync while online).',
-          [{ text: 'OK', onPress: () => setCurrentScreen(previousScreen || 'home') }],
-        );
+          'If you are offline, make sure the paint exists in this device’s inventory first (via a full sync while online).';
+
+        // RN Web `Alert.alert` can be unreliable/suppressed; use browser-native alert.
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.alert(`${title}\n\n${msg}`);
+          setCurrentScreen('list');
+        } else {
+          Alert.alert(title, msg, [
+            { text: 'OK', onPress: () => setCurrentScreen('list') },
+          ]);
+        }
         return;
       }
 
