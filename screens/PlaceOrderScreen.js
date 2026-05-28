@@ -689,7 +689,7 @@ export default function PlaceOrderScreen({
                                       onChangeText={(t) => setJob(id, t)}
                                       placeholder="#"
                                       keyboardType="number-pad"
-                                      maxLength={8}
+                                      maxLength={10}
                                       style={styles.inputJob}
                                     />
                                   ) : (
@@ -913,8 +913,8 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   inputJob: {
-    width: 104,
-    maxWidth: 104,
+    width: 124,
+    maxWidth: 124,
     marginBottom: 0,
   },
   inputJobSpacer: {

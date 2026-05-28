@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Alert, Platform, useWindowDimensions, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -67,6 +67,11 @@ export default function App() {
   const [scanLookupLoading, setScanLookupLoading] = useState(false);
   const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
   const [onOrderSummary, setOnOrderSummary] = useState({});
+  /** Cached open PO list for Receive PO modal — loaded once in background, refreshed after receives. */
+  const [receiveOrdersCache, setReceiveOrdersCache] = useState(null);
+  const [receiveOrdersLoading, setReceiveOrdersLoading] = useState(false);
+  const receiveOrdersFetchStarted = useRef(false);
+  const recycleSyncInFlight = useRef(false);
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
   const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
   const [inventoryViewState, setInventoryViewState] = useState({
@@ -238,6 +243,24 @@ export default function App() {
     }
   };
 
+  const refreshReceiveOrders = useCallback(async (force = false) => {
+    if (receiveOrdersLoading && !force) return;
+    if (!force && receiveOrdersCache !== null) return;
+    setReceiveOrdersLoading(true);
+    try {
+      const list = await OrderService.getOrders(200);
+      setReceiveOrdersCache(Array.isArray(list) ? list : []);
+      receiveOrdersFetchStarted.current = true;
+    } catch (e) {
+      console.error('Error prefetching receive PO list:', e);
+      if (force) {
+        Alert.alert('Error', e?.message || 'Could not load orders.');
+      }
+    } finally {
+      setReceiveOrdersLoading(false);
+    }
+  }, [receiveOrdersCache, receiveOrdersLoading]);
+
   const loadInventory = async (showLoading = false) => {
     try {
       if (showLoading) {
@@ -263,6 +286,30 @@ export default function App() {
 
       const items = await InventoryService.getAllItems();
       setInventory(items);
+
+      // Prefetch open POs for Receive PO (no reload on each modal open).
+      refreshReceiveOrders();
+
+      const needsRecycleBackfill = items.some((i) => {
+        const t = (i.type || '').toLowerCase();
+        const isCustom = t === 'custom_paint' || t === 'custom_stain';
+        const hasDate = i.recycle_date != null && String(i.recycle_date).trim() !== '';
+        return isCustom && !hasDate;
+      });
+      if (needsRecycleBackfill && !recycleSyncInFlight.current) {
+        recycleSyncInFlight.current = true;
+        InventoryService.syncRecycleDatesFromAudit()
+          .then(async (r) => {
+            if (r?.success && (r.updated || 0) > 0) {
+              const fresh = await InventoryService.getAllItems();
+              setInventory(fresh);
+            }
+          })
+          .catch((e) => console.error('Recycle date sync:', e))
+          .finally(() => {
+            recycleSyncInFlight.current = false;
+          });
+      }
 
       try {
         const ot = await MaterialUsageService.getOvertime();
@@ -735,7 +782,7 @@ export default function App() {
     const from = (fromDate || '').trim();
     const to = (toDate || '').trim();
     if (!from || !to) {
-      Alert.alert('Required', 'Please enter both From and To dates (YYYY-MM-DD).');
+      Alert.alert('Required', 'Please select both From and To dates.');
       return;
     }
     const url = MaterialUsageService.getExportExcelUrl(from, to);
@@ -988,6 +1035,14 @@ export default function App() {
             minQuantity={30}
             isAdmin={isAdmin}
             onOrderSummary={onOrderSummary}
+            receiveOrdersList={receiveOrdersCache ?? []}
+            receiveOrdersLoaded={receiveOrdersCache !== null}
+            receiveOrdersLoading={receiveOrdersLoading}
+            onRefreshReceiveOrders={refreshReceiveOrders}
+            onReceivePoCompleted={() => {
+              refreshReceiveOrders(true);
+              loadInventory();
+            }}
             recycleDueFilter={recycleDueFilter}
             onClearRecycleDueFilter={() => setRecycleDueFilter(false)}
             initialViewMode={inventoryViewState.viewMode}
@@ -1044,6 +1099,7 @@ export default function App() {
             onBack={() => setCurrentScreen('home')}
             onOrderCreated={() => {
               loadInventory();
+              refreshReceiveOrders(true);
             }}
           />
         );

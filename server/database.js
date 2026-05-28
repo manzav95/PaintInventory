@@ -45,6 +45,15 @@ class Database {
       await this.initTables(client);
       client.release();
       await this.backfillMixingDefaults();
+      const recycleSync = await this.syncAllCustomRecycleDatesFromAudit();
+      if (recycleSync.updated > 0) {
+        console.log(
+          `Recycle dates backfilled for ${recycleSync.updated} custom item(s)` +
+            (recycleSync.fromFallback
+              ? ` (${recycleSync.fromFallback} from created/updated dates)`
+              : ""),
+        );
+      }
       console.log("Connected to PostgreSQL database");
     } catch (err) {
       console.error("Error connecting to database:", err);
@@ -1015,6 +1024,103 @@ class Database {
     );
     if (result.rowCount === 0) return { success: false, error: "Not found" };
     return { success: true };
+  }
+
+  /** Activity that resets custom paint/stain recycle clock (due = last activity + 4 months). */
+  static recycleActivityActions() {
+    return ["add", "check_in", "check_out", "receiving", "update"];
+  }
+
+  static recycleDueDateFromActivityIso(isoTimestamp) {
+    const d = new Date(isoTimestamp);
+    if (isNaN(d.getTime())) return null;
+    d.setMonth(d.getMonth() + 4);
+    return d.toISOString().slice(0, 10);
+  }
+
+  async getLastActivityTimestampForItem(itemId) {
+    const id = itemId != null ? String(itemId).trim() : "";
+    if (!id) return null;
+    const actions = Database.recycleActivityActions();
+    const result = await this.pool.query(
+      `SELECT timestamp FROM audit_log
+       WHERE "itemId" = $1 AND action = ANY($2::text[])
+       ORDER BY timestamp DESC
+       LIMIT 1`,
+      [id, actions],
+    );
+    return result.rows[0]?.timestamp || null;
+  }
+
+  /**
+   * Latest timestamp to base recycle due date on: audit activity first, then item dates.
+   */
+  async getRecycleBaselineTimestampForItem(itemId, item = null) {
+    const auditTs = await this.getLastActivityTimestampForItem(itemId);
+    if (auditTs) return { timestamp: auditTs, source: "audit" };
+    const it = item || (await this.getItem(itemId));
+    if (!it) return null;
+    const candidates = [it.createdAt, it.updatedAt, it.lastScanned];
+    for (const ts of candidates) {
+      if (ts && !isNaN(new Date(ts).getTime())) {
+        return { timestamp: ts, source: "item_dates" };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Set recycle_date (due date) from latest activity for custom_paint/custom_stain.
+   */
+  async updateRecycleDateFromLastActivity(itemId, { onlyIfMissing = false } = {}) {
+    const id = itemId != null ? String(itemId).trim() : "";
+    if (!id) return { success: false };
+    const item = await this.getItem(id);
+    if (!item) return { success: false, error: "Item not found" };
+    const t = (item.type || "").toLowerCase();
+    if (t !== "custom_paint" && t !== "custom_stain") {
+      return { success: true, skipped: true };
+    }
+    const existing = item.recycle_date != null ? String(item.recycle_date).trim() : "";
+    if (onlyIfMissing && existing) {
+      return { success: true, skipped: true, reason: "has_date" };
+    }
+    const baseline = await this.getRecycleBaselineTimestampForItem(id, item);
+    if (!baseline) return { success: true, skipped: true, reason: "no_timestamp" };
+    const recycleDate = Database.recycleDueDateFromActivityIso(baseline.timestamp);
+    if (!recycleDate) return { success: false, error: "Invalid activity timestamp" };
+    await this.updateItem(id, { recycle_date: recycleDate });
+    return {
+      success: true,
+      recycle_date: recycleDate,
+      usedFallback: baseline.source === "item_dates",
+    };
+  }
+
+  /** Backfill recycle_date for custom items missing a due date. */
+  async syncAllCustomRecycleDatesFromAudit() {
+    const result = await this.pool.query(
+      `SELECT id, type, recycle_date FROM items WHERE lower(type) IN ('custom_paint', 'custom_stain')`,
+    );
+    let updated = 0;
+    let skipped = 0;
+    let fromFallback = 0;
+    for (const row of result.rows) {
+      const hasDate =
+        row.recycle_date != null && String(row.recycle_date).trim() !== "";
+      if (hasDate) {
+        skipped += 1;
+        continue;
+      }
+      const r = await this.updateRecycleDateFromLastActivity(row.id);
+      if (r.success && !r.skipped) {
+        updated += 1;
+        if (r.usedFallback) fromFallback += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { success: true, updated, skipped, fromFallback, total: result.rows.length };
   }
 
   close() {

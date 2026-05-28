@@ -35,6 +35,18 @@ const TYPE_OPTIONS = [
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
+function normalizeRecycleDateInput(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(`${s}T12:00:00`);
+    if (!isNaN(d.getTime())) return s;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
+
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
   { label: "Stock Container", value: "Stock Container" },
@@ -253,7 +265,19 @@ export default function ItemDetailScreen({
 
     const priceVal = priceInput.trim() === "" ? 55.56 : parseFloat(priceInput);
     const hexVal = normalizeHex(hexColorInput);
-    const recycleVal = recycleDateInput.trim() ? recycleDateInput.trim() : null;
+    let recycleVal = null;
+    if (isCustomType) {
+      if (recycleDateInput.trim()) {
+        recycleVal = normalizeRecycleDateInput(recycleDateInput);
+        if (!recycleVal) {
+          Alert.alert(
+            "Invalid",
+            "Recycle date must be YYYY-MM-DD (example: 2024-06-15).",
+          );
+          return;
+        }
+      }
+    }
     const externalCodeVal = externalCodeInput.trim()
       ? externalCodeInput.trim()
       : null;
@@ -355,11 +379,14 @@ export default function ItemDetailScreen({
         </View>
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={isDesktop && styles.webContentContainer}
+          contentContainerStyle={[
+            !isDesktop && styles.mobileScrollContent,
+            isDesktop && styles.webContentContainer,
+          ]}
         >
-          <View style={isDesktop && styles.webWrapper}>
+          <View style={[styles.scrollInner, isDesktop && styles.webWrapper]}>
             <Card style={[styles.card, isDesktop && styles.webCard]}>
-              <Card.Content>
+              <Card.Content style={styles.cardContent}>
                 <Text style={styles.label}>
                   Paint ID{isAdmin ? " *" : ""}
                 </Text>
@@ -442,7 +469,7 @@ export default function ItemDetailScreen({
             </Card>
 
             <Card style={[styles.card, isDesktop && styles.webCard]}>
-              <Card.Content>
+              <Card.Content style={styles.cardContent}>
                 <TextInput
                   label={isAdmin ? "Paint Name *" : "Paint Name"}
                   value={name}
@@ -904,19 +931,76 @@ export default function ItemDetailScreen({
                 )}
 
                 {isCustomType && (
-                  <>
-                    <Text style={styles.label}>Recycle date</Text>
-                    <Text style={styles.itemId}>{recycleDateInput || "—"}</Text>
-                    <Text
-                      style={[
-                        styles.recycleHint,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Set automatically on each check-in (4 months from check-in
-                      date).
-                    </Text>
-                  </>
+                  <View style={styles.recycleDateBlock}>
+                    <Text style={styles.label}>Recycle date (due)</Text>
+                    {isAdmin ? (
+                      <>
+                        <View style={styles.fieldFullWidth}>
+                          {isWeb ? (
+                            <input
+                              type="date"
+                              value={recycleDateInput}
+                              onChange={(e) =>
+                                setRecycleDateInput(e.target.value)
+                              }
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                maxWidth: "100%",
+                                minWidth: 0,
+                                boxSizing: "border-box",
+                                padding: 12,
+                                fontSize: 16,
+                                borderRadius: 4,
+                                border: `1px solid ${theme.colors.outline}`,
+                                backgroundColor: theme.colors.surface,
+                                color: theme.colors.onSurface,
+                              }}
+                            />
+                          ) : (
+                            <TextInput
+                              label="Recycle date"
+                              value={recycleDateInput}
+                              onChangeText={setRecycleDateInput}
+                              mode="outlined"
+                              style={styles.recycleDateInput}
+                              contentStyle={styles.recycleDateInputContent}
+                              placeholder="YYYY-MM-DD"
+                              autoCapitalize="none"
+                              autoCorrect={false}
+                            />
+                          )}
+                        </View>
+                        <Text
+                          style={[
+                            styles.recycleHint,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Set manually for older custom colors. Leave blank to
+                          use activity-based dates (4 months after check-in,
+                          check-out, receiving, or quantity change).
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.itemId}>
+                          {recycleDateInput
+                            ? normalizeRecycleDateInput(recycleDateInput) ||
+                              recycleDateInput
+                            : "—"}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.recycleHint,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Due date for recycling this custom color.
+                        </Text>
+                      </>
+                    )}
+                  </View>
                 )}
 
                 {item?.lastScanned && (
@@ -994,6 +1078,15 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  mobileScrollContent: {
+    width: "100%",
+    maxWidth: "100%",
+  },
+  scrollInner: {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+  },
   savingOverlay: {
     flex: 1,
     justifyContent: "center",
@@ -1030,6 +1123,35 @@ const styles = StyleSheet.create({
     margin: 16,
     marginTop: 8,
     elevation: 4,
+    overflow: "hidden",
+  },
+  cardContent: {
+    width: "100%",
+    maxWidth: "100%",
+    overflow: "hidden",
+    minWidth: 0,
+  },
+  recycleDateBlock: {
+    width: "100%",
+    maxWidth: "100%",
+    alignSelf: "stretch",
+    minWidth: 0,
+  },
+  fieldFullWidth: {
+    width: "100%",
+    maxWidth: "100%",
+    alignSelf: "stretch",
+    overflow: "hidden",
+    marginBottom: 8,
+    minWidth: 0,
+  },
+  recycleDateInput: {
+    width: "100%",
+    maxWidth: "100%",
+    marginBottom: 0,
+  },
+  recycleDateInputContent: {
+    width: "100%",
   },
   label: {
     fontSize: 14,
@@ -1049,8 +1171,9 @@ const styles = StyleSheet.create({
   recycleHint: {
     fontSize: 12,
     marginTop: 4,
-    marginBottom: 12,
+    marginBottom: 4,
     fontStyle: "italic",
+    flexShrink: 1,
   },
   onOrderText: {
     fontSize: 14,

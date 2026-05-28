@@ -24,6 +24,7 @@ import {
   IconButton,
   Checkbox,
 } from "react-native-paper";
+import DateField from "../components/DateField";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
   BOOTH_OPTIONS,
@@ -764,13 +765,11 @@ export default function MaterialUsageScreen({
             <Card.Content>
               <Title style={styles.cardTitle}>Log mix</Title>
               <View style={styles.row}>
-                <TextInput
+                <DateField
                   label="Date"
                   value={entryDate}
-                  onChangeText={setEntryDate}
-                  mode="outlined"
+                  onChange={setEntryDate}
                   style={styles.halfInput}
-                  placeholder="YYYY-MM-DD"
                 />
                 <View style={styles.timeInputRow}>
                   <TextInput

@@ -42,6 +42,17 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
+// Recompute custom paint/stain recycle_date from latest audit activity (add, check-in/out, receive, manual qty).
+app.post('/api/items/sync-recycle-dates', async (req, res) => {
+  try {
+    const result = await db.syncAllCustomRecycleDatesFromAudit();
+    res.json(result);
+  } catch (error) {
+    console.error('Error syncing recycle dates:', error);
+    res.status(500).json({ error: 'Failed to sync recycle dates' });
+  }
+});
+
 // Get single item
 app.get('/api/items/:id', async (req, res) => {
   try {
@@ -75,6 +86,7 @@ app.post('/api/items', async (req, res) => {
         quantity: req.body.quantity || 0,
         newQuantity: req.body.quantity || 0, // Store the total quantity after this transaction
       });
+      await db.updateRecycleDateFromLastActivity(req.body.id);
       res.json(result);
     } else {
       res.status(400).json(result);
@@ -103,6 +115,7 @@ app.put('/api/items/:id', async (req, res) => {
     // Extract action type flag (if present) and remove it from updates before saving
     const actionType = updates._actionType;
     const quantityChange = updates._quantityChange;
+    const recycleDateProvided = Object.prototype.hasOwnProperty.call(updates, 'recycle_date');
 
     console.log('Extracted actionType:', actionType, 'quantityChange:', quantityChange, 'for item:', id);
 
@@ -125,15 +138,6 @@ app.put('/api/items/:id', async (req, res) => {
         updates.po_label_ap = isMixing === false;
         updates.po_label_mixing = isMixing === true;
       }
-    }
-
-    // On check-in, set recycle_date to 4 months from now for custom paint/stain (replaces previous date)
-    const customTypes = ['custom_paint', 'custom_stain'];
-    const itemType = (currentItem?.type || '').toLowerCase();
-    if (actionType === 'check_in' && customTypes.includes(itemType)) {
-      const d = new Date();
-      d.setMonth(d.getMonth() + 4);
-      updates.recycle_date = d.toISOString().slice(0, 10);
     }
 
     const result = await db.updateItem(id, updates);
@@ -194,6 +198,12 @@ app.put('/api/items/:id', async (req, res) => {
       
       // Log audit with appropriate action type
       await db.addAuditLog(auditActionType, id, auditUserName, auditDetails);
+      if (
+        !recycleDateProvided &&
+        ["add", "check_in", "check_out", "receiving", "update"].includes(auditActionType)
+      ) {
+        await db.updateRecycleDateFromLastActivity(id);
+      }
       res.json(result);
     } else {
       console.log('Update failed - item not found:', id);

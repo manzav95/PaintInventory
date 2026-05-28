@@ -20,6 +20,7 @@ import {
   TextInput,
   ActivityIndicator,
 } from "react-native-paper";
+import DateField from "../components/DateField";
 import OrderService from "../services/orderService";
 import {
   getItemApMixingFlags,
@@ -330,7 +331,7 @@ export default function UpcomingOrdersScreen({
         if (Number.isNaN(d.getTime())) {
           Alert.alert(
             "Invalid",
-            "Placed date must be a valid date (e.g. YYYY-MM-DD).",
+            "Placed date must be a valid date.",
           );
           return;
         }
@@ -1132,13 +1133,11 @@ export default function UpcomingOrdersScreen({
                 style={styles.input}
                 placeholder="Add when you have it – e.g. PO-2024-001"
               />
-              <TextInput
+              <DateField
                 label="Date placed (optional)"
                 value={placedDate}
-                onChangeText={setPlacedDate}
-                mode="outlined"
+                onChange={setPlacedDate}
                 style={styles.input}
-                placeholder="YYYY-MM-DD (default: today)"
               />
               <TextInput
                 label="Lead time (days)"
@@ -1158,13 +1157,19 @@ export default function UpcomingOrdersScreen({
                   inventory.find((i) => String(i.id) === String(line.itemId));
                 const showJobLine =
                   selInv && isCustomColorInventoryItem(selInv);
+                const isFocused = focusedLineIndex === index;
                 return (
-                  <View key={index} style={styles.lineBlock}>
+                  <View
+                    key={index}
+                    style={[
+                      styles.lineBlock,
+                      isFocused && styles.lineBlockDropdownOpen,
+                    ]}
+                  >
                     <View
                       style={[
                         styles.lineRow,
-                        focusedLineIndex === index &&
-                          styles.lineRowDropdownOpen,
+                        isFocused && styles.lineRowDropdownOpen,
                       ]}
                     >
                       <View style={styles.lineItemIdWrap}>
@@ -1783,6 +1788,11 @@ const styles = StyleSheet.create({
   },
   lineBlock: {
     marginBottom: 8,
+  },
+  lineBlockDropdownOpen: {
+    position: "relative",
+    zIndex: 10000,
+    elevation: 10000,
   },
   lineRow: {
     flexDirection: "row",

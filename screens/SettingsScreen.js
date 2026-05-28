@@ -19,6 +19,7 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import { IconButton } from "react-native-paper";
+import DateField from "../components/DateField";
 import version from "../version";
 import InventoryService from "../services/inventoryService";
 
@@ -215,20 +216,16 @@ export default function SettingsScreen({
                 >
                   Export Material Usage log to Excel (choose date range)
                 </Text>
-                <TextInput
+                <DateField
                   label="From date"
                   value={exportFromDate}
-                  onChangeText={setExportFromDate}
-                  mode="outlined"
-                  placeholder="YYYY-MM-DD"
+                  onChange={setExportFromDate}
                   style={styles.adminInput}
                 />
-                <TextInput
+                <DateField
                   label="To date"
                   value={exportToDate}
-                  onChangeText={setExportToDate}
-                  mode="outlined"
-                  placeholder="YYYY-MM-DD"
+                  onChange={setExportToDate}
                   style={styles.adminInput}
                 />
                 <Button

@@ -10,8 +10,8 @@ import {
   Modal,
   Pressable,
   Alert,
-  KeyboardAvoidingView,
 } from "react-native";
+import ReceivePoModal from "../components/ReceivePoModal";
 import {
   Card,
   Text,
@@ -28,21 +28,63 @@ import {
 import AuditService from "../services/auditService";
 import OrderService from "../services/orderService";
 import InventoryService from "../services/inventoryService";
-import config from "../config";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const STANDARD_TYPES = ["paint", "primer", "clear", "catalyst", "stain", "dye"];
 
+function isCustomType(item) {
+  return CUSTOM_TYPES.includes((item.type || "").toLowerCase());
+}
+
+function formatRecycleDateDisplay(recycleDate) {
+  const raw = recycleDate != null ? String(recycleDate).trim() : "";
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function isRecycleDue(item) {
   const rd = item.recycle_date;
   if (!rd || (item.quantity || 0) <= 0) return false;
-  if (!CUSTOM_TYPES.includes((item.type || "").toLowerCase())) return false;
+  if (!isCustomType(item)) return false;
   const d = new Date(rd);
   if (isNaN(d.getTime())) return false;
   d.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return d.getTime() <= today.getTime();
+}
+
+/** Show recycle date on inventory cards only when due within the next month (or overdue). */
+function isRecycleWithinOneMonth(item) {
+  const rd = item.recycle_date;
+  if (!rd || !isCustomType(item)) return false;
+  const d = new Date(rd);
+  if (isNaN(d.getTime())) return false;
+  d.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const oneMonthOut = new Date(today);
+  oneMonthOut.setMonth(oneMonthOut.getMonth() + 1);
+  return d.getTime() <= oneMonthOut.getTime();
+}
+
+function RecycleDateText({ item, style, dueStyle }) {
+  if (!isRecycleWithinOneMonth(item)) return null;
+  const formatted = formatRecycleDateDisplay(item.recycle_date);
+  if (!formatted) return null;
+  const overdue = isRecycleDue(item);
+  return (
+    <Text style={[style, dueStyle]}>
+      {overdue ? "Recycle due: " : "Recycle: "}
+      {formatted}
+    </Text>
+  );
 }
 
 /** Matches App.js handleScanResult normalization for comparing typed/scanned IDs to inventory. */
@@ -111,6 +153,11 @@ export default function InventoryListScreen({
   onClearRecycleDueFilter,
   onScanCode,
   actorName = null,
+  receiveOrdersList = [],
+  receiveOrdersLoaded = false,
+  receiveOrdersLoading = false,
+  onRefreshReceiveOrders,
+  onReceivePoCompleted,
   initialViewMode = "inventory",
   initialBookFilter,
   initialScrollOffset = 0,
@@ -140,10 +187,10 @@ export default function InventoryListScreen({
   ); // 'standard' | 'custom'
   const [receivePoVisible, setReceivePoVisible] = useState(false);
   const [receivePoStep, setReceivePoStep] = useState("list"); // 'list' | 'detail'
-  const [receiveOrdersList, setReceiveOrdersList] = useState([]);
-  const [receiveOrdersLoading, setReceiveOrdersLoading] = useState(false);
   const [selectedReceiveOrder, setSelectedReceiveOrder] = useState(null);
-  const [lineReceiveQtys, setLineReceiveQtys] = useState({});
+  // Keep receive quantities out of React state so typing doesn't re-render the whole screen (prevents focus glitches).
+  const lineReceiveQtysRef = useRef({});
+  const [receiveDetailKey, setReceiveDetailKey] = useState(0);
   const [receiveSubmitting, setReceiveSubmitting] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(initialScrollOffset || 0);
   const listRef = useRef(null);
@@ -183,60 +230,13 @@ export default function InventoryListScreen({
     return `${names.slice(0, 3).join(" · ")} · +${names.length - 3} more`;
   };
 
-  const getOrderExpectedLabel = (order) => {
-    const placed = order?.placed_at;
-    const days = parseInt(order?.lead_time_days, 10) || 5;
-    if (!placed) return null;
-    const d = new Date(placed);
-    if (isNaN(d.getTime())) return null;
-    const exp = new Date(d);
-    exp.setDate(exp.getDate() + days);
-    return exp.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
-
   const openReceivePoModal = () => {
     setReceivePoVisible(true);
     setReceivePoStep("list");
     setSelectedReceiveOrder(null);
-    setLineReceiveQtys({});
-    setReceiveOrdersLoading(true);
-    (async () => {
-      try {
-        // Use a direct fetch here so failures can't silently become "[]".
-        const url = `${config.API_URL}/api/orders?limit=200`;
-        const res = await fetch(url);
-        const text = await res.text();
-        if (!res.ok) {
-          throw new Error(
-            `Orders API failed (${res.status}). ${text?.slice(0, 200) || ""}`,
-          );
-        }
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (e) {
-          throw new Error(
-            `Orders API returned invalid JSON. ${text?.slice(0, 200) || ""}`,
-          );
-        }
-        const list = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.orders)
-            ? data.orders
-            : [];
-        setReceiveOrdersList(list);
-      } catch (e) {
-        console.error("Receive PO load orders:", e);
-        Alert.alert("Error", e?.message || "Could not load orders. Try again.");
-        setReceiveOrdersList([]);
-      } finally {
-        setReceiveOrdersLoading(false);
-      }
-    })();
+    lineReceiveQtysRef.current = {};
+    setReceiveDetailKey((k) => k + 1);
+    onRefreshReceiveOrders?.(false);
   };
 
   const closeReceivePoModal = () => {
@@ -244,8 +244,8 @@ export default function InventoryListScreen({
     setReceivePoVisible(false);
     setReceivePoStep("list");
     setSelectedReceiveOrder(null);
-    setReceiveOrdersList([]);
-    setLineReceiveQtys({});
+    lineReceiveQtysRef.current = {};
+    setReceiveDetailKey((k) => k + 1);
   };
 
   const selectOrderForReceive = (order) => {
@@ -256,7 +256,9 @@ export default function InventoryListScreen({
       const remaining = lineRemainingQty(line);
       if (remaining > 0) init[itemId] = String(remaining);
     }
-    setLineReceiveQtys(init);
+    lineReceiveQtysRef.current = init;
+    // Force uncontrolled inputs to re-mount with new defaults.
+    setReceiveDetailKey((k) => k + 1);
     setSelectedReceiveOrder(order);
     setReceivePoStep("detail");
   };
@@ -272,7 +274,7 @@ export default function InventoryListScreen({
         if (!itemId) continue;
         const remaining = lineRemainingQty(line);
         if (remaining <= 0) continue;
-        const raw = lineReceiveQtys[itemId];
+        const raw = lineReceiveQtysRef.current[itemId];
         const qty =
           raw === undefined || raw === null || String(raw).trim() === ""
             ? 0
@@ -321,6 +323,7 @@ export default function InventoryListScreen({
         return;
       }
       await onRefresh?.();
+      onReceivePoCompleted?.();
       const po = selectedReceiveOrder.po_number || selectedReceiveOrder.id;
       closeReceivePoModal();
       Alert.alert(
@@ -788,343 +791,35 @@ export default function InventoryListScreen({
     );
   };
 
-  const ReceivePoModal = () => {
-    if (!actorName) return null;
-    const expLabel = selectedReceiveOrder
-      ? getOrderExpectedLabel(selectedReceiveOrder)
-      : null;
-    const isOpen = (o) =>
-      String(o?.status ?? "")
-        .toLowerCase()
-        .trim() === "open";
-    const openOrders = (receiveOrdersList || []).filter(isOpen);
-    const totalOrders = (receiveOrdersList || []).length;
-
-    return (
-      <Modal
-        visible={receivePoVisible}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => !receiveSubmitting && closeReceivePoModal()}
-      >
-        <KeyboardAvoidingView
-          style={styles.receivePoKb}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <View style={styles.receivePoOverlayInner}>
-            <Pressable
-              style={styles.receivePoBackdrop}
-              // Don't close on backdrop press; prevents accidental closes and focus glitches.
-              onPress={() => {}}
-            />
-            <View
-              style={[
-                styles.receivePoBox,
-                { backgroundColor: theme.colors.surface },
-              ]}
-            >
-              <IconButton
-                icon="close"
-                size={20}
-                onPress={closeReceivePoModal}
-                disabled={receiveSubmitting}
-                style={{ position: "absolute", right: 6, top: 6, zIndex: 2 }}
-              />
-              {receivePoStep === "list" && (
-                <>
-                  <Text
-                    variant="titleMedium"
-                    style={[
-                      styles.receivePoTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    Receive from PO
-                  </Text>
-                  <Text
-                    style={[
-                      styles.receivePoHelp,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Choose an open order, then enter how many gallons you are
-                    receiving on each line (defaults to full remaining).
-                  </Text>
-                  <Text
-                    style={{
-                      color: theme.colors.onSurfaceVariant,
-                      fontSize: 12,
-                      marginBottom: 8,
-                    }}
-                  >
-                    Open POs: {openOrders.length}
-                  </Text>
-                  {receiveOrdersLoading ? (
-                    <ActivityIndicator style={{ marginVertical: 24 }} />
-                  ) : openOrders.length === 0 ? (
-                    <>
-                      <Text
-                        style={{
-                          color: theme.colors.onSurfaceVariant,
-                          marginVertical: 12,
-                        }}
-                      >
-                        No open purchase orders detected.
-                      </Text>
-                      <View style={styles.receivePoActions}>
-                        <Button
-                          mode="outlined"
-                          onPress={() => {
-                            if (!receiveOrdersLoading) openReceivePoModal();
-                          }}
-                          disabled={receiveOrdersLoading}
-                        >
-                          Reload
-                        </Button>
-                      </View>
-                    </>
-                  ) : (
-                    <ScrollView
-                      style={styles.receivePoListScroll}
-                      keyboardShouldPersistTaps="handled"
-                      showsVerticalScrollIndicator
-                    >
-                      {openOrders.map((order) => {
-                        const placed = order.placed_at
-                          ? new Date(order.placed_at).toLocaleDateString(
-                              "en-US",
-                              {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              },
-                            )
-                          : "";
-                        const exp = getOrderExpectedLabel(order);
-                        return (
-                          <Pressable
-                            key={String(order.id)}
-                            onPress={() => selectOrderForReceive(order)}
-                            style={({ pressed }) => [
-                              styles.receivePoOrderRow,
-                              {
-                                borderColor: theme.colors.outline,
-                                backgroundColor: pressed
-                                  ? theme.colors.surfaceVariant
-                                  : theme.colors.surface,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.receivePoOrderPo,
-                                { color: theme.colors.primary },
-                              ]}
-                            >
-                              PO {order.po_number || order.id}
-                            </Text>
-                            {placed ? (
-                              <Text
-                                style={[
-                                  styles.receivePoOrderMeta,
-                                  { color: theme.colors.onSurfaceVariant },
-                                ]}
-                              >
-                                Placed {placed}
-                                {exp ? ` · Expected ~${exp}` : ""}
-                              </Text>
-                            ) : null}
-                            <Text
-                              style={[
-                                styles.receivePoOrderPreview,
-                                { color: theme.colors.onSurface },
-                              ]}
-                              numberOfLines={2}
-                            >
-                              {formatOrderColorsPreview(order)}
-                            </Text>
-                            {(() => {
-                              const jobs = [
-                                ...new Set(
-                                  (order.lines || [])
-                                    .map((l) =>
-                                      (l.job_name || "").trim(),
-                                    )
-                                    .filter(Boolean),
-                                ),
-                              ];
-                              if (jobs.length === 0) return null;
-                              return (
-                                <Text
-                                  style={[
-                                    styles.receivePoOrderMeta,
-                                    {
-                                      color: theme.colors.onSurfaceVariant,
-                                      marginTop: 4,
-                                    },
-                                  ]}
-                                  numberOfLines={2}
-                                >
-                                  Job
-                                  {jobs.length > 1 ? "s" : ""}: {jobs.join(", ")}
-                                </Text>
-                              );
-                            })()}
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                  )}
-                </>
-              )}
-
-              {receivePoStep === "detail" && selectedReceiveOrder && (
-                <>
-                  <View style={styles.receivePoDetailHeader}>
-                    <IconButton
-                      icon="arrow-left"
-                      size={22}
-                      onPress={() => {
-                        if (!receiveSubmitting) {
-                          setReceivePoStep("list");
-                          setSelectedReceiveOrder(null);
-                          setLineReceiveQtys({});
-                        }
-                      }}
-                      disabled={receiveSubmitting}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        variant="titleMedium"
-                        style={[
-                          styles.receivePoTitle,
-                          { color: theme.colors.onSurface, marginBottom: 0 },
-                        ]}
-                      >
-                        PO{" "}
-                        {selectedReceiveOrder.po_number ||
-                          selectedReceiveOrder.id}
-                      </Text>
-                      {expLabel ? (
-                        <Text
-                          style={{
-                            color: theme.colors.onSurfaceVariant,
-                            fontSize: 12,
-                            marginTop: 4,
-                          }}
-                        >
-                          Expected ~{expLabel}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <ScrollView
-                    style={styles.receivePoDetailScroll}
-                    keyboardShouldPersistTaps="handled"
-                    showsVerticalScrollIndicator
-                  >
-                    {(selectedReceiveOrder.lines || []).map((line, idx) => {
-                      const itemId = String(
-                        line.itemId ?? line.item_id ?? "",
-                      ).trim();
-                      const ordered = lineOrderedQty(line);
-                      const received = lineReceivedQty(line);
-                      const remaining = lineRemainingQty(line);
-                      const name = getItemNameForOrder(itemId);
-                      return (
-                        <View
-                          key={`${itemId}-${idx}`}
-                          style={[
-                            styles.receivePoLineCard,
-                            { borderColor: theme.colors.outline },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.receivePoLineName,
-                              { color: theme.colors.onSurface },
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {name}
-                          </Text>
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              color: theme.colors.onSurfaceVariant,
-                              marginBottom: 8,
-                            }}
-                          >
-                            Ordered {ordered} gal · Received {received} gal
-                            {remaining > 0
-                              ? ` · ${remaining} remaining`
-                              : " · Complete"}
-                          </Text>
-                          {(line.job_name || "").trim() ? (
-                            <Text
-                              style={{
-                                fontSize: 12,
-                                color: theme.colors.onSurfaceVariant,
-                                marginBottom: 8,
-                              }}
-                            >
-                              Job: {(line.job_name || "").trim()}
-                            </Text>
-                          ) : null}
-                          {remaining > 0 ? (
-                            <TextInput
-                              label="Receive now (gal)"
-                              value={lineReceiveQtys[itemId] ?? ""}
-                              onChangeText={(t) =>
-                                setLineReceiveQtys((prev) => ({
-                                  ...prev,
-                                  [itemId]: t,
-                                }))
-                              }
-                              mode="outlined"
-                              dense
-                              keyboardType="number-pad"
-                              placeholder={String(remaining)}
-                            />
-                          ) : null}
-                        </View>
-                      );
-                    })}
-                  </ScrollView>
-
-                  <View style={styles.receivePoActions}>
-                    <Button
-                      mode="outlined"
-                      onPress={() => {
-                        if (!receiveSubmitting) {
-                          setReceivePoStep("list");
-                          setSelectedReceiveOrder(null);
-                          setLineReceiveQtys({});
-                        }
-                      }}
-                      disabled={receiveSubmitting}
-                    >
-                      Back
-                    </Button>
-                    <Button
-                      mode="contained"
-                      onPress={handleReceivePoSubmit}
-                      loading={receiveSubmitting}
-                      disabled={receiveSubmitting}
-                    >
-                      Receive
-                    </Button>
-                  </View>
-                </>
-              )}
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    );
+  const backToReceivePoList = () => {
+    if (receiveSubmitting) return;
+    setReceivePoStep("list");
+    setSelectedReceiveOrder(null);
+    lineReceiveQtysRef.current = {};
+    setReceiveDetailKey((k) => k + 1);
   };
+
+  const receivePoModal = (
+    <ReceivePoModal
+      visible={receivePoVisible}
+      actorName={actorName}
+      step={receivePoStep}
+      onClose={closeReceivePoModal}
+      onBackToList={backToReceivePoList}
+      onSelectOrder={selectOrderForReceive}
+      onSubmit={handleReceivePoSubmit}
+      receiveSubmitting={receiveSubmitting}
+      receiveOrdersList={receiveOrdersList}
+      receiveOrdersLoaded={receiveOrdersLoaded}
+      receiveOrdersLoading={receiveOrdersLoading}
+      onRefreshReceiveOrders={onRefreshReceiveOrders}
+      selectedReceiveOrder={selectedReceiveOrder}
+      lineReceiveQtysRef={lineReceiveQtysRef}
+      detailResetKey={receiveDetailKey}
+      getItemNameForOrder={getItemNameForOrder}
+      formatOrderColorsPreview={formatOrderColorsPreview}
+    />
+  );
 
   const renderItem = ({ item }) => {
     const isLowStock =
@@ -1285,6 +980,11 @@ export default function InventoryListScreen({
                 </Text>
               );
             })()}
+            <RecycleDateText
+              item={item}
+              style={styles.recycleDateText}
+              dueStyle={styles.recycleDateDue}
+            />
             <View style={styles.cardBottomRow}>
               <Text
                 style={styles.lastScanned}
@@ -1789,11 +1489,21 @@ export default function InventoryListScreen({
                                 </DataTable.Title>
                                 {viewMode === "inventory" &&
                                 bookFilter === "custom" ? (
-                                  <DataTable.Title
-                                    style={[styles.tableCell, styles.jobsColCell]}
-                                  >
-                                    Jobs
-                                  </DataTable.Title>
+                                  <>
+                                    <DataTable.Title
+                                      style={[
+                                        styles.tableCell,
+                                        styles.recycleColCell,
+                                      ]}
+                                    >
+                                      Recycle
+                                    </DataTable.Title>
+                                    <DataTable.Title
+                                      style={[styles.tableCell, styles.jobsColCell]}
+                                    >
+                                      Jobs
+                                    </DataTable.Title>
+                                  </>
                                 ) : null}
                               </DataTable.Header>
                             </DataTable>
@@ -2141,44 +1851,58 @@ export default function InventoryListScreen({
                                       </DataTable.Cell>
                                       {viewMode === "inventory" &&
                                       bookFilter === "custom" ? (
-                                        <DataTable.Cell
-                                          style={[
-                                            styles.tableCell,
-                                            styles.jobsColCell,
-                                          ]}
-                                        >
-                                          {(() => {
-                                            const orderInfo =
-                                              onOrderSummary[item.id] ||
-                                              onOrderSummary[String(item.id)];
-                                            const jobs = Array.isArray(
-                                              orderInfo?.jobs,
-                                            )
-                                              ? orderInfo.jobs
-                                              : [];
-                                            if (jobs.length === 0) return null;
-                                            const shown = jobs.slice(0, 3).join(
-                                              ", ",
-                                            );
-                                            const more =
-                                              jobs.length > 3
-                                                ? ` +${jobs.length - 3}`
-                                                : "";
-                                            return (
-                                              <Text
-                                                style={{
-                                                  fontSize: 12,
-                                                  color:
-                                                    theme.colors.onSurfaceVariant,
-                                                }}
-                                                numberOfLines={2}
-                                              >
-                                                {shown}
-                                                {more}
-                                              </Text>
-                                            );
-                                          })()}
-                                        </DataTable.Cell>
+                                        <>
+                                          <DataTable.Cell
+                                            style={[
+                                              styles.tableCell,
+                                              styles.recycleColCell,
+                                            ]}
+                                          >
+                                            <RecycleDateText
+                                              item={item}
+                                              style={styles.recycleDateTableText}
+                                              dueStyle={styles.recycleDateDue}
+                                            />
+                                          </DataTable.Cell>
+                                          <DataTable.Cell
+                                            style={[
+                                              styles.tableCell,
+                                              styles.jobsColCell,
+                                            ]}
+                                          >
+                                            {(() => {
+                                              const orderInfo =
+                                                onOrderSummary[item.id] ||
+                                                onOrderSummary[String(item.id)];
+                                              const jobs = Array.isArray(
+                                                orderInfo?.jobs,
+                                              )
+                                                ? orderInfo.jobs
+                                                : [];
+                                              if (jobs.length === 0) return null;
+                                              const shown = jobs
+                                                .slice(0, 3)
+                                                .join(", ");
+                                              const more =
+                                                jobs.length > 3
+                                                  ? ` +${jobs.length - 3}`
+                                                  : "";
+                                              return (
+                                                <Text
+                                                  style={{
+                                                    fontSize: 12,
+                                                    color:
+                                                      theme.colors.onSurfaceVariant,
+                                                  }}
+                                                  numberOfLines={2}
+                                                >
+                                                  {shown}
+                                                  {more}
+                                                </Text>
+                                              );
+                                            })()}
+                                          </DataTable.Cell>
+                                        </>
                                       ) : null}
                                     </DataTable.Row>
                                   );
@@ -2194,7 +1918,7 @@ export default function InventoryListScreen({
               </View>
             </View>
           )}
-          <ReceivePoModal />
+          {receivePoModal}
           <ColorPreviewModal />
         </View>
       </View>
@@ -2572,7 +2296,7 @@ export default function InventoryListScreen({
             </View>
           )}
         </ScrollView>
-        <ReceivePoModal />
+        {receivePoModal}
         <ColorPreviewModal />
       </>
     );
@@ -2768,7 +2492,7 @@ export default function InventoryListScreen({
           />
         )}
       </View>
-      <ReceivePoModal />
+      {receivePoModal}
       <ColorPreviewModal />
     </View>
   );
@@ -2943,6 +2667,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     marginBottom: 4,
+  },
+  receiveQtyWrap: {
+    marginTop: 2,
+  },
+  receiveQtyLabel: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  receiveQtyInput: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 12 : 10,
+    fontSize: 16,
   },
   filterSummaryRow: {
     marginBottom: 4,
@@ -3184,6 +2923,23 @@ const styles = StyleSheet.create({
   },
   onOrderColCell: {
     paddingLeft: 6,
+  },
+  recycleColCell: {
+    minWidth: 118,
+    paddingLeft: 6,
+    paddingRight: 8,
+  },
+  recycleDateText: {
+    fontSize: 13,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  recycleDateTableText: {
+    fontSize: 12,
+  },
+  recycleDateDue: {
+    color: "#c62828",
+    fontWeight: "600",
   },
   jobsColCell: {
     minWidth: 160,

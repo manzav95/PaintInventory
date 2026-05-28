@@ -33,6 +33,16 @@ const TYPE_OPTIONS = [
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
+function recycleDueDateFromNow() {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 4);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
   { label: "Stock Container", value: "Stock Container" },
@@ -150,7 +160,6 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
       ? type
       : undefined;
     const hexVal = normalizeHex(hexColor);
-    // Recycle date for custom types is set on first check-in (4 months from that date), not on add
     const rexRaw = rex.trim();
     const item = {
       id: tid,
@@ -554,15 +563,34 @@ export default function AddItemScreen({ onSave, onCancel, inventory = [] }) {
             />
 
             {isCustomType && (
-              <Text
-                style={[
-                  styles.recycleHint,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Recycle date is set automatically on first check-in (4 months
-                from that date).
-              </Text>
+              <View style={styles.recycleBlock}>
+                <Text
+                  style={[
+                    styles.recycleDueLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Recycle due
+                </Text>
+                <Text
+                  style={[
+                    styles.recycleDueValue,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {recycleDueDateFromNow()}
+                </Text>
+                <Text
+                  style={[
+                    styles.recycleHint,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Starts when you save this item. Due date is 4 months after the
+                  last activity (add, check-in, check-out, receiving, or manual
+                  quantity change).
+                </Text>
+              </View>
             )}
 
             <View style={styles.buttonContainer}>
@@ -629,9 +657,21 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontStyle: "italic",
   },
+  recycleBlock: {
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  recycleDueLabel: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  recycleDueValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 6,
+  },
   recycleHint: {
     fontSize: 12,
-    marginBottom: 12,
     fontStyle: "italic",
   },
   webContentContainer: {

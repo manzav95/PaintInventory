@@ -51,6 +51,18 @@ class InventoryService {
     }
   }
 
+  async syncRecycleDatesFromAudit() {
+    try {
+      return await _fetch('/api/items/sync-recycle-dates', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error('Error syncing recycle dates:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async getItem(itemId) {
     try {
       const encodedId = encodeURIComponent(itemId);

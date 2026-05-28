@@ -504,7 +504,7 @@ export default function HomeScreen({
           style={styles.button}
           icon="cart-plus"
         >
-          Place order
+          Place Order
         </Button>
       )}
       {isAdmin && onOpenUpcomingOrders && (
