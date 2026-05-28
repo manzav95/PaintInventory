@@ -676,6 +676,14 @@ export default function UpcomingOrdersScreen({
     const orderIsBackOrder = isBackOrder(order);
     const singleReceivedDate = getSingleReceivedDate(order);
     const categoryLabel = getOrderCategoryLabel(order, inventory);
+    const jobs = (() => {
+      const set = new Set();
+      for (const line of order.lines || []) {
+        const j = (line.job_name || "").trim();
+        if (j) set.add(j);
+      }
+      return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)));
+    })();
     return (
       <Card
         key={order.id}
@@ -735,6 +743,18 @@ export default function UpcomingOrdersScreen({
                     ]}
                   >
                     Expected {formatDateWithWeekday(expected)}
+                  </Text>
+                )}
+                {jobs.length > 0 && (
+                  <Text
+                    style={[
+                      styles.orderMetaExpected,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    Jobs: {jobs.slice(0, 6).join(", ")}
+                    {jobs.length > 6 ? ` +${jobs.length - 6}` : ""}
                   </Text>
                 )}
               </View>

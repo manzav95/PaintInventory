@@ -63,6 +63,18 @@ class InventoryService {
     }
   }
 
+  async syncJobHistoryFromOrders() {
+    try {
+      return await _fetch('/api/items/sync-job-history', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    } catch (error) {
+      console.error('Error syncing job history:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async getItem(itemId) {
     try {
       const encodedId = encodeURIComponent(itemId);

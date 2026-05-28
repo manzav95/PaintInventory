@@ -53,6 +53,17 @@ app.post('/api/items/sync-recycle-dates', async (req, res) => {
   }
 });
 
+// Backfill custom color job history from existing order lines (past + present).
+app.post('/api/items/sync-job-history', async (req, res) => {
+  try {
+    const result = await db.syncItemJobHistoryFromOrderLines();
+    res.json(result);
+  } catch (error) {
+    console.error('Error syncing job history:', error);
+    res.status(500).json({ error: 'Failed to sync job history' });
+  }
+});
+
 // Get single item
 app.get('/api/items/:id', async (req, res) => {
   try {

@@ -45,6 +45,12 @@ class Database {
       await this.initTables(client);
       client.release();
       await this.backfillMixingDefaults();
+      const jobSync = await this.syncItemJobHistoryFromOrderLines();
+      if (jobSync?.updated > 0) {
+        console.log(
+          `Job history backfilled for ${jobSync.updated} item/job pair(s).`,
+        );
+      }
       const recycleSync = await this.syncAllCustomRecycleDatesFromAudit();
       if (recycleSync.updated > 0) {
         console.log(
@@ -263,6 +269,16 @@ class Database {
           ALTER TABLE order_lines ADD COLUMN job_name TEXT NOT NULL DEFAULT '';
         END IF;
       END $$
+    `);
+    // Persist job numbers per item so the app can show job history for custom colors.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS item_job_history (
+        item_id TEXT NOT NULL,
+        job_name TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (item_id, job_name)
+      )
     `);
     console.log("Orders tables ready");
 
@@ -621,6 +637,64 @@ class Database {
     }));
   }
 
+  async upsertItemJobHistory(itemId, jobName) {
+    const item = itemId != null ? String(itemId).trim() : "";
+    const job = jobName != null ? String(jobName).trim() : "";
+    if (!item || !job) return { success: false };
+    const now = new Date().toISOString();
+    await this.pool.query(
+      `INSERT INTO item_job_history (item_id, job_name, first_seen_at, last_seen_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (item_id, job_name)
+       DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at`,
+      [item, job, now, now],
+    );
+    return { success: true };
+  }
+
+  async getItemJobHistoryMap() {
+    const result = await this.pool.query(
+      `SELECT item_id, job_name, last_seen_at
+       FROM item_job_history
+       ORDER BY item_id ASC, job_name ASC`,
+    );
+    const byItem = {};
+    for (const row of result.rows) {
+      const id = row.item_id;
+      const job = row.job_name != null ? String(row.job_name).trim() : "";
+      if (!id || !job) continue;
+      if (!byItem[id]) byItem[id] = [];
+      if (!byItem[id].includes(job)) byItem[id].push(job);
+    }
+    return byItem;
+  }
+
+  /**
+   * Backfill job history table from existing order lines (past + present orders).
+   * This makes older POs contribute job numbers to the Inventory "Jobs" column.
+   */
+  async syncItemJobHistoryFromOrderLines() {
+    const now = new Date().toISOString();
+    const result = await this.pool.query(
+      `INSERT INTO item_job_history (item_id, job_name, first_seen_at, last_seen_at)
+       SELECT
+         TRIM(ol.item_id) AS item_id,
+         TRIM(ol.job_name) AS job_name,
+         COALESCE(MIN(NULLIF(TRIM(o.placed_at), '')), $1) AS first_seen_at,
+         COALESCE(MAX(NULLIF(TRIM(o.placed_at), '')), $1) AS last_seen_at
+       FROM order_lines ol
+       JOIN orders o ON o.id = ol.order_id
+       WHERE TRIM(COALESCE(ol.job_name, '')) <> ''
+       GROUP BY TRIM(ol.item_id), TRIM(ol.job_name)
+       ON CONFLICT (item_id, job_name)
+       DO UPDATE SET
+         first_seen_at = LEAST(item_job_history.first_seen_at, EXCLUDED.first_seen_at),
+         last_seen_at = GREATEST(item_job_history.last_seen_at, EXCLUDED.last_seen_at)`,
+      [now],
+    );
+    return { success: true, updated: result.rowCount || 0 };
+  }
+
   async createOrder(poNumber, leadTimeDays, lines, createdBy, placedAt = null) {
     let placed;
     if (placedAt && typeof placedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(placedAt.trim())) {
@@ -655,6 +729,9 @@ class Database {
         `INSERT INTO order_lines (order_id, item_id, quantity, job_name) VALUES ($1, $2, $3, $4)`,
         [orderId, String(itemId).trim(), qty, jobName],
       );
+      if (jobName) {
+        await this.upsertItemJobHistory(String(itemId).trim(), jobName);
+      }
     }
     return this.getOrderById(orderId);
   }
@@ -743,6 +820,9 @@ class Database {
         "INSERT INTO order_lines (order_id, item_id, quantity, job_name) VALUES ($1, $2, $3, $4)",
         [id, String(itemId).trim(), qty, jobName],
       );
+      if (jobName) {
+        await this.upsertItemJobHistory(String(itemId).trim(), jobName);
+      }
     }
     return { success: true, order: await this.getOrderById(id) };
   }
@@ -760,6 +840,7 @@ class Database {
   }
 
   async getOnOrderSummary() {
+    const jobHistory = await this.getItemJobHistoryMap();
     const result = await this.pool.query(
       `SELECT ol.item_id, ol.quantity, ol.received_quantity, ol.job_name, o.placed_at, o.lead_time_days, o.po_number
        FROM order_lines ol
@@ -834,6 +915,28 @@ class Database {
         byItem[k].jobs.sort((a, b) => String(a).localeCompare(String(b)));
       } else {
         byItem[k].jobs = [];
+      }
+    }
+
+    // Merge persisted job history so Jobs column shows even without open POs.
+    for (const itemId of Object.keys(jobHistory || {})) {
+      const jobs = Array.isArray(jobHistory[itemId]) ? jobHistory[itemId] : [];
+      if (!byItem[itemId]) {
+        byItem[itemId] = {
+          quantity: 0,
+          expectedDate: null,
+          poNumber: null,
+          late: false,
+          backOrdered: false,
+          jobs: [...jobs].sort((a, b) => String(a).localeCompare(String(b))),
+        };
+      } else {
+        const arr = Array.isArray(byItem[itemId].jobs) ? byItem[itemId].jobs : [];
+        for (const j of jobs) {
+          if (j && !arr.includes(j)) arr.push(j);
+        }
+        arr.sort((a, b) => String(a).localeCompare(String(b)));
+        byItem[itemId].jobs = arr;
       }
     }
     return byItem;

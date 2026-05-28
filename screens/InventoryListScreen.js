@@ -1491,17 +1491,17 @@ export default function InventoryListScreen({
                                 bookFilter === "custom" ? (
                                   <>
                                     <DataTable.Title
+                                      style={[styles.tableCell, styles.jobsColCell]}
+                                    >
+                                      Jobs
+                                    </DataTable.Title>
+                                    <DataTable.Title
                                       style={[
                                         styles.tableCell,
                                         styles.recycleColCell,
                                       ]}
                                     >
                                       Recycle
-                                    </DataTable.Title>
-                                    <DataTable.Title
-                                      style={[styles.tableCell, styles.jobsColCell]}
-                                    >
-                                      Jobs
                                     </DataTable.Title>
                                   </>
                                 ) : null}
@@ -1855,18 +1855,6 @@ export default function InventoryListScreen({
                                           <DataTable.Cell
                                             style={[
                                               styles.tableCell,
-                                              styles.recycleColCell,
-                                            ]}
-                                          >
-                                            <RecycleDateText
-                                              item={item}
-                                              style={styles.recycleDateTableText}
-                                              dueStyle={styles.recycleDateDue}
-                                            />
-                                          </DataTable.Cell>
-                                          <DataTable.Cell
-                                            style={[
-                                              styles.tableCell,
                                               styles.jobsColCell,
                                             ]}
                                           >
@@ -1901,6 +1889,18 @@ export default function InventoryListScreen({
                                                 </Text>
                                               );
                                             })()}
+                                          </DataTable.Cell>
+                                          <DataTable.Cell
+                                            style={[
+                                              styles.tableCell,
+                                              styles.recycleColCell,
+                                            ]}
+                                          >
+                                            <RecycleDateText
+                                              item={item}
+                                              style={styles.recycleDateTableText}
+                                              dueStyle={styles.recycleDateDue}
+                                            />
                                           </DataTable.Cell>
                                         </>
                                       ) : null}

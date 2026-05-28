@@ -72,6 +72,7 @@ export default function App() {
   const [receiveOrdersLoading, setReceiveOrdersLoading] = useState(false);
   const receiveOrdersFetchStarted = useRef(false);
   const recycleSyncInFlight = useRef(false);
+  const jobHistorySyncInFlight = useRef(false);
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
   const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
   const [inventoryViewState, setInventoryViewState] = useState({
@@ -308,6 +309,21 @@ export default function App() {
           .catch((e) => console.error('Recycle date sync:', e))
           .finally(() => {
             recycleSyncInFlight.current = false;
+          });
+      }
+
+      if (!jobHistorySyncInFlight.current) {
+        jobHistorySyncInFlight.current = true;
+        InventoryService.syncJobHistoryFromOrders()
+          .then(async (r) => {
+            if (r?.success && (r.updated || 0) > 0) {
+              const summary = await OrderService.getOnOrderSummary();
+              setOnOrderSummary(summary || {});
+            }
+          })
+          .catch((e) => console.error('Job history sync:', e))
+          .finally(() => {
+            jobHistorySyncInFlight.current = false;
           });
       }
 
