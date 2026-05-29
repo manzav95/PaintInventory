@@ -20,7 +20,9 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
+import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 
 const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
@@ -68,12 +70,12 @@ export default function ItemDetailScreen({
   onBack,
   isAdmin,
   onOrderSummary = {},
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const desktopBreakpoint = 700;
-  const isDesktop = isWeb && width >= desktopBreakpoint;
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [name, setName] = useState(item?.name || "");
   const [quantity, setQuantity] = useState(item?.quantity?.toString() || "0");
   const [type, setType] = useState(item?.type || "");
@@ -370,13 +372,6 @@ export default function ItemDetailScreen({
       <View
         style={[styles.container, { backgroundColor: theme.colors.background }]}
       >
-        <View style={styles.header}>
-          <Button icon="arrow-left" onPress={onBack} mode="text">
-            Back
-          </Button>
-          <Text style={styles.headerTitle}>Item Details</Text>
-          <View style={styles.placeholder} />
-        </View>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={[
@@ -384,6 +379,11 @@ export default function ItemDetailScreen({
             isDesktop && styles.webContentContainer,
           ]}
         >
+          <PageHeader
+            title="Item Details"
+            onBack={onBack}
+            embeddedInShell={embeddedInShell}
+          />
           <View style={[styles.scrollInner, isDesktop && styles.webWrapper]}>
             <Card style={[styles.card, isDesktop && styles.webCard]}>
               <Card.Content style={styles.cardContent}>
@@ -1110,7 +1110,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   headerTitle: {
     fontSize: 20,

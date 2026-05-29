@@ -14,13 +14,12 @@ import {
   Title,
   Paragraph,
   Button,
-  Searchbar,
   useTheme,
   DataTable,
   Chip,
   ActivityIndicator,
 } from "react-native-paper";
-import AuditService from "../services/auditService";
+import OutlinedSearchInput from "../components/OutlinedSearchInput";
 
 function getDayKey(ts) {
   if (!ts) return null;
@@ -62,6 +61,8 @@ export default function DashboardScreen({
   inventory,
   inventoryLoaded = true,
   minQuantity = 30,
+  auditLogs: auditLogsFromApp = [],
+  auditLogsLoaded: auditLogsLoadedFromApp = false,
   onRefresh,
   isRefreshing = false,
   showTransactionTable = true,
@@ -70,8 +71,8 @@ export default function DashboardScreen({
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [auditLogsLoaded, setAuditLogsLoaded] = useState(false);
+  const auditLogs = auditLogsFromApp;
+  const auditLogsLoaded = auditLogsLoadedFromApp;
   const [searchQuery, setSearchQuery] = useState("");
   const [reducedHistory, setReducedHistory] = useState(false);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
@@ -81,21 +82,6 @@ export default function DashboardScreen({
   const [checkedOutListOpen, setCheckedOutListOpen] = useState(false);
   const [checkedOutListIsWeek, setCheckedOutListIsWeek] = useState(true);
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
-
-  useEffect(() => {
-    loadAuditLogs();
-  }, []);
-
-  const loadAuditLogs = async () => {
-    try {
-      const logs = await AuditService.list(1000);
-      setAuditLogs(logs);
-    } catch (error) {
-      console.error("Error loading audit logs:", error);
-    } finally {
-      setAuditLogsLoaded(true);
-    }
-  };
 
   // Current week (Sun–Sat) and current month date ranges + labels
   const periodRange = useMemo(() => {
@@ -1145,12 +1131,11 @@ export default function DashboardScreen({
                     {reducedHistory ? "Reduced" : "Standard"}
                   </Button>
                 )}
-                <Searchbar
+                <OutlinedSearchInput
                   placeholder="Search transactions..."
                   onChangeText={setSearchQuery}
                   value={searchQuery}
                   style={styles.searchbar}
-                  inputStyle={styles.searchbarInput}
                 />
               </View>
 

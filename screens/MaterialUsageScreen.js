@@ -25,6 +25,8 @@ import {
   Checkbox,
 } from "react-native-paper";
 import DateField from "../components/DateField";
+import PageHeader from "../components/PageHeader";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
   BOOTH_OPTIONS,
@@ -275,11 +277,12 @@ export default function MaterialUsageScreen({
   isAdmin = false,
   materialUsageOvertime = false,
   onBack,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width >= 700;
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
 
   const now = useMemo(() => new Date(), []);
   const [entryDate, setEntryDate] = useState(() => formatDateForInput(now));
@@ -725,27 +728,6 @@ export default function MaterialUsageScreen({
       <View
         style={[styles.container, { backgroundColor: theme.colors.background }]}
       >
-        <View style={styles.header}>
-          <IconButton
-            icon="arrow-left"
-            size={24}
-            onPress={onBack}
-            iconColor={theme.colors.primary}
-          />
-          <Title style={styles.headerTitle}>Material Usage</Title>
-          <View style={styles.headerRight}>
-            <IconButton
-              icon="refresh"
-              size={24}
-              onPress={() => {
-                setRefreshing(true);
-                loadLogs();
-              }}
-              iconColor={theme.colors.primary}
-            />
-          </View>
-        </View>
-
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[
@@ -761,6 +743,22 @@ export default function MaterialUsageScreen({
             />
           }
         >
+          <PageHeader
+            title="Material Usage"
+            onBack={onBack}
+            embeddedInShell={embeddedInShell}
+            actions={
+              <IconButton
+                icon="refresh"
+                size={24}
+                onPress={() => {
+                  setRefreshing(true);
+                  loadLogs();
+                }}
+                iconColor={theme.colors.primary}
+              />
+            }
+          />
           <Card style={styles.card}>
             <Card.Content>
               <Title style={styles.cardTitle}>Log mix</Title>
@@ -1172,7 +1170,7 @@ export default function MaterialUsageScreen({
                                     styles.dayHeaderRow,
                                     {
                                       backgroundColor:
-                                        theme.colors.surfaceVariant || "#eee",
+                                        theme.colors.surfaceContainerHighest,
                                       borderLeftWidth: 4,
                                       borderLeftColor:
                                         theme.colors.primary || "#6f95ab",
@@ -1317,7 +1315,7 @@ export default function MaterialUsageScreen({
                               styles.dayHeaderCard,
                               {
                                 backgroundColor:
-                                  theme.colors.surfaceVariant || "#eee",
+                                  theme.colors.surfaceContainerHighest,
                                 borderLeftColor:
                                   theme.colors.primary || "#6f95ab",
                               },
@@ -1543,7 +1541,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   headerTitle: {
     fontSize: 20,
@@ -1660,7 +1658,7 @@ const styles = StyleSheet.create({
   colorRow: {
     padding: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   colorRowCustom: {
     backgroundColor: "rgba(0,0,0,0.03)",
@@ -1938,7 +1936,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   th: {
     fontWeight: "600",

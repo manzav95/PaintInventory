@@ -21,7 +21,11 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import DateField from "../components/DateField";
+import PageHeader from "../components/PageHeader";
+import MetricStrip from "../components/MetricStrip";
+import ToolbarCard from "../components/ToolbarCard";
 import OrderService from "../services/orderService";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
@@ -216,16 +220,22 @@ export default function UpcomingOrdersScreen({
   onBack,
   inventory = [],
   userName,
+  orders: ordersFromApp = [],
+  ordersLoaded = true,
+  ordersLoading = false,
+  onRefreshOrders,
   onOrdersChanged,
   initialFilter = null,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width >= 700;
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
+  const isWideLayout = isDesktop || embeddedInShell;
 
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const orders = ordersFromApp;
+  const showBlockingLoad = !ordersLoaded;
   const [showForm, setShowForm] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [poNumber, setPoNumber] = useState("");
@@ -256,22 +266,11 @@ export default function UpcomingOrdersScreen({
     setLeadTimeDays(String(defaultDays));
   }, [lines, inventory, editingOrder]);
 
-  const loadOrders = async () => {
-    setLoading(true);
-    try {
-      const list = await OrderService.getOrders();
-      setOrders(list);
-    } catch (e) {
-      console.error(e);
-      // Keep existing orders on failure so we don't wipe the list (e.g. after a successful create)
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadOrders();
-  }, []);
+    if (!ordersLoaded && onRefreshOrders) {
+      onRefreshOrders();
+    }
+  }, [ordersLoaded, onRefreshOrders]);
 
   const addLine = () => {
     setLines((prev) => [
@@ -380,10 +379,6 @@ export default function UpcomingOrdersScreen({
           userName,
           placedAt,
         );
-        // Optimistically show the new order so it appears even if the next load fails
-        if (created && (created.id != null || created.po_number != null)) {
-          setOrders((prev) => [created, ...prev]);
-        }
       }
       setPoNumber("");
       setPlacedDate("");
@@ -392,8 +387,7 @@ export default function UpcomingOrdersScreen({
       setEditingOrder(null);
       setShowForm(false);
       setFocusedLineIndex(null);
-      await loadOrders();
-      onOrdersChanged?.();
+      await onOrdersChanged?.();
     } catch (e) {
       Alert.alert("Error", e.message || "Failed to save order.");
     } finally {
@@ -405,8 +399,7 @@ export default function UpcomingOrdersScreen({
     setMarkingId(orderId);
     try {
       await OrderService.markOrderReceived(orderId);
-      await loadOrders();
-      onOrdersChanged?.();
+      await onOrdersChanged?.();
     } catch (e) {
       Alert.alert("Error", e.message || "Failed to mark order received.");
     } finally {
@@ -451,9 +444,7 @@ export default function UpcomingOrdersScreen({
           setEditingReceivedOrder(null);
           setReceivedLineQtys({});
         }
-        setOrders((prev) => prev.filter((o) => Number(o.id) !== id));
-        await loadOrders();
-        onOrdersChanged?.();
+        await onOrdersChanged?.();
       } catch (e) {
         Alert.alert("Error", e.message || "Failed to delete order.");
       } finally {
@@ -514,8 +505,7 @@ export default function UpcomingOrdersScreen({
       );
       setEditingReceivedOrder(null);
       setReceivedLineQtys({});
-      await loadOrders();
-      onOrdersChanged?.();
+      await onOrdersChanged?.();
     } catch (e) {
       Alert.alert(
         "Error",
@@ -558,6 +548,17 @@ export default function UpcomingOrdersScreen({
     }
     return false;
   };
+
+  const orderCounts = useMemo(() => {
+    const list = orders || [];
+    return {
+      all: list.length,
+      existing: list.filter(isExistingOrder).length,
+      back: list.filter(isBackOrder).length,
+      late: list.filter(isLateOrder).length,
+      completed: list.filter((o) => o.status === "received").length,
+    };
+  }, [orders]);
 
   const filteredOrders = (orders || []).filter((order) => {
     if (!order) return false;
@@ -690,7 +691,10 @@ export default function UpcomingOrdersScreen({
         style={[
           styles.card,
           styles.orderCard,
-          { backgroundColor: theme.colors.surface },
+          {
+            backgroundColor: theme.colors.surfaceContainerHighest,
+            borderColor: theme.colors.outlineVariant,
+          },
         ]}
       >
         <Card.Content>
@@ -710,7 +714,7 @@ export default function UpcomingOrdersScreen({
                       styles.categoryBadge,
                       {
                         backgroundColor:
-                          theme.colors.surfaceVariant || "#e0e0e0",
+                          theme.colors.surfaceContainerHighest,
                       },
                     ]}
                   >
@@ -1025,104 +1029,139 @@ export default function UpcomingOrdersScreen({
   const bgColor = theme?.colors?.background ?? "#fff";
   const primaryColor = theme?.colors?.primary ?? "#6f95ab";
 
+  const dateViewLocksFilters =
+    dateViewMode === "week" || dateViewMode === "month";
+
+  const metricItems = useMemo(
+    () => {
+      const pickFilter = (filter) =>
+        dateViewLocksFilters ? undefined : () => setOrderFilter(filter);
+      return [
+        {
+          id: "all",
+          label: "All POs",
+          value: orderCounts.all,
+          color: theme?.colors?.primary,
+          active: orderFilter === "all",
+          onPress: pickFilter("all"),
+        },
+        {
+          id: "existing",
+          label: "Open POs",
+          value: orderCounts.existing,
+          color: FILTER_COLORS.existing,
+          active: orderFilter === "existing",
+          onPress: pickFilter("existing"),
+        },
+        {
+          id: "back",
+          label: "Back orders",
+          value: orderCounts.back,
+          color: FILTER_COLORS.back_orders,
+          active: orderFilter === "back_orders",
+          onPress: pickFilter("back_orders"),
+        },
+        {
+          id: "late",
+          label: "Late",
+          value: orderCounts.late,
+          color: FILTER_COLORS.late_orders,
+          active: orderFilter === "late_orders",
+          onPress: pickFilter("late_orders"),
+        },
+        {
+          id: "completed",
+          label: "Completed",
+          value: orderCounts.completed,
+          color: FILTER_COLORS.completed,
+          active: orderFilter === "completed",
+          onPress: pickFilter("completed"),
+        },
+      ];
+    },
+    [orderCounts, orderFilter, theme?.colors?.primary, dateViewLocksFilters],
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: bgColor }]}>
-      <View style={styles.header}>
-        <IconButton
-          icon="arrow-left"
-          size={24}
-          onPress={onBack}
-          iconColor={primaryColor}
-        />
-        <Title style={[styles.title, isDesktop && styles.titleCentered]}>
-          Purchase Orders
-        </Title>
-        {!isDesktop && (
-          <View style={styles.headerRight}>
-            {!showForm ? (
-              <Button mode="contained" onPress={openNewOrder} icon="plus">
-                Add Order
-              </Button>
-            ) : (
-              <Button mode="outlined" onPress={closeForm}>
-                Cancel
-              </Button>
-            )}
-          </View>
-        )}
-      </View>
-
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
-          isDesktop && styles.scrollContentWeb,
+          isWideLayout && styles.scrollContentWeb,
         ]}
       >
+        <PageHeader
+          title="Purchase Orders"
+          onBack={onBack}
+          embeddedInShell={embeddedInShell}
+          actions={
+            !showForm ? (
+              <Button mode="contained" onPress={openNewOrder} icon="plus" compact>
+                Add Order
+              </Button>
+            ) : (
+              <Button mode="outlined" onPress={closeForm} compact>
+                Cancel
+              </Button>
+            )
+          }
+        />
+
         {!showForm && (
           <>
-            <TextInput
-              mode="outlined"
-              placeholder="Search by PO, job, name, ID, or external code"
-              value={poSearchQuery}
-              onChangeText={setPoSearchQuery}
-              style={styles.searchInput}
-              left={<TextInput.Icon icon="magnify" />}
-            />
-            <Text
-              style={[
-                styles.dateViewLabel,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              By date
-            </Text>
-            <View style={styles.filterRow}>
-              <Button
-                mode={dateViewMode === null ? "contained" : "outlined"}
-                compact
-                onPress={() => setDateViewMode(null)}
-                style={styles.filterBtn}
+            <MetricStrip items={metricItems} />
+            <ToolbarCard>
+              <TextInput
+                mode="outlined"
+                placeholder="Search by PO, job, name, ID, or external code"
+                value={poSearchQuery}
+                onChangeText={setPoSearchQuery}
+                style={styles.searchInput}
+              />
+              <Text
+                style={[
+                  styles.dateViewLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
               >
-                List
-              </Button>
-              <Button
-                mode={dateViewMode === "week" ? "contained" : "outlined"}
-                compact
-                onPress={() => {
-                  setDateViewMode("week");
-                  setOrderFilter("all");
-                  setExpandedGroupKeys([]);
-                }}
-                style={styles.filterBtn}
-              >
-                Week
-              </Button>
-              <Button
-                mode={dateViewMode === "month" ? "contained" : "outlined"}
-                compact
-                onPress={() => {
-                  setDateViewMode("month");
-                  setOrderFilter("all");
-                  setExpandedGroupKeys([]);
-                }}
-                style={styles.filterBtn}
-              >
-                Month
-              </Button>
-              {isDesktop && (
-                <View style={{ marginLeft: "auto" }}>
-                  <Button
-                    mode="outlined"
-                    onPress={openNewOrder}
-                    icon="plus"
-                    compact
-                  >
-                    Add Order
-                  </Button>
-                </View>
-              )}
-            </View>
+                By date
+              </Text>
+              <View style={styles.filterRow}>
+                <Button
+                  mode={dateViewMode === null ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setDateViewMode(null)}
+                  style={styles.filterBtn}
+                >
+                  List
+                </Button>
+                <Button
+                  mode={dateViewMode === "week" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => {
+                    setDateViewMode("week");
+                    setOrderFilter("all");
+                    setExpandedGroupKeys([]);
+                  }}
+                  style={styles.filterBtn}
+                >
+                  Week
+                </Button>
+                <Button
+                  mode={dateViewMode === "month" ? "contained" : "outlined"}
+                  compact
+                  onPress={() => {
+                    setDateViewMode("month");
+                    setOrderFilter("all");
+                    setExpandedGroupKeys([]);
+                  }}
+                  style={styles.filterBtn}
+                >
+                  Month
+                </Button>
+              </View>
+            </ToolbarCard>
           </>
         )}
         {isDesktop && showForm && (
@@ -1214,9 +1253,8 @@ export default function UpcomingOrdersScreen({
                               styles.dropdown,
                               {
                                 backgroundColor:
-                                  theme && theme.dark ? "#2d2d2d" : "#ffffff",
-                                borderColor:
-                                  theme && theme.dark ? "#444" : "#ccc",
+                                  theme.colors.surfaceContainerHighest,
+                                borderColor: theme.colors.outlineVariant,
                               },
                             ]}
                             collapsable={false}
@@ -1250,9 +1288,7 @@ export default function UpcomingOrdersScreen({
                                         styles.dropdownItemWrap,
                                         {
                                           backgroundColor: pressed
-                                            ? theme && theme.dark
-                                              ? "#3d3d3d"
-                                              : "#eee"
+                                            ? theme.colors.surfaceContainerHighest
                                             : "transparent",
                                         },
                                       ]}
@@ -1346,135 +1382,22 @@ export default function UpcomingOrdersScreen({
           </Card>
         )}
 
-        {loading ? (
+        {showBlockingLoad ? (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
+            {ordersLoading && (
+              <Text
+                style={[
+                  styles.loadingHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Loading purchase orders…
+              </Text>
+            )}
           </View>
         ) : !showForm ? (
           <>
-            <View style={styles.filterRow}>
-              <Button
-                mode={orderFilter === "all" ? "contained" : "outlined"}
-                compact
-                onPress={() => setOrderFilter("all")}
-                style={styles.filterBtn}
-                disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={
-                  orderFilter === "all" ? theme.colors.primary : undefined
-                }
-                textColor={orderFilter === "all" ? "#fff" : undefined}
-              >
-                All
-              </Button>
-              <Button
-                mode={orderFilter === "existing" ? "contained" : "outlined"}
-                compact
-                onPress={() => setOrderFilter("existing")}
-                style={[
-                  styles.filterBtn,
-                  orderFilter !== "existing" &&
-                    FILTER_COLORS.existing && {
-                      borderColor: FILTER_COLORS.existing,
-                    },
-                ]}
-                disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={
-                  orderFilter === "existing"
-                    ? FILTER_COLORS.existing
-                    : undefined
-                }
-                textColor={
-                  orderFilter === "existing"
-                    ? "#fff"
-                    : orderFilter !== "existing" && FILTER_COLORS.existing
-                      ? FILTER_COLORS.existing
-                      : undefined
-                }
-              >
-                Open POs
-              </Button>
-              <Button
-                mode={orderFilter === "back_orders" ? "contained" : "outlined"}
-                compact
-                onPress={() => setOrderFilter("back_orders")}
-                style={[
-                  styles.filterBtn,
-                  orderFilter !== "back_orders" &&
-                    FILTER_COLORS.back_orders && {
-                      borderColor: FILTER_COLORS.back_orders,
-                    },
-                ]}
-                disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={
-                  orderFilter === "back_orders"
-                    ? FILTER_COLORS.back_orders
-                    : undefined
-                }
-                textColor={
-                  orderFilter === "back_orders"
-                    ? "#fff"
-                    : orderFilter !== "back_orders" && FILTER_COLORS.back_orders
-                      ? FILTER_COLORS.back_orders
-                      : undefined
-                }
-              >
-                Back Orders
-              </Button>
-              <Button
-                mode={orderFilter === "late_orders" ? "contained" : "outlined"}
-                compact
-                onPress={() => setOrderFilter("late_orders")}
-                style={[
-                  styles.filterBtn,
-                  orderFilter !== "late_orders" &&
-                    FILTER_COLORS.late_orders && {
-                      borderColor: FILTER_COLORS.late_orders,
-                    },
-                ]}
-                disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={
-                  orderFilter === "late_orders"
-                    ? FILTER_COLORS.late_orders
-                    : undefined
-                }
-                textColor={
-                  orderFilter === "late_orders"
-                    ? "#fff"
-                    : orderFilter !== "late_orders" && FILTER_COLORS.late_orders
-                      ? FILTER_COLORS.late_orders
-                      : undefined
-                }
-              >
-                Late Orders
-              </Button>
-              <Button
-                mode={orderFilter === "completed" ? "contained" : "outlined"}
-                compact
-                onPress={() => setOrderFilter("completed")}
-                style={[
-                  styles.filterBtn,
-                  orderFilter !== "completed" &&
-                    FILTER_COLORS.completed && {
-                      borderColor: FILTER_COLORS.completed,
-                    },
-                ]}
-                disabled={dateViewMode === "week" || dateViewMode === "month"}
-                buttonColor={
-                  orderFilter === "completed"
-                    ? FILTER_COLORS.completed
-                    : undefined
-                }
-                textColor={
-                  orderFilter === "completed"
-                    ? "#fff"
-                    : orderFilter !== "completed" && FILTER_COLORS.completed
-                      ? FILTER_COLORS.completed
-                      : undefined
-                }
-              >
-                Completed POs
-              </Button>
-            </View>
             {(() => {
               const emptyCount =
                 dateViewMode === "week"
@@ -1551,7 +1474,7 @@ export default function UpcomingOrdersScreen({
                             styles.dateGroupHeader,
                             {
                               backgroundColor:
-                                theme.colors.surfaceVariant || "#e0e0e0",
+                                theme.colors.surfaceContainerHigh,
                             },
                           ]}
                         >
@@ -1610,7 +1533,7 @@ export default function UpcomingOrdersScreen({
                             styles.dateGroupHeader,
                             {
                               backgroundColor:
-                                theme.colors.surfaceVariant || "#e0e0e0",
+                                theme.colors.surfaceContainerHigh,
                             },
                           ]}
                         >
@@ -1764,7 +1687,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   title: {
     fontSize: 20,
@@ -1785,13 +1708,15 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   scrollContentWeb: {
-    maxWidth: 760,
+    maxWidth: 1200,
     alignSelf: "center",
     width: "100%",
   },
   card: {
     marginBottom: 16,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   cardTitle: {
     fontSize: 18,
@@ -1896,6 +1821,11 @@ const styles = StyleSheet.create({
   centered: {
     padding: 40,
     alignItems: "center",
+    gap: 12,
+  },
+  loadingHint: {
+    fontSize: 14,
+    marginTop: 8,
   },
   emptyText: {
     textAlign: "center",

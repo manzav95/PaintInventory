@@ -175,7 +175,12 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
 
   const content = (
     <>
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { borderBottomColor: theme.colors.outlineVariant },
+        ]}
+      >
         <IconButton
           icon="arrow-left"
           size={24}
@@ -190,7 +195,7 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
           styles.itemSummary,
           {
             borderBottomWidth: 1,
-            borderBottomColor: theme.dark ? "rgba(255,255,255,0.15)" : "#eee",
+            borderBottomColor: theme.colors.outlineVariant,
           },
         ]}
       >
@@ -217,7 +222,12 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
             />
           }
         >
-          <Card style={[styles.card, { backgroundColor: "#25232A" }]}>
+          <Card
+            style={[
+              styles.card,
+              { backgroundColor: theme.colors.surfaceContainerHighest },
+            ]}
+          >
             <Card.Content style={styles.cardContent}>
               {logs.length === 0 ? (
                 <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
@@ -274,7 +284,7 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
                         style={[
                           styles.row,
                           index < logs.length - 1 && styles.rowBorder,
-                          { borderBottomColor: theme.dark ? "#333" : "#eee" },
+                          { borderBottomColor: theme.colors.outlineVariant },
                         ]}
                       >
                         <View style={styles.rowLeft}>
@@ -326,7 +336,12 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: "#1a1a1e" }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: theme.colors.background },
+      ]}
+    >
       {isDesktop ? (
         <View style={styles.webContainer}>
           {content}
@@ -358,7 +373,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
   },
   title: {
     fontSize: 20,

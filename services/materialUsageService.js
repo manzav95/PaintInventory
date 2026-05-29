@@ -45,6 +45,8 @@ class MaterialUsageService {
       params.set('from', today);
       params.set('to', today);
     }
+    if (options.from) params.set('from', String(options.from).trim());
+    if (options.to) params.set('to', String(options.to).trim());
     if (options.excludeAdmin) {
       params.set('excludeAdmin', 'true');
     }

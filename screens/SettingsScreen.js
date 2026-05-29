@@ -20,7 +20,10 @@ import {
 } from "react-native-paper";
 import { IconButton } from "react-native-paper";
 import DateField from "../components/DateField";
+import PageHeader from "../components/PageHeader";
 import version from "../version";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import InventoryService from "../services/inventoryService";
 
 function formatDateForInput(d) {
@@ -42,12 +45,12 @@ export default function SettingsScreen({
   onSetMaterialUsageOvertime,
   onExportExcel,
   onExportMaterialUsageExcel,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const desktopBreakpoint = 700;
-  const isDesktop = isWeb && width >= desktopBreakpoint;
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [exportFromDate, setExportFromDate] = useState(() =>
     formatDateForInput(new Date()),
   );
@@ -72,17 +75,6 @@ export default function SettingsScreen({
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <View style={styles.header}>
-        <IconButton
-          icon="arrow-left"
-          size={24}
-          onPress={onBack}
-          iconColor={theme.colors.primary}
-        />
-        <Title style={styles.headerTitle}>Settings</Title>
-        <View style={styles.placeholder} />
-      </View>
-
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[
@@ -90,6 +82,11 @@ export default function SettingsScreen({
           isDesktop && styles.webScrollContent,
         ]}
       >
+        <PageHeader
+          title="Settings"
+          onBack={onBack}
+          embeddedInShell={embeddedInShell}
+        />
         <View style={isDesktop && styles.webWrapper}>
           <Card
             style={[
@@ -356,7 +353,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   headerTitle: {
     fontSize: 20,
@@ -453,7 +450,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: "#222831",
+    backgroundColor: DARK_SURFACE_ELEVATED,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,

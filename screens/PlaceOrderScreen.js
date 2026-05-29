@@ -24,9 +24,13 @@ import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
 } from "../utils/poItemLabels";
+import PageHeader from "../components/PageHeader";
+import { DESKTOP_BREAKPOINT, useAppLayout } from "../utils/layout";
 
 const PAGE_MAX_WIDTH = 1200;
-const GRID_GAP = 10;
+const GRID_GAP = 12;
+const SHELL_SIDEBAR_WIDE = 280;
+const SHELL_SIDEBAR_NARROW = 240;
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -104,11 +108,21 @@ function getMaterialTypeLabelAndColor(item, theme) {
   return { label, color };
 }
 
-function gridColumnCount(windowWidth) {
-  const inner = Math.min(PAGE_MAX_WIDTH, windowWidth);
-  if (inner >= 960) return 3;
-  if (inner >= 600) return 2;
+/** Column count from actual content width (main pane when sidebar is open). */
+function gridColumnCount(contentWidth) {
+  if (contentWidth >= 680) return 3;
+  if (contentWidth >= 420) return 2;
   return 1;
+}
+
+function getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop) {
+  const scrollPad = 32;
+  if (embeddedInShell) {
+    const sidebar = isNarrowDesktop ? SHELL_SIDEBAR_NARROW : SHELL_SIDEBAR_WIDE;
+    const shellChrome = sidebar + 56;
+    return Math.max(280, windowWidth - shellChrome - scrollPad);
+  }
+  return Math.max(280, Math.min(PAGE_MAX_WIDTH, windowWidth) - scrollPad);
 }
 
 /** Non-AP bundles: paint with paint, stain with stain, etc. */
@@ -235,12 +249,18 @@ export default function PlaceOrderScreen({
   userName,
   onBack,
   onOrderCreated,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width: windowWidth } = useWindowDimensions();
-  const numCols = gridColumnCount(windowWidth);
-  const isDesktop = isWeb && windowWidth >= 700;
+  const { isNarrowDesktop } = useAppLayout();
+  const contentWidth = useMemo(
+    () => getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop),
+    [windowWidth, embeddedInShell, isNarrowDesktop],
+  );
+  const numCols = gridColumnCount(contentWidth);
+  const isDesktop = isWeb && windowWidth >= DESKTOP_BREAKPOINT;
 
   const [filterTab, setFilterTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -413,50 +433,36 @@ export default function PlaceOrderScreen({
     }
   };
 
-  const listBg = theme.dark === true ? theme.colors.background : "#f5f5f5";
-  // Slightly lighter than page gray (light) / raised surface (dark) so cards read as separate tiles.
-  const cardBg =
-    theme.dark === true
-      ? (theme.colors.surfaceContainerLow ??
-        theme.colors.surfaceContainer ??
-        theme.colors.surface)
-      : "#fafafa";
+  const listBg = theme.colors.background;
+  const cardBg = theme.colors.surfaceContainerHighest;
 
-  const scrollHorizontalPad = 32;
-  const bounded = Math.min(PAGE_MAX_WIDTH, windowWidth);
-  const usableWidth = Math.max(280, bounded - scrollHorizontalPad);
   const colW =
     numCols === 1
-      ? usableWidth
-      : (usableWidth - GRID_GAP * (numCols - 1)) / numCols;
+      ? contentWidth
+      : (contentWidth - GRID_GAP * (numCols - 1)) / numCols;
 
   return (
-    <View style={[styles.rootMax, { backgroundColor: listBg }]}>
+    <View
+      style={[
+        styles.rootMax,
+        embeddedInShell && styles.rootShell,
+        { backgroundColor: listBg },
+      ]}
+    >
       <KeyboardAvoidingView
         style={styles.keyboardInner}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={styles.header}>
-          <IconButton
-            icon="arrow-left"
-            size={24}
-            onPress={onBack}
-            iconColor={theme.colors.primary}
-          />
-          <Title
-            style={[styles.title, isDesktop && styles.titleCentered]}
-            numberOfLines={1}
-          >
-            Place order
-          </Title>
-          <View style={styles.headerRight} />
-        </View>
-
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
+          <PageHeader
+            title="Place Order"
+            onBack={onBack}
+            embeddedInShell={embeddedInShell}
+          />
           <Text
             style={[styles.intro, { color: theme.colors.onSurfaceVariant }]}
           >
@@ -470,7 +476,7 @@ export default function PlaceOrderScreen({
               {
                 borderColor: theme.colors.outlineVariant,
                 backgroundColor: theme.dark
-                  ? "rgba(255,255,255,0.06)"
+                  ? theme.colors.surfaceContainerHighest
                   : theme.colors.surfaceContainerHigh ?? theme.colors.surface,
               },
             ]}
@@ -546,7 +552,6 @@ export default function PlaceOrderScreen({
               styles.searchInput,
               { backgroundColor: theme.colors.surface },
             ]}
-            left={<TextInput.Icon icon="magnify" />}
           />
 
           {filteredItems.length === 0 ? (
@@ -704,7 +709,7 @@ export default function PlaceOrderScreen({
                                     {
                                       borderColor: typeColor,
                                       backgroundColor: theme.dark
-                                        ? "rgba(255,255,255,0.06)"
+                                        ? theme.colors.surfaceContainerHighest
                                         : "rgba(0,0,0,0.03)",
                                     },
                                   ]}
@@ -767,6 +772,10 @@ const styles = StyleSheet.create({
     maxWidth: PAGE_MAX_WIDTH,
     alignSelf: "center",
   },
+  rootShell: {
+    maxWidth: "100%",
+    alignSelf: "stretch",
+  },
   keyboardInner: {
     flex: 1,
     minHeight: 0,
@@ -828,8 +837,12 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     alignItems: "stretch",
     justifyContent: "flex-start",
+    width: "100%",
   },
-  gridCell: {},
+  gridCell: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   itemCard: {
     flex: 1,
     elevation: 2,

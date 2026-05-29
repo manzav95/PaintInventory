@@ -46,11 +46,10 @@ const getApiUrl = () => {
       return "https://paintinventory.onrender.com"; // ← Your backend URL
     }
 
-    // Localhost development
+    // Localhost development — use local API server (start-dev / npm run server).
+    // Override with REACT_APP_API_URL to point at production instead.
     if (hostname === "localhost" || hostname === "127.0.0.1") {
-      // If you're using Render/Supabase as the source of truth, prefer it even when running the UI on localhost.
-      // To use a local backend instead, set REACT_APP_API_URL to "http://localhost:3000" (or your LAN IP).
-      return PRODUCTION_API_URL;
+      return process.env.REACT_APP_API_URL || "http://localhost:3000";
     }
 
     // IP address (local network)

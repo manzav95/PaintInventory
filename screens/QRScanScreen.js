@@ -16,11 +16,17 @@ import {
   useTheme,
   SegmentedButtons,
 } from "react-native-paper";
+import PageHeader from "../components/PageHeader";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 
-export default function QRScanScreen({ onScanResult, onCancel }) {
+export default function QRScanScreen({
+  onScanResult,
+  onCancel,
+  embeddedInShell = false,
+}) {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const isDesktop = isWeb && width > 1024; // iPad is 768-1024px, so >1024 is desktop
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const isTabletOrSmaller = !isDesktop;
 
   // Check if we're on web accessing via IP (not localhost) - camera won't work
@@ -94,6 +100,15 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
     onScanResult(trimmed);
   };
 
+  const cardBg = theme.colors.surfaceContainerHighest;
+  const shellHeader = embeddedInShell ? (
+    <PageHeader
+      title="Check In / Check Out"
+      onBack={onCancel}
+      embeddedInShell
+    />
+  ) : null;
+
   // Desktop: Always show manual input only
   if (isDesktop) {
     return (
@@ -107,10 +122,15 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
           ]}
         >
           <View style={styles.webWrapper}>
+            {shellHeader}
             <Card
               style={[
                 styles.card,
-                { backgroundColor: theme.colors.surface },
+                {
+                  backgroundColor: cardBg,
+                  borderColor: theme.colors.outlineVariant,
+                  borderWidth: 1,
+                },
                 styles.webCard,
               ]}
             >
@@ -168,11 +188,23 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
+      {embeddedInShell && (
+        <View style={styles.shellHeaderWrap}>
+          {shellHeader}
+        </View>
+      )}
       {/* Manual input mode */}
       {inputMode === "manual" && (
         <ScrollView contentContainerStyle={styles.manualContainer}>
           <Card
-            style={[styles.card, { backgroundColor: theme.colors.surface }]}
+            style={[
+              styles.card,
+              {
+                backgroundColor: cardBg,
+                borderColor: theme.colors.outlineVariant,
+                borderWidth: 1,
+              },
+            ]}
           >
             <Card.Content>
               <SegmentedButtons
@@ -261,7 +293,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
               ]}
             >
               <Card
-                style={[styles.card, { backgroundColor: theme.colors.surface }]}
+                style={[styles.card, { backgroundColor: theme.colors.surfaceContainerHighest }]}
               >
                 <Card.Content style={styles.content}>
                   <SegmentedButtons
@@ -298,7 +330,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
           {hasPermission === false && (
             <ScrollView contentContainerStyle={styles.manualContainer}>
               <Card
-                style={[styles.card, { backgroundColor: theme.colors.surface }]}
+                style={[styles.card, { backgroundColor: theme.colors.surfaceContainerHighest }]}
               >
                 <Card.Content style={styles.content}>
                   <SegmentedButtons
@@ -369,7 +401,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
               <Card
                 style={[
                   styles.cardCameraHeader,
-                  { backgroundColor: theme.colors.surface },
+                  { backgroundColor: theme.colors.surfaceContainerHighest },
                 ]}
               >
                 <Card.Content style={styles.cardCameraHeaderContent}>
@@ -422,7 +454,7 @@ export default function QRScanScreen({ onScanResult, onCancel }) {
               <View
                 style={[
                   styles.controls,
-                  { backgroundColor: theme.colors.surface },
+                  { backgroundColor: theme.colors.surfaceContainerHighest },
                 ]}
               >
                 <Button
@@ -547,6 +579,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     marginBottom: 20,
+  },
+  shellHeaderWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    maxWidth: 1200,
+    alignSelf: "center",
+    width: "100%",
   },
   manualContainer: {
     flexGrow: 1,

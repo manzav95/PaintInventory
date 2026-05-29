@@ -247,7 +247,7 @@ export default function ReceivePoModal({
                             {
                               borderColor: theme.colors.outline,
                               backgroundColor: pressed
-                                ? theme.colors.surfaceVariant
+                                ? theme.colors.surfaceContainerHighest
                                 : theme.colors.surface,
                             },
                           ]}

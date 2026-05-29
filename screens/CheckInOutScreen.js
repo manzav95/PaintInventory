@@ -10,8 +10,10 @@ import {
   ScrollView,
 } from "react-native";
 import { Card, Text, Button, TextInput, useTheme } from "react-native-paper";
+import PageHeader from "../components/PageHeader";
 import OrderService from "../services/orderService";
 import { getContrastingTextColors } from "../utils/colorUtils";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 
 function getValidHex(hex) {
   if (!hex || typeof hex !== "string") return null;
@@ -28,12 +30,12 @@ export default function CheckInOutScreen({
   onCancel,
   onOrderSummary = {},
   onReceiveDelivery,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
-  const desktopBreakpoint = 700;
-  const isDesktop = isWeb && width >= desktopBreakpoint;
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [quantity, setQuantity] = useState("");
   const [action, setAction] = useState(null); // 'in' | 'out'
   const [orders, setOrders] = useState([]);
@@ -165,8 +167,17 @@ export default function CheckInOutScreen({
   const sectionBg = hexColor || theme.colors.surfaceVariant;
   const textOnHex = hexColor ? getContrastingTextColors(hexColor) : null;
 
+  const cardBg = theme.colors.surfaceContainerHighest;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      {embeddedInShell && (
+        <PageHeader
+          title="Check In / Check Out"
+          onBack={onCancel}
+          embeddedInShell={embeddedInShell}
+        />
+      )}
       <View style={styles.centeredBlock}>
         <View
           style={[
@@ -202,7 +213,17 @@ export default function CheckInOutScreen({
         </View>
 
         <View style={isDesktop && styles.webWrapper}>
-          <Card style={[styles.card, { backgroundColor: theme.colors.surface }, isDesktop && styles.webCard]}>
+          <Card
+            style={[
+              styles.card,
+              {
+                backgroundColor: cardBg,
+                borderColor: theme.colors.outlineVariant,
+                borderWidth: 1,
+              },
+              isDesktop && styles.webCard,
+            ]}
+          >
           <Card.Content>
             <View style={styles.buttonRow}>
               <Button

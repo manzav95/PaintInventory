@@ -1226,6 +1226,161 @@ class Database {
     return { success: true, updated, skipped, fromFallback, total: result.rows.length };
   }
 
+  /**
+   * Aggregated metrics for Reports screen (week or month buckets).
+   */
+  async getReportsSummary(fromDate, toDate, groupBy = "week") {
+    const trunc = groupBy === "month" ? "month" : "week";
+    const from = fromDate || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
+    const to = toDate || new Date().toISOString().slice(0, 10);
+
+    const auditRows = await this.pool.query(
+      `SELECT
+         date_trunc($1, (timestamp::timestamptz)) AS bucket,
+         action,
+         details
+       FROM audit_log
+       WHERE (timestamp::timestamptz) >= $2::date
+         AND (timestamp::timestamptz) < ($3::date + interval '1 day')
+       ORDER BY bucket ASC`,
+      [trunc, from, to],
+    );
+
+    const orderRows = await this.pool.query(
+      `SELECT
+         date_trunc($1, (o.placed_at::timestamptz)) AS bucket,
+         COALESCE(SUM(ol.quantity), 0)::float AS order_quantity,
+         COALESCE(SUM(ol.quantity * COALESCE(i.price, 0)), 0)::float AS order_value
+       FROM orders o
+       JOIN order_lines ol ON ol.order_id = o.id
+       LEFT JOIN items i ON i.id = ol.item_id
+       WHERE (o.placed_at::timestamptz) >= $2::date
+         AND (o.placed_at::timestamptz) < ($3::date + interval '1 day')
+       GROUP BY bucket
+       ORDER BY bucket ASC`,
+      [trunc, from, to],
+    );
+
+    const usageRows = await this.pool.query(
+      `SELECT
+         date_trunc($1, (entry_date::date)) AS bucket,
+         COALESCE(SUM(qty_gallons), 0)::float AS usage_gallons,
+         COUNT(*)::int AS usage_count
+       FROM material_usage
+       WHERE (entry_date::date) >= $2::date
+         AND (entry_date::date) < ($3::date + interval '1 day')
+       GROUP BY bucket
+       ORDER BY bucket ASC`,
+      [trunc, from, to],
+    );
+
+    const bucketMap = new Map();
+
+    const ensureBucket = (key, label) => {
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, {
+          key,
+          label,
+          checkoutGallons: 0,
+          receivingGallons: 0,
+          orderQuantity: 0,
+          orderValue: 0,
+          materialUsageGallons: 0,
+          materialUsageCount: 0,
+        });
+      }
+      return bucketMap.get(key);
+    };
+
+    const formatBucketLabel = (d) => {
+      if (!d) return "";
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return String(d);
+      if (trunc === "month") {
+        return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      }
+      const end = new Date(dt);
+      end.setDate(end.getDate() + 6);
+      return `${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    };
+
+    for (const row of auditRows.rows) {
+      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
+      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      let details = row.details;
+      if (typeof details === "string") {
+        try {
+          details = JSON.parse(details || "{}");
+        } catch {
+          details = {};
+        }
+      }
+      const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+      const action = row.action;
+      const actionType = details?._actionType;
+      const isCheckout =
+        action === "check_out" ||
+        (action === "update" && actionType === "check_out");
+      const isReceiving =
+        action === "receiving" ||
+        (action === "update" && actionType === "receiving");
+      if (isCheckout) b.checkoutGallons += qty;
+      if (isReceiving) b.receivingGallons += qty;
+    }
+
+    for (const row of orderRows.rows) {
+      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
+      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      b.orderQuantity += parseFloat(row.order_quantity) || 0;
+      b.orderValue += parseFloat(row.order_value) || 0;
+    }
+
+    for (const row of usageRows.rows) {
+      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
+      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      b.materialUsageGallons += parseFloat(row.usage_gallons) || 0;
+      b.materialUsageCount += parseInt(row.usage_count, 10) || 0;
+    }
+
+    const sorted = [...bucketMap.values()].sort((a, b) =>
+      a.key.localeCompare(b.key),
+    );
+
+    const totals = sorted.reduce(
+      (acc, b) => {
+        acc.checkoutGallons += b.checkoutGallons;
+        acc.receivingGallons += b.receivingGallons;
+        acc.orderQuantity += b.orderQuantity;
+        acc.orderValue += b.orderValue;
+        acc.materialUsageGallons += b.materialUsageGallons;
+        acc.materialUsageCount += b.materialUsageCount;
+        return acc;
+      },
+      {
+        checkoutGallons: 0,
+        receivingGallons: 0,
+        orderQuantity: 0,
+        orderValue: 0,
+        materialUsageGallons: 0,
+        materialUsageCount: 0,
+      },
+    );
+
+    return {
+      from,
+      to,
+      groupBy: trunc,
+      buckets: sorted.map((b) => b.label),
+      checkoutGallons: sorted.map((b) => Math.round(b.checkoutGallons * 10) / 10),
+      receivingGallons: sorted.map((b) => Math.round(b.receivingGallons * 10) / 10),
+      orderQuantity: sorted.map((b) => Math.round(b.orderQuantity)),
+      orderValue: sorted.map((b) => Math.round(b.orderValue * 100) / 100),
+      materialUsageGallons: sorted.map((b) => Math.round(b.materialUsageGallons * 10) / 10),
+      materialUsageCount: sorted.map((b) => b.materialUsageCount),
+      totals,
+    };
+  }
+
   close() {
     return this.pool.end();
   }

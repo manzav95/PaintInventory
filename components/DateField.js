@@ -49,7 +49,9 @@ export default function DateField({
     const border = theme.colors?.outline ?? "#ccc";
     const bg = disabled
       ? theme.colors?.surfaceDisabled ?? "#f1f1f1"
-      : theme.colors?.surface ?? "#fff";
+      : theme.colors?.surfaceContainerHighest ??
+        theme.colors?.surface ??
+        "#fff";
     const fg = theme.colors?.onSurface ?? "#111";
     const labelColor = theme.colors?.onSurfaceVariant ?? fg;
     return (

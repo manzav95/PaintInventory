@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, View, Alert, Platform, useWindowDimensions, Modal, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
@@ -25,12 +25,45 @@ import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
+import ReportsScreen from './screens/ReportsScreen';
+import AppShell from './components/AppShell';
+import AppSidebar from './components/AppSidebar';
+import { useAppLayout, shouldUseShell } from './utils/layout';
+import {
+  DARK_SITE_BACKGROUND,
+  DARK_SURFACE_ELEVATED,
+  DARK_BORDER,
+} from './utils/themeColors';
+
+const NEUTRAL_LIGHT = {
+  bg: '#f0f0f0',
+  elevated: '#fafafa',
+  elevatedHigh: '#ffffff',
+  border: '#d0d0d0',
+};
 
 const lightTheme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
     primary: '#6f95ab',
+    primaryContainer: '#d4e3eb',
+    onPrimaryContainer: '#1a3a4a',
+    background: NEUTRAL_LIGHT.bg,
+    surface: NEUTRAL_LIGHT.bg,
+    surfaceVariant: NEUTRAL_LIGHT.elevated,
+    surfaceContainer: NEUTRAL_LIGHT.elevated,
+    surfaceContainerHigh: NEUTRAL_LIGHT.elevated,
+    surfaceContainerHighest: NEUTRAL_LIGHT.elevatedHigh,
+    outlineVariant: NEUTRAL_LIGHT.border,
+    elevation: {
+      level0: NEUTRAL_LIGHT.bg,
+      level1: NEUTRAL_LIGHT.elevated,
+      level2: NEUTRAL_LIGHT.elevated,
+      level3: NEUTRAL_LIGHT.elevatedHigh,
+      level4: NEUTRAL_LIGHT.elevatedHigh,
+      level5: NEUTRAL_LIGHT.elevatedHigh,
+    },
   },
 };
 
@@ -39,16 +72,38 @@ const darkTheme = {
   colors: {
     ...MD3DarkTheme.colors,
     primary: '#6f95ab',
+    primaryContainer: '#3d5058',
+    onPrimaryContainer: '#d0e4ed',
+    secondaryContainer: DARK_SURFACE_ELEVATED,
+    onSecondaryContainer: '#e8e8e8',
+    background: DARK_SITE_BACKGROUND,
+    surface: DARK_SITE_BACKGROUND,
+    surfaceVariant: DARK_SURFACE_ELEVATED,
+    surfaceContainer: DARK_SURFACE_ELEVATED,
+    surfaceContainerHigh: DARK_SURFACE_ELEVATED,
+    surfaceContainerHighest: DARK_SURFACE_ELEVATED,
+    surfaceDisabled: DARK_SURFACE_ELEVATED,
+    outline: DARK_BORDER,
+    outlineVariant: DARK_BORDER,
+    elevation: {
+      level0: DARK_SITE_BACKGROUND,
+      level1: DARK_SURFACE_ELEVATED,
+      level2: DARK_SURFACE_ELEVATED,
+      level3: DARK_SURFACE_ELEVATED,
+      level4: DARK_SURFACE_ELEVATED,
+      level5: DARK_SURFACE_ELEVATED,
+    },
   },
 };
 
 export default function App() {
   const isWeb = Platform.OS === 'web';
-  const { width } = useWindowDimensions();
-  const desktopBreakpoint = 700;
-  const isDesktop = isWeb && width >= desktopBreakpoint;
-  const isNarrowDesktop = isWeb && width >= desktopBreakpoint && width <= 1024;
-  
+  const {
+    showPersistentSidebar,
+    isNarrowDesktop,
+    isWebDesktop,
+  } = useAppLayout();
+
   const [currentScreen, setCurrentScreen] = useState('home');
   const [previousScreen, setPreviousScreen] = useState('home');
   const [nfcStatus, setNfcStatus] = useState({ isSupported: false, isEnabled: false });
@@ -67,13 +122,17 @@ export default function App() {
   const [scanLookupLoading, setScanLookupLoading] = useState(false);
   const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
   const [onOrderSummary, setOnOrderSummary] = useState({});
-  /** Cached open PO list for Receive PO modal — loaded once in background, refreshed after receives. */
+  /** Cached PO list (Receive PO modal + Purchase Orders page) — background load, refresh on demand. */
   const [receiveOrdersCache, setReceiveOrdersCache] = useState(null);
   const [receiveOrdersLoading, setReceiveOrdersLoading] = useState(false);
   const receiveOrdersFetchStarted = useRef(false);
+  /** Cached audit logs (dashboard stats, inventory analytics, transaction history). */
+  const [auditLogsCache, setAuditLogsCache] = useState(null);
+  const [auditLogsLoading, setAuditLogsLoading] = useState(false);
   const recycleSyncInFlight = useRef(false);
   const jobHistorySyncInFlight = useRef(false);
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
+  const [lowStockFilter, setLowStockFilter] = useState(false);
   const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
   const [inventoryViewState, setInventoryViewState] = useState({
     viewMode: 'inventory', // 'inventory' | 'colorBook'
@@ -81,6 +140,35 @@ export default function App() {
     scrollOffset: 0,
   });
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
+  const embeddedInShell = shouldUseShell(currentScreen, showPersistentSidebar);
+
+  const navigateTo = (screen, options = {}) => {
+    if (screen === 'reports' && !isAdmin) {
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(options, 'ordersInitialFilter')) {
+      setOrdersInitialFilter(options.ordersInitialFilter);
+    } else if (screen === 'orders') {
+      setOrdersInitialFilter(null);
+    }
+    if (screen === 'materialUsage' && isWeb && typeof window !== 'undefined') {
+      window.location.hash = '#/material-usage';
+    } else if (screen === 'reports' && isWeb && typeof window !== 'undefined') {
+      window.location.hash = '#/reports';
+    } else if (
+      (screen === 'home' || screen === 'list') &&
+      isWeb &&
+      typeof window !== 'undefined'
+    ) {
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (window.location.search || ''),
+      );
+    }
+    setPreviousScreen(currentScreen);
+    setCurrentScreen(screen);
+  };
 
   // When we have a logged-in user, try to sync any offline check-in/out actions.
   useEffect(() => {
@@ -105,12 +193,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (currentScreen === 'reports' && userName && !isAdmin) {
+      setCurrentScreen('home');
+    }
+  }, [currentScreen, userName, isAdmin]);
+
+  useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const titles = {
         materialUsage: 'Material Usage',
-        orders: 'Upcoming Deliveries',
+        orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         list: 'Inventory',
+        reports: 'Reports',
+        settings: 'Settings',
+        home: 'Dashboard',
       };
       document.title = titles[currentScreen] || 'Paint Inventory';
     }
@@ -124,6 +221,8 @@ export default function App() {
       const path = hash.startsWith('/') ? hash : `/${hash}`;
       if (path === '/material-usage' && userName != null) {
         setCurrentScreen('materialUsage');
+      } else if (path === '/reports' && userName != null && userName === 'admin123') {
+        setCurrentScreen('reports');
       }
     };
     applyHash();
@@ -132,6 +231,8 @@ export default function App() {
       const p = h.startsWith('/') ? h : `/${h}`;
       if (p === '/material-usage' && userName != null) {
         setCurrentScreen('materialUsage');
+      } else if (p === '/reports' && userName != null && userName === 'admin123') {
+        setCurrentScreen('reports');
       }
     };
     window.addEventListener('hashchange', onHashChange);
@@ -158,13 +259,13 @@ export default function App() {
       `;
       document.head.appendChild(style);
     }
-    if (isDesktop) {
+    if (isWebDesktop) {
       document.body.classList.add('hide-desktop-scrollbars');
     } else {
       document.body.classList.remove('hide-desktop-scrollbars');
     }
     return () => document.body.classList.remove('hide-desktop-scrollbars');
-  }, [isDesktop]);
+  }, [isWebDesktop]);
 
   const loadThemePreference = async () => {
     try {
@@ -262,7 +363,31 @@ export default function App() {
     }
   }, [receiveOrdersCache, receiveOrdersLoading]);
 
-  const loadInventory = async (showLoading = false) => {
+  const refreshAuditLogs = useCallback(async (force = false) => {
+    if (auditLogsLoading && !force) return;
+    if (!force && auditLogsCache !== null) return;
+    setAuditLogsLoading(true);
+    try {
+      const logs = await AuditService.list(1000);
+      setAuditLogsCache(Array.isArray(logs) ? logs : []);
+    } catch (e) {
+      console.error('Error prefetching audit logs:', e);
+      if (force) {
+        Alert.alert('Error', e?.message || 'Could not load activity history.');
+      }
+    } finally {
+      setAuditLogsLoading(false);
+    }
+  }, [auditLogsCache, auditLogsLoading]);
+
+  // Background prefetch for logged-in session (no-op if caches already warm).
+  useEffect(() => {
+    if (!userName) return;
+    refreshReceiveOrders(false);
+    refreshAuditLogs(false);
+  }, [userName, refreshReceiveOrders, refreshAuditLogs]);
+
+  const loadInventory = async (showLoading = false, { refreshCaches = false } = {}) => {
     try {
       if (showLoading) {
         setIsRefreshing(true);
@@ -288,8 +413,9 @@ export default function App() {
       const items = await InventoryService.getAllItems();
       setInventory(items);
 
-      // Prefetch open POs for Receive PO (no reload on each modal open).
-      refreshReceiveOrders();
+      // Background prefetch — skipped on later visits unless refreshCaches / cache empty.
+      refreshReceiveOrders(refreshCaches);
+      refreshAuditLogs(refreshCaches);
 
       const needsRecycleBackfill = items.some((i) => {
         const t = (i.type || '').toLowerCase();
@@ -352,7 +478,7 @@ export default function App() {
   };
 
   const handleRefresh = () => {
-    loadInventory(true);
+    loadInventory(true, { refreshCaches: true });
   };
 
   const handleScanNFC = async () => {
@@ -361,7 +487,12 @@ export default function App() {
   };
 
   const handleScanQR = () => {
-    setCurrentScreen('qrscan');
+    navigateTo('qrscan');
+  };
+
+  const exitCheckInFlow = () => {
+    setScannedItem(null);
+    setCurrentScreen(previousScreen || 'home');
   };
 
   const handleAddManual = () => {
@@ -870,75 +1001,24 @@ export default function App() {
       case 'login':
         return <LoginScreen onLogin={handleLogin} isDarkMode={isDarkMode} onToggleDarkMode={toggleDarkMode} />;
       case 'home':
-        // Show dashboard on web/desktop, regular home on mobile
-        if (isDesktop) {
+        if (embeddedInShell) {
           return (
-            <View style={styles.webContainer}>
-              <View style={[styles.webSidebar, isNarrowDesktop && styles.webSidebarNarrow]}>
-                <HomeScreen
-                  onScanQR={handleScanQR}
-                  onAddManual={handleAddManual}
-                  onViewInventory={() => setCurrentScreen('list')}
-                  onOpenRecycleDue={() => {
-                    setRecycleDueFilter(true);
-                    setCurrentScreen('list');
-                  }}
-                  inventory={inventory}
-                  inventoryLoaded={inventoryLoaded}
-                  minQuantity={30}
-                  userName={isAdmin ? 'Admin' : userName}
-                  isAdmin={isAdmin}
-                  onSwitchUser={handleSwitchUser}
-                  isDarkMode={isDarkMode}
-                  onRefresh={handleRefresh}
-                  isRefreshing={isRefreshing}
-                  onToggleDarkMode={toggleDarkMode}
-                  onOpenSettings={() => {
-                    setPreviousScreen('home');
-                    setCurrentScreen('settings');
-                  }}
-                  onOpenPlaceOrder={isAdmin ? () => {
-                    setPreviousScreen('home');
-                    setCurrentScreen('placeOrder');
-                  } : undefined}
-                  onOpenUpcomingOrders={isAdmin ? () => {
-                    setOrdersInitialFilter(null);
-                    setPreviousScreen('home');
-                    setCurrentScreen('orders');
-                  } : undefined}
-                  onOpenBackOrders={isAdmin ? () => {
-                    setOrdersInitialFilter('back_orders');
-                    setPreviousScreen('home');
-                    setCurrentScreen('orders');
-                  } : undefined}
-                  onOpenLateOrders={isAdmin ? () => {
-                    setOrdersInitialFilter('late_orders');
-                    setPreviousScreen('home');
-                    setCurrentScreen('orders');
-                  } : undefined}
-                  onOpenMaterialUsage={() => {
-                    if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
-                    setCurrentScreen('materialUsage');
-                  }}
-                  isWeb={true}
-                />
-              </View>
-              <View style={[styles.webMain, isNarrowDesktop && styles.webMainNarrow]}>
-                <DashboardScreen
-                  inventory={inventory}
-                  inventoryLoaded={inventoryLoaded}
-                  minQuantity={30}
-                  onRefresh={handleRefresh}
-                  isRefreshing={isRefreshing}
-                  showTransactionTable={!isNarrowDesktop}
-                  isAdmin={isAdmin}
-                  onOpenRecycleDue={() => {
-                    setRecycleDueFilter(true);
-                    setCurrentScreen('list');
-                  }}
-                />
-              </View>
-            </View>
+            <DashboardScreen
+              inventory={inventory}
+              inventoryLoaded={inventoryLoaded}
+              minQuantity={30}
+              auditLogs={auditLogsCache ?? []}
+              auditLogsLoaded={auditLogsCache !== null}
+              onRefresh={handleRefresh}
+              isRefreshing={isRefreshing}
+              showTransactionTable={!isNarrowDesktop}
+              isAdmin={isAdmin}
+              embeddedInShell={embeddedInShell}
+              onOpenRecycleDue={() => {
+                setRecycleDueFilter(true);
+                navigateTo('list');
+              }}
+            />
           );
         }
         return (
@@ -984,10 +1064,25 @@ export default function App() {
               setPreviousScreen('home');
               setCurrentScreen('orders');
             } : undefined}
-            onOpenMaterialUsage={() => {
-              if (isWeb && typeof window !== 'undefined') window.location.hash = '#/material-usage';
-              setCurrentScreen('materialUsage');
+            onOpenMaterialUsage={() => navigateTo('materialUsage')}
+            onOpenReports={isAdmin ? () => navigateTo('reports') : undefined}
+            onOpenLowStock={() => {
+              setLowStockFilter(true);
+              setCurrentScreen('list');
             }}
+            auditLogs={auditLogsCache ?? []}
+            auditLogsLoaded={auditLogsCache !== null}
+            onRefreshAuditLogs={() => refreshAuditLogs(true)}
+          />
+        );
+      case 'reports':
+        if (!isAdmin) {
+          return null;
+        }
+        return (
+          <ReportsScreen
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
           />
         );
       case 'scan':
@@ -1000,21 +1095,19 @@ export default function App() {
       case 'qrscan':
         return (
           <QRScanScreen
+            embeddedInShell={embeddedInShell}
             onScanResult={handleScanResult}
-            onCancel={() => setCurrentScreen('home')}
+            onCancel={exitCheckInFlow}
           />
         );
       case 'checkinout':
         return (
           <CheckInOutScreen
+            embeddedInShell={embeddedInShell}
             item={scannedItem}
             onCheckIn={handleCheckIn}
             onCheckOut={handleCheckOut}
-            onCancel={() => {
-              setScannedItem(null);
-              const target = previousScreen || 'home';
-              setCurrentScreen(target);
-            }}
+            onCancel={exitCheckInFlow}
             onOrderSummary={onOrderSummary}
             onReceiveDelivery={handleReceiveDelivery}
           />
@@ -1024,7 +1117,9 @@ export default function App() {
           <AddItemScreen
             inventory={inventory}
             onSave={handleAddItem}
-            onCancel={() => setCurrentScreen('home')}
+            onCancel={() => navigateTo(embeddedInShell ? 'list' : 'home')}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo(embeddedInShell ? 'list' : 'home')}
           />
         );
       case 'detail':
@@ -1040,11 +1135,13 @@ export default function App() {
             onBack={() => setCurrentScreen(previousScreen)}
             isAdmin={isAdmin}
             onOrderSummary={onOrderSummary}
+            embeddedInShell={embeddedInShell}
           />
         );
       case 'list':
         return (
           <InventoryListScreen
+            embeddedInShell={embeddedInShell}
             onRefresh={handleRefresh}
             isRefreshing={isRefreshing}
             inventory={inventory}
@@ -1057,10 +1154,15 @@ export default function App() {
             onRefreshReceiveOrders={refreshReceiveOrders}
             onReceivePoCompleted={() => {
               refreshReceiveOrders(true);
+              refreshAuditLogs(true);
               loadInventory();
             }}
             recycleDueFilter={recycleDueFilter}
             onClearRecycleDueFilter={() => setRecycleDueFilter(false)}
+            initialStockFilter={lowStockFilter ? 'lowStock' : null}
+            onClearStockFilter={() => setLowStockFilter(false)}
+            auditLogs={auditLogsCache ?? []}
+            auditLogsLoaded={auditLogsCache !== null}
             initialViewMode={inventoryViewState.viewMode}
             initialBookFilter={inventoryViewState.bookFilter}
             initialScrollOffset={inventoryViewState.scrollOffset}
@@ -1080,7 +1182,7 @@ export default function App() {
               handleScanResult(code);
             }}
             actorName={actorName}
-            onBack={() => setCurrentScreen('home')}
+            onBack={() => navigateTo(embeddedInShell ? 'home' : 'home')}
           />
         );
       case 'itemHistory':
@@ -1094,15 +1196,25 @@ export default function App() {
       case 'orders':
         return (
           <UpcomingOrdersScreen
+            embeddedInShell={embeddedInShell}
             onBack={() => {
               setOrdersInitialFilter(null);
-              setCurrentScreen(previousScreen);
+              navigateTo(embeddedInShell ? 'home' : previousScreen || 'home');
             }}
             inventory={inventory}
             userName={actorName}
-            onOrdersChanged={() => {
-              loadInventory();
-              if (isAdmin) OrderService.getBackOrderCount().then((c) => {}); // HomeScreen will refresh on return
+            orders={receiveOrdersCache ?? []}
+            ordersLoaded={receiveOrdersCache !== null}
+            ordersLoading={receiveOrdersLoading}
+            onRefreshOrders={() => refreshReceiveOrders(true)}
+            onOrdersChanged={async () => {
+              await refreshReceiveOrders(true);
+              try {
+                const summary = await OrderService.getOnOrderSummary();
+                setOnOrderSummary(summary || {});
+              } catch (e) {
+                console.error('Error refreshing on-order summary:', e);
+              }
             }}
             initialFilter={ordersInitialFilter}
           />
@@ -1112,10 +1224,12 @@ export default function App() {
           <PlaceOrderScreen
             inventory={inventory}
             userName={actorName}
-            onBack={() => setCurrentScreen('home')}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
             onOrderCreated={() => {
               loadInventory();
               refreshReceiveOrders(true);
+              refreshAuditLogs(true);
             }}
           />
         );
@@ -1126,18 +1240,15 @@ export default function App() {
             userName={actorName}
             isAdmin={isAdmin}
             materialUsageOvertime={materialUsageOvertime}
-            onBack={() => {
-              setCurrentScreen('home');
-              if (isWeb && typeof window !== 'undefined') {
-                window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
-              }
-            }}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
           />
         );
       case 'settings':
         return (
           <SettingsScreen
-            onBack={() => setCurrentScreen(previousScreen)}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo(embeddedInShell ? 'home' : previousScreen || 'home')}
             userName={actorName}
             isDarkMode={isDarkMode}
             onToggleDarkMode={toggleDarkMode}
@@ -1154,11 +1265,66 @@ export default function App() {
     }
   };
 
+  const mainContent = renderScreen();
+  const shellWrapped =
+    embeddedInShell && userName ? (
+      <AppShell
+        isNarrowDesktop={isNarrowDesktop}
+        sidebar={
+          <AppSidebar
+            currentScreen={currentScreen}
+            ordersInitialFilter={ordersInitialFilter}
+            isAdmin={isAdmin}
+            userName={userName}
+            inventory={inventory}
+            inventoryLoaded={inventoryLoaded}
+            isRefreshing={isRefreshing}
+            onNavigate={navigateTo}
+            onAddManual={
+              isAdmin
+                ? () => {
+                    setPreviousScreen('home');
+                    navigateTo('add');
+                  }
+                : undefined
+            }
+            onRefresh={handleRefresh}
+            onOpenSettings={() => navigateTo('settings')}
+            onToggleDarkMode={toggleDarkMode}
+            onSwitchUser={handleSwitchUser}
+            minQuantity={30}
+            onOpenRecycleDue={() => {
+              setRecycleDueFilter(true);
+              navigateTo('list');
+            }}
+            onOpenBackOrders={
+              isAdmin
+                ? () => navigateTo('orders', { ordersInitialFilter: 'back_orders' })
+                : undefined
+            }
+            onOpenLateOrders={
+              isAdmin
+                ? () => navigateTo('orders', { ordersInitialFilter: 'late_orders' })
+                : undefined
+            }
+            onOpenLowStock={() => {
+              setLowStockFilter(true);
+              navigateTo('list');
+            }}
+          />
+        }
+      >
+        {mainContent}
+      </AppShell>
+    ) : (
+      mainContent
+    );
+
   return (
     <PaperProvider theme={paperTheme}>
       <View style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}>
         <StatusBar style="auto" />
-        {renderScreen()}
+        {shellWrapped}
         {isActionLoading && (
           <View style={[styles.loadingOverlay, { pointerEvents: "auto" }]}>
             <View style={styles.loadingCard}>
@@ -1191,7 +1357,10 @@ export default function App() {
             <TouchableOpacity
               activeOpacity={1}
               onPress={(e) => e.stopPropagation()}
-              style={[styles.adminDialogCard, { backgroundColor: paperTheme.colors.surface }]}
+              style={[
+                styles.adminDialogCard,
+                { backgroundColor: paperTheme.colors.surfaceContainerHighest },
+              ]}
             >
               <Text style={[styles.adminDialogTitle, { color: paperTheme.colors.onSurface }]}>
                 Item
@@ -1296,7 +1465,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     paddingHorizontal: 32,
     borderRadius: 12,
-    backgroundColor: '#222',
+    backgroundColor: DARK_SURFACE_ELEVATED,
     opacity: 0.95,
   },
   loadingText: {

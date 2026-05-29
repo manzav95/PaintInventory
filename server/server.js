@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const fs = require('fs');
 const db = require('./database');
+const { sendLowStockAlertEmail } = require('./lowStockAlertEmail');
 
 // Try to load optional dependencies (for Excel export)
 let XLSX, cron;
@@ -400,6 +401,19 @@ app.post('/api/settings/paint-external-suffix', async (req, res) => {
   }
 });
 
+app.get('/api/reports/summary', async (req, res) => {
+  try {
+    const fromDate = (req.query.from && String(req.query.from).trim()) || null;
+    const toDate = (req.query.to && String(req.query.to).trim()) || null;
+    const groupBy = req.query.groupBy === 'month' ? 'month' : 'week';
+    const summary = await db.getReportsSummary(fromDate, toDate, groupBy);
+    res.json(summary);
+  } catch (error) {
+    console.error('Error fetching reports summary:', error);
+    res.status(500).json({ error: 'Failed to fetch reports summary' });
+  }
+});
+
 // Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {
@@ -791,6 +805,30 @@ app.post('/api/export/save', async (req, res) => {
   } catch (error) {
     console.error('Error saving Excel:', error);
     res.status(500).json({ error: 'Failed to save Excel file', details: error.message });
+  }
+});
+
+// Low-stock alert email (standard users → purchasing)
+app.post('/api/notifications/low-stock-alert', async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const requestedBy = String(req.body?.requestedBy || '').trim() || 'unknown';
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'No items to report' });
+    }
+    const result = await sendLowStockAlertEmail({ items, requestedBy });
+    if (result.success) {
+      return res.json(result);
+    }
+    res.json({
+      success: false,
+      mailtoUrl: result.mailtoUrl,
+      error: result.error,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error('Low-stock alert email error:', error);
+    res.status(500).json({ error: error.message || 'Failed to send alert' });
   }
 });
 

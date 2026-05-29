@@ -12,11 +12,14 @@ import {
   Alert,
 } from "react-native";
 import ReceivePoModal from "../components/ReceivePoModal";
+import PageHeader from "../components/PageHeader";
+import MetricStrip from "../components/MetricStrip";
+import ToolbarCard from "../components/ToolbarCard";
+import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import {
   Card,
   Text,
   Button,
-  Searchbar,
   useTheme,
   IconButton,
   ActivityIndicator,
@@ -151,6 +154,10 @@ export default function InventoryListScreen({
   onOrderSummary = {},
   recycleDueFilter = false,
   onClearRecycleDueFilter,
+  initialStockFilter = null,
+  onClearStockFilter,
+  auditLogs: auditLogsFromApp,
+  auditLogsLoaded: auditLogsLoadedFromApp = false,
   onScanCode,
   actorName = null,
   receiveOrdersList = [],
@@ -162,6 +169,7 @@ export default function InventoryListScreen({
   initialBookFilter,
   initialScrollOffset = 0,
   onViewStateChange,
+  embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -177,7 +185,9 @@ export default function InventoryListScreen({
   const [listOrderMode, setListOrderMode] = useState("alphabetical"); // 'alphabetical' | 'trueOrder'
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
   const [apOnly, setApOnly] = useState(false);
-  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogsLocal, setAuditLogsLocal] = useState([]);
+  const useCachedAudit = auditLogsLoadedFromApp;
+  const auditLogs = useCachedAudit ? auditLogsFromApp : auditLogsLocal;
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
@@ -353,11 +363,12 @@ export default function InventoryListScreen({
   }, [initialScrollOffset]);
 
   useEffect(() => {
+    if (useCachedAudit) return;
     let cancelled = false;
     (async () => {
       try {
         const logs = await AuditService.list(1000);
-        if (!cancelled) setAuditLogs(logs);
+        if (!cancelled) setAuditLogsLocal(logs);
       } catch (e) {
         if (!cancelled) console.error("InventoryListScreen audit load:", e);
       }
@@ -365,7 +376,7 @@ export default function InventoryListScreen({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [useCachedAudit]);
 
   useEffect(() => {
     if (recycleDueFilter) {
@@ -374,8 +385,15 @@ export default function InventoryListScreen({
     }
   }, [recycleDueFilter]);
 
+  useEffect(() => {
+    if (initialStockFilter) {
+      setStockFilter(initialStockFilter);
+    }
+  }, [initialStockFilter]);
+
   const handleBack = () => {
     onClearRecycleDueFilter?.();
+    onClearStockFilter?.();
     onBack();
   };
 
@@ -748,7 +766,7 @@ export default function InventoryListScreen({
                 styles.colorModalNameRow,
                 {
                   backgroundColor: theme.dark
-                    ? "rgba(255,255,255,0.06)"
+                    ? theme.colors.surfaceContainerHighest
                     : "rgba(0,0,0,0.04)",
                 },
               ]}
@@ -835,7 +853,9 @@ export default function InventoryListScreen({
       ? {
           borderLeftWidth: 4,
           borderLeftColor: "#ff6b6b",
-          backgroundColor: theme.dark ? "#3a3a3a" : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
+          backgroundColor: theme.dark
+            ? theme.colors.surfaceContainerHighest
+            : "#fef5f5",
         }
       : null;
 
@@ -1047,22 +1067,13 @@ export default function InventoryListScreen({
         ]}
       >
         <View style={[styles.webContainer, styles.webContainerFlex]}>
-          {/* Header */}
-          <View style={styles.webHeader}>
-            <View style={styles.webHeaderLeft}>
-              <Button
-                icon="arrow-left"
-                onPress={handleBack}
-                mode="text"
-                style={styles.backButton}
-              >
-                Back
-              </Button>
-              <Title style={styles.webTitle}>Inventory Dashboard</Title>
-            </View>
-            <View style={styles.refreshContainer}>
-              {viewMode === "colorBook" && (
-                <View style={[styles.headerFilterGroup, { marginRight: 8 }]}>
+          <PageHeader
+            title="Inventory Dashboard"
+            onBack={handleBack}
+            embeddedInShell={embeddedInShell}
+            actions={
+              <>
+                {viewMode === "colorBook" && (
                   <Button
                     mode={bookFilter === "standard" ? "outlined" : "contained"}
                     compact
@@ -1071,27 +1082,25 @@ export default function InventoryListScreen({
                         prev === "standard" ? "custom" : "standard",
                       )
                     }
-                    style={styles.viewModeButton}
                   >
                     {bookFilter === "standard" ? "Custom" : "Stock"}
                   </Button>
-                </View>
-              )}
-              <Button
-                mode={viewMode === "colorBook" ? "contained" : "outlined"}
-                compact
-                onPress={() =>
-                  setViewMode(
-                    viewMode === "colorBook" ? "inventory" : "colorBook",
-                  )
-                }
-                style={styles.viewModeButtonColorBook}
-                icon="palette-outline"
-              >
-                {viewMode === "colorBook" ? "Inventory" : "Color Book"}
-              </Button>
-            </View>
-          </View>
+                )}
+                <Button
+                  mode={viewMode === "colorBook" ? "contained" : "outlined"}
+                  compact
+                  onPress={() =>
+                    setViewMode(
+                      viewMode === "colorBook" ? "inventory" : "colorBook",
+                    )
+                  }
+                  icon="palette-outline"
+                >
+                  {viewMode === "colorBook" ? "Inventory" : "Color Book"}
+                </Button>
+              </>
+            }
+          />
 
           {recycleDueFilter && (
             <View style={styles.recycleDueBanner}>
@@ -1105,18 +1114,36 @@ export default function InventoryListScreen({
               )}
             </View>
           )}
+          {initialStockFilter === "lowStock" && stockFilter === "lowStock" && (
+            <View style={styles.recycleDueBanner}>
+              <Text style={styles.recycleDueBannerText}>
+                Showing: Low Stock Items
+              </Text>
+              {onClearStockFilter && (
+                <Button
+                  mode="text"
+                  compact
+                  onPress={() => {
+                    setStockFilter(null);
+                    onClearStockFilter();
+                  }}
+                >
+                  Clear Filter
+                </Button>
+              )}
+            </View>
+          )}
 
           {/* Color Book view (desktop): 4-column grid */}
           {viewMode === "colorBook" ? (
             <View
               style={[styles.webContentCentered, styles.webContentCenteredFlex]}
             >
-              <Searchbar
+              <OutlinedSearchInput
                 placeholder="Search colors by name or ID — Enter scans ID/barcode for check in/out"
                 onChangeText={setSearchQuery}
                 value={searchQuery}
                 style={styles.colorBookSearchbar}
-                inputStyle={styles.searchbarInput}
                 onSubmitEditing={handleSearchSubmit}
                 blurOnSubmit={false}
                 autoCorrect={false}
@@ -1159,7 +1186,17 @@ export default function InventoryListScreen({
               >
                 {/* Analytics Cards */}
                 <View style={styles.analyticsRow}>
-                  <Card style={styles.analyticsCard}>
+                  <Card
+                    style={[
+                      styles.analyticsCard,
+                      {
+                        backgroundColor: theme.colors.surfaceContainerHighest,
+                        borderColor: theme.colors.outlineVariant,
+                        borderWidth: 1,
+                      },
+                    ]}
+                    mode="outlined"
+                  >
                     <Card.Content style={styles.analyticsCardContent}>
                       <Text style={styles.analyticsLabel}>Total Gallons</Text>
                       <Title style={styles.analyticsValue}>
@@ -1184,7 +1221,17 @@ export default function InventoryListScreen({
                         )
                       }
                     >
-                      <Card style={styles.analyticsCardInner}>
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor: theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
                         <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Low Stock
@@ -1219,7 +1266,17 @@ export default function InventoryListScreen({
                         )
                       }
                     >
-                      <Card style={styles.analyticsCardInner}>
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor: theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
                         <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Out of Stock
@@ -1241,7 +1298,17 @@ export default function InventoryListScreen({
                     style={[styles.analyticsCard, styles.analyticsCardFilter]}
                     onPress={() => setGalPeriodWeek((prev) => !prev)}
                   >
-                    <Card style={styles.analyticsCardInner}>
+                    <Card
+                      style={[
+                        styles.analyticsCardInner,
+                        {
+                          backgroundColor: theme.colors.surfaceContainerHighest,
+                          borderColor: theme.colors.outlineVariant,
+                          borderWidth: 1,
+                        },
+                      ]}
+                      mode="outlined"
+                    >
                       <Card.Content style={styles.analyticsCardContent}>
                         <Text style={styles.analyticsLabel}>
                           Checked out this {galPeriodWeek ? "week" : "month"}
@@ -1268,7 +1335,17 @@ export default function InventoryListScreen({
                       style={[styles.analyticsCard, styles.analyticsCardFilter]}
                       onPress={() => setMostUsedByWeek((prev) => !prev)}
                     >
-                      <Card style={styles.analyticsCardInner}>
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor: theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
                         <Card.Content style={styles.analyticsCardContent}>
                           <Text style={styles.analyticsLabel}>
                             Most gallons checked out
@@ -1296,7 +1373,17 @@ export default function InventoryListScreen({
 
                 {/* Search and Table - fills remaining height, scrolls internally */}
                 <View style={styles.tableCardWrapper}>
-                  <Card style={styles.tableCardFlex}>
+                  <Card
+                    style={[
+                      styles.tableCardFlex,
+                      {
+                        backgroundColor: theme.colors.surfaceContainerHighest,
+                        borderColor: theme.colors.outlineVariant,
+                        borderWidth: 1,
+                      },
+                    ]}
+                    mode="outlined"
+                  >
                     <Card.Content style={styles.tableCardContentFlex}>
                       <View style={styles.tableHeader}>
                         <View style={styles.tableHeaderTopRow}>
@@ -1374,12 +1461,11 @@ export default function InventoryListScreen({
                           </View>
                         </View>
                         <View style={styles.tableHeaderSearchRow}>
-                          <Searchbar
+                          <OutlinedSearchInput
                             placeholder="Search or Scan"
                             onChangeText={setSearchQuery}
                             value={searchQuery}
                             style={styles.webSearchbar}
-                            inputStyle={styles.searchbarInput}
                             onSubmitEditing={handleSearchSubmit}
                             blurOnSubmit={false}
                             autoCorrect={false}
@@ -1537,8 +1623,8 @@ export default function InventoryListScreen({
                                         isLowStock
                                           ? {
                                               backgroundColor: theme.dark
-                                                ? "#3a3a3a"
-                                                : "#fef5f5", // Subtle gray in dark mode, very light pink in light mode
+                                                ? theme.colors.surfaceContainerHighest
+                                                : "#fef5f5",
                                               borderLeftWidth: 4,
                                               borderLeftColor: "#ff6b6b",
                                             }
@@ -2032,7 +2118,7 @@ export default function InventoryListScreen({
                     : "Stock - Alphabetical"}
             </Text>
           </View>
-          <Searchbar
+          <OutlinedSearchInput
             placeholder={
               viewMode === "colorBook" ? "Search colors" : "Search or Scan"
             }
@@ -2392,7 +2478,7 @@ export default function InventoryListScreen({
                   : "Stock - Alphabetical"}
           </Text>
         </View>
-        <Searchbar
+        <OutlinedSearchInput
           placeholder={
             viewMode === "colorBook" ? "Search colors" : "Search or Scan"
           }
@@ -2518,7 +2604,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     minHeight: 48,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   headerMobilePortrait: {
     paddingHorizontal: 16,
@@ -2574,8 +2660,8 @@ const styles = StyleSheet.create({
   searchbar: {
     margin: 0,
     height: 52,
-    justifyContent: "center",
-    alignItems: "center",
+    width: "100%",
+    alignSelf: "stretch",
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   receivePoButton: {
@@ -2980,7 +3066,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   webHeaderLeft: {
     flexDirection: "row",
@@ -3148,8 +3234,8 @@ const styles = StyleSheet.create({
     flex: 1,
     elevation: 0,
     height: 52,
-    justifyContent: "center",
-    alignItems: "center",
+    width: "100%",
+    alignSelf: "stretch",
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   colorBookSearchbar: {
@@ -3157,8 +3243,8 @@ const styles = StyleSheet.create({
     elevation: 0,
     height: 52,
     maxHeight: 52,
-    justifyContent: "center",
-    alignItems: "center",
+    width: "100%",
+    alignSelf: "stretch",
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   searchbarInput: {

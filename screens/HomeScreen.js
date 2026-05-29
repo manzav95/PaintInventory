@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
-import OrderService from "../services/orderService";
+import NotificationsBell from "../components/NotificationsBell";
 import version from "../version";
 
 function formatAction(action, details) {
@@ -76,21 +76,6 @@ function getQuantityDisplay(action, details) {
   return "-";
 }
 
-const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
-function isRecycleDue(item) {
-  const t = (item.type || "").toLowerCase();
-  if (!CUSTOM_TYPES.includes(t)) return false;
-  const qty = item.quantity || 0;
-  if (qty <= 0) return false;
-  const rd = item.recycle_date;
-  if (!rd) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const recycleDate = new Date(rd);
-  recycleDate.setHours(0, 0, 0, 0);
-  return recycleDate.getTime() <= today.getTime();
-}
-
 export default function HomeScreen({
   onScanQR,
   onAddManual,
@@ -111,72 +96,47 @@ export default function HomeScreen({
   onOpenUpcomingOrders,
   onOpenBackOrders,
   onOpenLateOrders,
+  onOpenLowStock,
   onOpenMaterialUsage,
+  onOpenReports,
+  auditLogs: auditLogsFromApp,
+  auditLogsLoaded: auditLogsLoadedFromApp = false,
+  onRefreshAuditLogs,
   isWeb = false,
 }) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width > 1024;
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [auditLogsLoading, setAuditLogsLoading] = useState(!isDesktop);
-  const [auditLogsLoaded, setAuditLogsLoaded] = useState(false);
-  const [backOrderCount, setBackOrderCount] = useState(0);
-  const [lateOrderCount, setLateOrderCount] = useState(0);
+  const [auditLogsLocal, setAuditLogsLocal] = useState([]);
+  const useCachedAudit = auditLogsLoadedFromApp;
+  const auditLogs = useCachedAudit ? auditLogsFromApp : auditLogsLocal;
+  const [auditLogsLoading, setAuditLogsLoading] = useState(
+    !isDesktop && !useCachedAudit,
+  );
+  const auditLogsLoaded = useCachedAudit || auditLogsLocal.length > 0;
   // Admin only: 'all' = full transaction history, 'reduced' = what standard users see
   const [transactionHistoryView, setTransactionHistoryView] = useState("all");
 
-  const lowStockItems = useMemo(
-    () =>
-      inventory.filter(
-        (item) =>
-          (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30),
-      ),
-    [inventory, minQuantity],
-  );
-
-  const recycleDueCount = useMemo(
-    () => inventory.filter((item) => isRecycleDue(item)).length,
-    [inventory],
-  );
-
   const loadAuditLogs = async () => {
+    if (onRefreshAuditLogs) {
+      await onRefreshAuditLogs();
+      return;
+    }
     setAuditLogsLoading(true);
     try {
       const logs = await AuditService.list(200);
-      setAuditLogs(Array.isArray(logs) ? logs : []);
+      setAuditLogsLocal(Array.isArray(logs) ? logs : []);
     } catch (e) {
       console.error("HomeScreen audit load:", e);
     } finally {
       setAuditLogsLoading(false);
-      setAuditLogsLoaded(true);
     }
   };
 
   useEffect(() => {
+    if (useCachedAudit) return;
     loadAuditLogs();
-  }, []);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [back, late] = await Promise.all([
-          OrderService.getBackOrderCount(),
-          OrderService.getLateOrderCount(),
-        ]);
-        if (!cancelled) {
-          setBackOrderCount(back);
-          setLateOrderCount(late);
-        }
-      } catch (e) {
-        if (!cancelled) console.error("HomeScreen order counts:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin]);
+  }, [useCachedAudit]);
 
   const weekAgoStart = useMemo(() => {
     const d = new Date();
@@ -287,7 +247,11 @@ export default function HomeScreen({
 
   const handleRefresh = async () => {
     await onRefresh?.();
-    await loadAuditLogs();
+    if (onRefreshAuditLogs) {
+      await onRefreshAuditLogs();
+    } else {
+      await loadAuditLogs();
+    }
     if (isAdmin) {
       try {
         const [back, late] = await Promise.all([
@@ -527,6 +491,16 @@ export default function HomeScreen({
           Material Usage
         </Button>
       )}
+      {onOpenReports && (
+        <Button
+          mode="outlined"
+          onPress={onOpenReports}
+          style={styles.button}
+          icon="chart-line"
+        >
+          Reports
+        </Button>
+      )}
     </View>
   );
 
@@ -542,6 +516,18 @@ export default function HomeScreen({
         <View style={styles.headerBar}>
           <Title style={styles.title}>Paint Inventory</Title>
           <View style={styles.headerButtons}>
+            <NotificationsBell
+              inventory={inventory}
+              inventoryLoaded={inventoryLoaded}
+              minQuantity={minQuantity}
+              isAdmin={isAdmin}
+              userName={userName}
+              onOpenRecycleDue={onOpenRecycleDue}
+              onOpenBackOrders={onOpenBackOrders}
+              onOpenLateOrders={onOpenLateOrders}
+              onOpenLowStock={onOpenLowStock}
+              iconSize={24}
+            />
             {onOpenMaterialUsage && (
               <IconButton
                 icon="chart-box"
@@ -578,6 +564,17 @@ export default function HomeScreen({
         <View style={styles.webHeader}>
           <Title style={styles.webTitle}>Paint Inventory</Title>
           <View style={styles.webHeaderButtons}>
+            <NotificationsBell
+              inventory={inventory}
+              inventoryLoaded={inventoryLoaded}
+              minQuantity={minQuantity}
+              isAdmin={isAdmin}
+              userName={userName}
+              onOpenRecycleDue={onOpenRecycleDue}
+              onOpenBackOrders={onOpenBackOrders}
+              onOpenLateOrders={onOpenLateOrders}
+              onOpenLowStock={onOpenLowStock}
+            />
             {onOpenMaterialUsage && (
               <IconButton
                 icon="chart-box"
@@ -620,220 +617,23 @@ export default function HomeScreen({
         }
       >
         <View style={styles.content}>
+          {!inventoryLoaded && (
+            <View style={styles.alertsLoadingRow}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <Text
+                style={[
+                  styles.alertsLoadingText,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Loading inventory…
+              </Text>
+            </View>
+          )}
           {isDesktop ? (
-            <>
-              {!inventoryLoaded ? (
-                <>
-                  <Card style={styles.card}>
-                    <Card.Content>
-                      <Text style={styles.statLabel}>
-                        Paint Need to Recycle
-                      </Text>
-                      <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator
-                          size="small"
-                          color={theme.colors.primary}
-                        />
-                        <Text style={styles.statLoadingText}>Loading…</Text>
-                      </View>
-                    </Card.Content>
-                  </Card>
-                  {onOpenBackOrders && (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Back Orders</Text>
-                        <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator
-                            size="small"
-                            color={theme.colors.primary}
-                          />
-                          <Text style={styles.statLoadingText}>Loading…</Text>
-                        </View>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {onOpenLateOrders && (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Late Orders</Text>
-                        <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator
-                            size="small"
-                            color={theme.colors.primary}
-                          />
-                          <Text style={styles.statLoadingText}>Loading…</Text>
-                        </View>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  <Card style={styles.card}>
-                    <Card.Content>
-                      <Text style={styles.statLabel}>Low Stock</Text>
-                      <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator
-                          size="small"
-                          color={theme.colors.primary}
-                        />
-                        <Text style={styles.statLoadingText}>Loading…</Text>
-                      </View>
-                    </Card.Content>
-                  </Card>
-                </>
-              ) : (
-                <>
-                  {recycleDueCount > 0 && onOpenRecycleDue && (
-                    <Card style={styles.card} onPress={onOpenRecycleDue}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>
-                          Paint Need to Recycle
-                        </Text>
-                        <Title style={[styles.statValue, { color: "#e65100" }]}>
-                          {recycleDueCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View List</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {backOrderCount > 0 && onOpenBackOrders && (
-                    <Card style={styles.card} onPress={onOpenBackOrders}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Back Orders</Text>
-                        <Title style={[styles.statValue, { color: "#ff9800" }]}>
-                          {backOrderCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {lateOrderCount > 0 && onOpenLateOrders && (
-                    <Card style={styles.card} onPress={onOpenLateOrders}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Late Orders</Text>
-                        <Title style={[styles.statValue, { color: "#d32f2f" }]}>
-                          {lateOrderCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {lowStockItems.length > 0 ? (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>
-                          Low Stock ({"< 30"} gallons)
-                        </Text>
-                        {lowStockItems.map((item) => (
-                          <View key={item.id} style={styles.lowStockItem}>
-                            <Text style={styles.lowStockName}>
-                              {item.name || "Unnamed"}
-                            </Text>
-                            <Text style={styles.lowStockQty}>
-                              {item.quantity || 0} gal
-                            </Text>
-                          </View>
-                        ))}
-                      </Card.Content>
-                    </Card>
-                  ) : (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>
-                          All paints in stock
-                        </Text>
-                        <Text style={styles.statValue}>✓</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                </>
-              )}
-              {actionButtons}
-            </>
+            <>{actionButtons}</>
           ) : (
             <>
-              {!inventoryLoaded ? (
-                <>
-                  <Card style={styles.card}>
-                    <Card.Content>
-                      <Text style={styles.statLabel}>
-                        Paint Need to Recycle
-                      </Text>
-                      <View style={styles.statValueSkeleton}>
-                        <ActivityIndicator
-                          size="small"
-                          color={theme.colors.primary}
-                        />
-                        <Text style={styles.statLoadingText}>Loading…</Text>
-                      </View>
-                    </Card.Content>
-                  </Card>
-                  {onOpenBackOrders && (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Back Orders</Text>
-                        <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator
-                            size="small"
-                            color={theme.colors.primary}
-                          />
-                          <Text style={styles.statLoadingText}>Loading…</Text>
-                        </View>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {onOpenLateOrders && (
-                    <Card style={styles.card}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Late Orders</Text>
-                        <View style={styles.statValueSkeleton}>
-                          <ActivityIndicator
-                            size="small"
-                            color={theme.colors.primary}
-                          />
-                          <Text style={styles.statLoadingText}>Loading…</Text>
-                        </View>
-                      </Card.Content>
-                    </Card>
-                  )}
-                </>
-              ) : (
-                <>
-                  {recycleDueCount > 0 && onOpenRecycleDue && (
-                    <Card style={styles.card} onPress={onOpenRecycleDue}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>
-                          Paint Need to Recycle
-                        </Text>
-                        <Title style={[styles.statValue, { color: "#e65100" }]}>
-                          {recycleDueCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View List</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {backOrderCount > 0 && onOpenBackOrders && (
-                    <Card style={styles.card} onPress={onOpenBackOrders}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Back Orders</Text>
-                        <Title style={[styles.statValue, { color: "#ff9800" }]}>
-                          {backOrderCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                  {lateOrderCount > 0 && onOpenLateOrders && (
-                    <Card style={styles.card} onPress={onOpenLateOrders}>
-                      <Card.Content>
-                        <Text style={styles.statLabel}>Late Orders</Text>
-                        <Title style={[styles.statValue, { color: "#d32f2f" }]}>
-                          {lateOrderCount}
-                        </Title>
-                        <Text style={styles.statHint}>Tap to View</Text>
-                      </Card.Content>
-                    </Card>
-                  )}
-                </>
-              )}
               {actionButtons}
               {transactionSection}
             </>
@@ -870,7 +670,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     backgroundColor: "transparent",
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   headerButtons: {
     flexDirection: "row",
@@ -903,6 +703,15 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 30,
     elevation: 4,
+  },
+  alertsLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  alertsLoadingText: {
+    fontSize: 14,
   },
   statValueSkeleton: {
     flexDirection: "row",
@@ -940,7 +749,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   lowStockName: {
     fontSize: 16,
@@ -1101,7 +910,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: "transparent",
   },
   webTitle: {
     fontSize: 20,

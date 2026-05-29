@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Modal, View, StyleSheet, Pressable } from "react-native";
-import { Text, Button, ActivityIndicator } from "react-native-paper";
+import { Text, Button, ActivityIndicator, useTheme } from "react-native-paper";
+import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import { CameraView, useCameraPermissions } from "expo-camera";
 
 /**
@@ -16,6 +17,7 @@ export default function CameraColorPickerModal({
   onClose,
   onColorPicked,
 }) {
+  const theme = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [isRequesting, setIsRequesting] = useState(false);
   const [sampleHex, setSampleHex] = useState("#808080");
@@ -49,7 +51,15 @@ export default function CameraColorPickerModal({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <View style={styles.sheet}>
+        <View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor:
+                theme.colors.surfaceContainerHighest ?? DARK_SURFACE_ELEVATED,
+            },
+          ]}
+        >
           <Text style={styles.title}>Pick color from camera</Text>
           {!canShowCamera ? (
             <View style={styles.permissionBlock}>
@@ -125,7 +135,6 @@ const styles = StyleSheet.create({
     maxWidth: 480,
     borderRadius: 16,
     padding: 16,
-    backgroundColor: "#111319",
     zIndex: 2,
   },
   title: {
