@@ -2,6 +2,8 @@ import { Platform, useWindowDimensions } from "react-native";
 
 export const DESKTOP_BREAKPOINT = 700;
 export const LANDSCAPE_SIDEBAR_MIN_WIDTH = 600;
+/** Web viewports above this width hide the dedicated Check In / Out control (sidebar / home). */
+export const CHECK_IN_OUT_HIDE_MIN_WIDTH = 1024;
 
 /** Screens that stay full-screen (no persistent sidebar) on any layout. */
 export const FULLSCREEN_ROUTES = new Set(["login", "scan"]);
@@ -17,6 +19,8 @@ export function useAppLayout() {
   const isNarrowDesktop =
     isWeb && width >= DESKTOP_BREAKPOINT && width <= 1024;
   const isWebDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
+  const showCheckInOutNav =
+    !isWeb || width <= CHECK_IN_OUT_HIDE_MIN_WIDTH;
 
   return {
     width,
@@ -28,6 +32,7 @@ export function useAppLayout() {
     isNarrowDesktop,
     isWebDesktop,
     isDesktop: isWebDesktop,
+    showCheckInOutNav,
   };
 }
 

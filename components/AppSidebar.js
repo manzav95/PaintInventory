@@ -52,6 +52,7 @@ export default function AppSidebar({
   onOpenBackOrders,
   onOpenLateOrders,
   onOpenLowStock,
+  showCheckInOutNav = true,
 }) {
   const theme = useTheme();
 
@@ -111,12 +112,14 @@ export default function AppSidebar({
         active={currentScreen === "home"}
         onPress={() => onNavigate("home")}
       />
-      <NavButton
-        label="Check In / Check Out"
-        icon="keyboard"
-        active={currentScreen === "qrscan" || currentScreen === "checkinout"}
-        onPress={() => onNavigate("qrscan")}
-      />
+      {showCheckInOutNav && (
+        <NavButton
+          label="Check In / Check Out"
+          icon="keyboard"
+          active={currentScreen === "qrscan" || currentScreen === "checkinout"}
+          onPress={() => onNavigate("qrscan")}
+        />
+      )}
       <NavButton
         label="View Inventory"
         icon="format-list-bulleted"

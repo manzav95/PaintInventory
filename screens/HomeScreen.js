@@ -445,14 +445,16 @@ export default function HomeScreen({
           Add Item
         </Button>
       )}
-      <Button
-        mode="contained"
-        onPress={onScanQR}
-        style={styles.button}
-        icon={isDesktop ? "keyboard" : "qrcode-scan"}
-      >
-        {qrButtonText}
-      </Button>
+      {!isDesktop && (
+        <Button
+          mode="contained"
+          onPress={onScanQR}
+          style={styles.button}
+          icon="qrcode-scan"
+        >
+          {qrButtonText}
+        </Button>
+      )}
       <Button
         mode="outlined"
         onPress={onViewInventory}

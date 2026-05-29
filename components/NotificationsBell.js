@@ -12,6 +12,7 @@ import {
 } from "react-native-paper";
 import OrderService from "../services/orderService";
 import NotificationService from "../services/notificationService";
+import { NOTIFICATION_BADGE_RED } from "../utils/themeColors";
 import {
   isRecycleDue,
   getLowStockItems,
@@ -219,7 +220,7 @@ export default function NotificationsBell({
         />
         {inventoryLoaded && badgeCount > 0 && (
           <View
-            style={[styles.badge, { backgroundColor: theme.colors.error }]}
+            style={[styles.badge, { backgroundColor: NOTIFICATION_BADGE_RED }]}
           >
             <Text style={styles.badgeText}>{badgeCount}</Text>
           </View>

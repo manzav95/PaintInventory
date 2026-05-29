@@ -102,6 +102,7 @@ export default function App() {
     showPersistentSidebar,
     isNarrowDesktop,
     isWebDesktop,
+    showCheckInOutNav,
   } = useAppLayout();
 
   const [currentScreen, setCurrentScreen] = useState('home');
@@ -1311,6 +1312,7 @@ export default function App() {
               setLowStockFilter(true);
               navigateTo('list');
             }}
+            showCheckInOutNav={showCheckInOutNav}
           />
         }
       >
