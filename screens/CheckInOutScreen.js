@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -11,9 +11,39 @@ import {
 } from "react-native";
 import { Card, Text, Button, TextInput, useTheme } from "react-native-paper";
 import PageHeader from "../components/PageHeader";
-import OrderService from "../services/orderService";
 import { getContrastingTextColors } from "../utils/colorUtils";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+
+function lineItemId(line) {
+  return line?.itemId ?? line?.item_id;
+}
+
+function lineOrderedQty(line) {
+  const q = line?.quantity ?? line?.qty;
+  const n = Number(q);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function lineReceivedQty(line) {
+  const q = line?.received_quantity ?? line?.receivedQuantity;
+  if (q === undefined || q === null || q === "") return 0;
+  const n = Number(q);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function lineRemainingQty(line) {
+  return Math.max(0, lineOrderedQty(line) - lineReceivedQty(line));
+}
+
+function getLineForItemId(order, itemIdStr) {
+  return (order?.lines || []).find((l) => String(lineItemId(l)) === itemIdStr);
+}
+
+function orderHasReceivableLineForItem(order, itemIdStr) {
+  if (order?.status !== "open" || !itemIdStr) return false;
+  const line = getLineForItemId(order, itemIdStr);
+  return line != null && lineRemainingQty(line) > 0;
+}
 
 function getValidHex(hex) {
   if (!hex || typeof hex !== "string") return null;
@@ -30,6 +60,10 @@ export default function CheckInOutScreen({
   onCancel,
   onOrderSummary = {},
   onReceiveDelivery,
+  receiveOrdersList = [],
+  receiveOrdersLoaded = false,
+  receiveOrdersLoading = false,
+  onRefreshReceiveOrders,
   embeddedInShell = false,
 }) {
   const theme = useTheme();
@@ -38,7 +72,6 @@ export default function CheckInOutScreen({
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [quantity, setQuantity] = useState("");
   const [action, setAction] = useState(null); // 'in' | 'out'
-  const [orders, setOrders] = useState([]);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [receiveQty, setReceiveQty] = useState("");
@@ -56,24 +89,27 @@ export default function CheckInOutScreen({
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
   const quickQtyOptions = [5, 10, 15, 20];
 
-  const hasUpcomingOrder = item && (onOrderSummary[item.id]?.quantity > 0);
-  const openOrdersWithItem = (orders || []).filter(
-    (o) => o.status === "open" && (o.lines || []).some((l) => String(l.itemId) === String(item?.id)),
-  );
+  const itemIdStr = item?.id != null ? String(item.id) : "";
+  const hasUpcomingOrder =
+    !!itemIdStr && (onOrderSummary[item.id]?.quantity > 0 ||
+      onOrderSummary[itemIdStr]?.quantity > 0);
+
+  const openOrdersWithItem = useMemo(() => {
+    if (!itemIdStr) return [];
+    return (receiveOrdersList || []).filter((o) =>
+      orderHasReceivableLineForItem(o, itemIdStr),
+    );
+  }, [receiveOrdersList, itemIdStr]);
+
+  const showReceivingButton =
+    !!onReceiveDelivery &&
+    (openOrdersWithItem.length > 0 ||
+      (hasUpcomingOrder && !receiveOrdersLoaded));
 
   useEffect(() => {
-    if (!item || !hasUpcomingOrder) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await OrderService.getOrders(100);
-        if (!cancelled) setOrders(Array.isArray(list) ? list : []);
-      } catch (e) {
-        if (!cancelled) console.error("CheckInOutScreen load orders:", e);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [item?.id, hasUpcomingOrder]);
+    if (!itemIdStr || !hasUpcomingOrder || receiveOrdersLoaded) return;
+    onRefreshReceiveOrders?.(false);
+  }, [itemIdStr, hasUpcomingOrder, receiveOrdersLoaded, onRefreshReceiveOrders]);
 
   const showAlert = (title, message) => {
     if (Platform.OS === "web" && typeof window !== "undefined" && window.alert) {
@@ -117,23 +153,20 @@ export default function CheckInOutScreen({
     setSelectedOrder(null);
     setReceiveQty("");
     setShowReceiveModal(true);
+    if (openOrdersWithItem.length === 0 && hasUpcomingOrder) {
+      onRefreshReceiveOrders?.(true);
+    }
   };
 
-  const getLineForItem = (order) => (order.lines || []).find((l) => String(l.itemId) === String(item?.id));
-  const remainingQty = selectedOrder ? (() => {
-    const line = getLineForItem(selectedOrder);
-    if (!line) return 0;
-    const ordered = parseInt(line.quantity, 10) || 0;
-    const received = parseInt(line.received_quantity, 10) || 0;
-    return Math.max(0, ordered - received);
-  })() : 0;
+  const getLineForItem = (order) => getLineForItemId(order, itemIdStr);
+  const remainingQty = selectedOrder
+    ? lineRemainingQty(getLineForItem(selectedOrder) || {})
+    : 0;
 
   const handleSelectOrder = (order) => {
     setSelectedOrder(order);
     const line = getLineForItem(order);
-    const ordered = parseInt(line?.quantity, 10) || 0;
-    const received = parseInt(line?.received_quantity, 10) || 0;
-    setReceiveQty(String(Math.max(0, ordered - received)));
+    setReceiveQty(String(line ? lineRemainingQty(line) : 0));
   };
 
   const handleReceiveSubmit = async () => {
@@ -242,7 +275,7 @@ export default function CheckInOutScreen({
               >
                 Check Out
               </Button>
-              {openOrdersWithItem.length > 0 && onReceiveDelivery && (
+              {showReceivingButton && (
                 <Button
                   mode="contained"
                   onPress={openReceiveModal}
@@ -326,11 +359,15 @@ export default function CheckInOutScreen({
               Select an upcoming PO that includes this item. Quantity will default to remaining; you can change it for partial shipments.
             </Text>
             <ScrollView style={styles.poList} keyboardShouldPersistTaps="handled">
+              {receiveOrdersLoading && openOrdersWithItem.length === 0 ? (
+                <Text style={[styles.poMeta, { color: theme.colors.onSurfaceVariant, textAlign: "center", paddingVertical: 16 }]}>
+                  Loading purchase orders…
+                </Text>
+              ) : null}
               {openOrdersWithItem.map((order) => {
                 const line = getLineForItem(order);
-                const ordered = parseInt(line?.quantity, 10) || 0;
-                const received = parseInt(line?.received_quantity, 10) || 0;
-                const remaining = Math.max(0, ordered - received);
+                const ordered = lineOrderedQty(line);
+                const remaining = lineRemainingQty(line);
                 const isSelected = selectedOrder?.id === order.id;
                 return (
                   <Pressable

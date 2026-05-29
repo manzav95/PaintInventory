@@ -628,6 +628,7 @@ export default function App() {
         const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
         if (!result.success) throw new Error(result.error || 'Failed to update inventory');
         await loadInventory();
+        await refreshReceiveOrders(true);
         Alert.alert(
           'Success',
           `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
@@ -1111,6 +1112,10 @@ export default function App() {
             onCancel={exitCheckInFlow}
             onOrderSummary={onOrderSummary}
             onReceiveDelivery={handleReceiveDelivery}
+            receiveOrdersList={receiveOrdersCache ?? []}
+            receiveOrdersLoaded={receiveOrdersCache !== null}
+            receiveOrdersLoading={receiveOrdersLoading}
+            onRefreshReceiveOrders={refreshReceiveOrders}
           />
         );
       case 'add':
