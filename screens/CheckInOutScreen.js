@@ -49,7 +49,14 @@ function getValidHex(hex) {
   if (!hex || typeof hex !== "string") return null;
   const s = hex.trim().replace(/^#/, "");
   if (/^[0-9A-Fa-f]{6}$/.test(s)) return "#" + s;
-  if (/^[0-9A-Fa-f]{3}$/.test(s)) return "#" + s.split("").map((c) => c + c).join("");
+  if (/^[0-9A-Fa-f]{3}$/.test(s))
+    return (
+      "#" +
+      s
+        .split("")
+        .map((c) => c + c)
+        .join("")
+    );
   return null;
 }
 
@@ -72,6 +79,7 @@ export default function CheckInOutScreen({
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [quantity, setQuantity] = useState("");
   const [action, setAction] = useState(null); // 'in' | 'out'
+  const [showDeliveryPrompt, setShowDeliveryPrompt] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [receiveQty, setReceiveQty] = useState("");
@@ -85,13 +93,16 @@ export default function CheckInOutScreen({
     "primer",
     "catalyst",
   ]);
-  const itemType = String(item?.type || "").toLowerCase().trim();
+  const itemType = String(item?.type || "")
+    .toLowerCase()
+    .trim();
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
   const quickQtyOptions = [5, 10, 15, 20];
 
   const itemIdStr = item?.id != null ? String(item.id) : "";
   const hasUpcomingOrder =
-    !!itemIdStr && (onOrderSummary[item.id]?.quantity > 0 ||
+    !!itemIdStr &&
+    (onOrderSummary[item.id]?.quantity > 0 ||
       onOrderSummary[itemIdStr]?.quantity > 0);
 
   const openOrdersWithItem = useMemo(() => {
@@ -109,10 +120,19 @@ export default function CheckInOutScreen({
   useEffect(() => {
     if (!itemIdStr || !hasUpcomingOrder || receiveOrdersLoaded) return;
     onRefreshReceiveOrders?.(false);
-  }, [itemIdStr, hasUpcomingOrder, receiveOrdersLoaded, onRefreshReceiveOrders]);
+  }, [
+    itemIdStr,
+    hasUpcomingOrder,
+    receiveOrdersLoaded,
+    onRefreshReceiveOrders,
+  ]);
 
   const showAlert = (title, message) => {
-    if (Platform.OS === "web" && typeof window !== "undefined" && window.alert) {
+    if (
+      Platform.OS === "web" &&
+      typeof window !== "undefined" &&
+      window.alert
+    ) {
       window.alert(message ? `${title}\n\n${message}` : title);
     } else {
       Alert.alert(title, message);
@@ -124,13 +144,19 @@ export default function CheckInOutScreen({
     const currentQty = Number(item.quantity) || 0;
 
     if (isNaN(qty) || qty <= 0) {
-      showAlert("Invalid Quantity", "Please enter a valid quantity greater than 0.");
+      showAlert(
+        "Invalid Quantity",
+        "Please enter a valid quantity greater than 0.",
+      );
       return;
     }
 
     if (action === "out") {
       if (currentQty <= 0) {
-        showAlert("Cannot check out", "This item currently has 0 gallons available to check out.");
+        showAlert(
+          "Cannot check out",
+          "This item currently has 0 gallons available to check out.",
+        );
         return;
       }
       if (qty > currentQty) {
@@ -158,6 +184,31 @@ export default function CheckInOutScreen({
     }
   };
 
+  const handleCheckInPress = () => {
+    const hasReceivablePOs = openOrdersWithItem.length > 0;
+    const mayHavePOs =
+      hasUpcomingOrder && (!receiveOrdersLoaded || receiveOrdersLoading);
+
+    if (onReceiveDelivery && (hasReceivablePOs || mayHavePOs)) {
+      if (mayHavePOs && !hasReceivablePOs) {
+        onRefreshReceiveOrders?.(true);
+      }
+      setShowDeliveryPrompt(true);
+      return;
+    }
+    setAction("in");
+  };
+
+  const handleDeliveryPromptYes = () => {
+    setShowDeliveryPrompt(false);
+    openReceiveModal();
+  };
+
+  const handleDeliveryPromptNo = () => {
+    setShowDeliveryPrompt(false);
+    setAction("in");
+  };
+
   const getLineForItem = (order) => getLineForItemId(order, itemIdStr);
   const remainingQty = selectedOrder
     ? lineRemainingQty(getLineForItem(selectedOrder) || {})
@@ -176,7 +227,10 @@ export default function CheckInOutScreen({
       return;
     }
     if (qty > remainingQty) {
-      showAlert("Invalid", `Remaining to receive for this line is ${remainingQty} gal.`);
+      showAlert(
+        "Invalid",
+        `Remaining to receive for this line is ${remainingQty} gal.`,
+      );
       return;
     }
     setReceiveSubmitting(true);
@@ -203,7 +257,9 @@ export default function CheckInOutScreen({
   const cardBg = theme.colors.surfaceContainerHighest;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
       {embeddedInShell && (
         <PageHeader
           title="Check In / Check Out"
@@ -230,7 +286,11 @@ export default function CheckInOutScreen({
           <Text
             style={[
               styles.subtitle,
-              { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
+              {
+                color: textOnHex
+                  ? textOnHex.secondary
+                  : theme.colors.onSurfaceVariant,
+              },
             ]}
           >
             ID: {item.id}
@@ -238,7 +298,11 @@ export default function CheckInOutScreen({
           <Text
             style={[
               styles.currentQty,
-              { color: textOnHex ? textOnHex.secondary : theme.colors.onSurfaceVariant },
+              {
+                color: textOnHex
+                  ? textOnHex.secondary
+                  : theme.colors.onSurfaceVariant,
+              },
             ]}
           >
             Current Quantity: {item.quantity || 0} gallons
@@ -257,110 +321,227 @@ export default function CheckInOutScreen({
               isDesktop && styles.webCard,
             ]}
           >
-          <Card.Content>
-            <View style={styles.buttonRow}>
-              <Button
-                mode={action === "in" ? "contained" : "outlined"}
-                onPress={() => setAction("in")}
-                style={[styles.actionButton, action === "in" && styles.selectedButton]}
-                icon="arrow-down"
-              >
-                Check In
-              </Button>
-              <Button
-                mode={action === "out" ? "contained" : "outlined"}
-                onPress={() => setAction("out")}
-                style={[styles.actionButton, action === "out" && styles.selectedButton]}
-                icon="arrow-up"
-              >
-                Check Out
-              </Button>
-              {showReceivingButton && (
+            <Card.Content>
+              <View style={styles.buttonRow}>
                 <Button
-                  mode="contained"
-                  onPress={openReceiveModal}
-                  style={styles.actionButton}
-                  icon="truck-delivery"
-                  buttonColor="#1565c0"
-                  textColor="#fff"
+                  mode={action === "in" ? "contained" : "outlined"}
+                  onPress={handleCheckInPress}
+                  style={[
+                    styles.actionButton,
+                    action === "in" && styles.selectedButton,
+                  ]}
+                  icon="arrow-down"
                 >
-                  Receiving Delivery
+                  Check In
                 </Button>
-              )}
-            </View>
-
-            {action && (
-              <>
-                {showQuickQty && (
-                  <View style={styles.quickQtyWrap}>
-                    <Text
-                      style={[
-                        styles.quickQtyLabel,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Quick quantity (gal)
-                    </Text>
-                    <View style={styles.quickQtyRow}>
-                      {quickQtyOptions.map((v) => (
-                        <Button
-                          key={String(v)}
-                          mode="outlined"
-                          compact
-                          onPress={() => setQuantity(String(v))}
-                          style={styles.quickQtyButton}
-                        >
-                          {v}
-                        </Button>
-                      ))}
-                    </View>
-                  </View>
-                )}
-                <TextInput
-                  label={`Quantity to ${action === "in" ? "add" : "remove"} (gallons)`}
-                  value={quantity}
-                  onChangeText={setQuantity}
-                  mode="outlined"
-                  keyboardType="decimal-pad"
-                  style={styles.input}
-                  right={<TextInput.Affix text="gal" />}
-                />
-                <View style={styles.submitRow}>
-                  <Button mode="outlined" onPress={onCancel} style={styles.button}>
-                    Cancel
-                  </Button>
+                <Button
+                  mode={action === "out" ? "contained" : "outlined"}
+                  onPress={() => setAction("out")}
+                  style={[
+                    styles.actionButton,
+                    action === "out" && styles.selectedButton,
+                  ]}
+                  icon="arrow-up"
+                >
+                  Check Out
+                </Button>
+                {showReceivingButton && (
                   <Button
                     mode="contained"
-                    onPress={handleSubmit}
-                    style={styles.button}
-                    disabled={!quantity || parseFloat(quantity) <= 0}
+                    onPress={openReceiveModal}
+                    style={styles.actionButton}
+                    icon="truck-delivery"
+                    buttonColor="#1565c0"
+                    textColor="#fff"
                   >
-                    Submit
+                    Receiving Delivery
                   </Button>
-                </View>
-              </>
-            )}
+                )}
+              </View>
 
-            {!action && (
-              <Button mode="outlined" onPress={onCancel} style={styles.cancelButton}>
-                Cancel
-              </Button>
-            )}
+              {action && (
+                <>
+                  {showQuickQty && (
+                    <View style={styles.quickQtyWrap}>
+                      <Text
+                        style={[
+                          styles.quickQtyLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Quick quantity (gal)
+                      </Text>
+                      <View style={styles.quickQtyRow}>
+                        {quickQtyOptions.map((v) => (
+                          <Button
+                            key={String(v)}
+                            mode="outlined"
+                            compact
+                            onPress={() => setQuantity(String(v))}
+                            style={styles.quickQtyButton}
+                          >
+                            {v}
+                          </Button>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                  <TextInput
+                    label={`Quantity to ${action === "in" ? "add" : "remove"} (gallons)`}
+                    value={quantity}
+                    onChangeText={setQuantity}
+                    mode="outlined"
+                    keyboardType="decimal-pad"
+                    style={styles.input}
+                    right={<TextInput.Affix text="gal" />}
+                  />
+                  <View style={styles.submitRow}>
+                    <Button
+                      mode="outlined"
+                      onPress={onCancel}
+                      style={styles.button}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      mode="contained"
+                      onPress={handleSubmit}
+                      style={styles.button}
+                      disabled={!quantity || parseFloat(quantity) <= 0}
+                    >
+                      Submit
+                    </Button>
+                  </View>
+                </>
+              )}
+
+              {!action && (
+                <Button
+                  mode="outlined"
+                  onPress={onCancel}
+                  style={styles.cancelButton}
+                >
+                  Cancel
+                </Button>
+              )}
             </Card.Content>
           </Card>
         </View>
       </View>
 
-      <Modal visible={showReceiveModal} transparent animationType="fade">
-        <Pressable style={styles.modalOverlay} onPress={() => setShowReceiveModal(false)}>
-          <Pressable style={[styles.modalContent, { backgroundColor: theme.colors.surface }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={[styles.modalTitle, { color: theme.colors.onSurface }]}>Receiving Delivery</Text>
-            <Text style={[styles.modalSubtitle, { color: theme.colors.onSurfaceVariant }]}>
-              Select an upcoming PO that includes this item. Quantity will default to remaining; you can change it for partial shipments.
+      <Modal visible={showDeliveryPrompt} transparent animationType="fade">
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowDeliveryPrompt(false)}
+        >
+          <Pressable
+            style={[
+              styles.modalContent,
+              { backgroundColor: theme.colors.surface },
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text
+              style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+            >
+              Receiving a delivery?
             </Text>
-            <ScrollView style={styles.poList} keyboardShouldPersistTaps="handled">
+            <Text
+              style={[
+                styles.modalSubtitle,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {item.name || "This item"} has an open purchase order
+              {openOrdersWithItem.length === 1 ? "" : "s"} waiting to receive.
+              <br />
+              Are you receiving a delivery?
+            </Text>
+            {receiveOrdersLoading && openOrdersWithItem.length === 0 ? (
+              <Text
+                style={[
+                  styles.poMeta,
+                  {
+                    color: theme.colors.onSurfaceVariant,
+                    textAlign: "center",
+                    marginBottom: 12,
+                  },
+                ]}
+              >
+                Loading purchase orders…
+              </Text>
+            ) : openOrdersWithItem.length > 0 ? (
+              <Text
+                style={[
+                  styles.poMeta,
+                  { color: theme.colors.onSurfaceVariant, marginBottom: 12 },
+                ]}
+              >
+                {openOrdersWithItem.length} PO
+                {openOrdersWithItem.length === 1 ? "" : "s"} include this item.
+              </Text>
+            ) : null}
+            <View style={styles.promptActions}>
+              <Button
+                mode="contained"
+                onPress={handleDeliveryPromptYes}
+                icon="truck-delivery"
+                style={styles.promptPrimaryBtn}
+              >
+                Yes — select PO
+              </Button>
+              <Button mode="outlined" onPress={handleDeliveryPromptNo}>
+                No — regular check-in
+              </Button>
+              <Button mode="text" onPress={() => setShowDeliveryPrompt(false)}>
+                Cancel
+              </Button>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={showReceiveModal} transparent animationType="fade">
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowReceiveModal(false)}
+        >
+          <Pressable
+            style={[
+              styles.modalContent,
+              { backgroundColor: theme.colors.surface },
+            ]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text
+              style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+            >
+              Receiving Delivery
+            </Text>
+            <Text
+              style={[
+                styles.modalSubtitle,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Select the PO # for {item.name || "this item"} (ID: {itemIdStr}).
+              Quantity defaults to remaining; change it for partial shipments.
+            </Text>
+            <ScrollView
+              style={styles.poList}
+              keyboardShouldPersistTaps="handled"
+            >
               {receiveOrdersLoading && openOrdersWithItem.length === 0 ? (
-                <Text style={[styles.poMeta, { color: theme.colors.onSurfaceVariant, textAlign: "center", paddingVertical: 16 }]}>
+                <Text
+                  style={[
+                    styles.poMeta,
+                    {
+                      color: theme.colors.onSurfaceVariant,
+                      textAlign: "center",
+                      paddingVertical: 16,
+                    },
+                  ]}
+                >
                   Loading purchase orders…
                 </Text>
               ) : null}
@@ -376,11 +557,27 @@ export default function CheckInOutScreen({
                     style={[
                       styles.poRow,
                       { borderColor: theme.colors.outline },
-                      isSelected && { backgroundColor: theme.colors.surfaceVariant },
+                      isSelected && {
+                        backgroundColor: theme.colors.surfaceVariant,
+                      },
                     ]}
                   >
-                    <Text style={[styles.poNumber, { color: theme.colors.onSurface }]}>{order.po_number && String(order.po_number).trim() ? `PO #${order.po_number}` : "No PO"}</Text>
-                    <Text style={[styles.poMeta, { color: theme.colors.onSurfaceVariant }]}>
+                    <Text
+                      style={[
+                        styles.poNumber,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      {order.po_number && String(order.po_number).trim()
+                        ? `PO #${order.po_number}`
+                        : "No PO"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.poMeta,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
                       {remaining} of {ordered} gal remaining
                     </Text>
                   </Pressable>
@@ -398,14 +595,21 @@ export default function CheckInOutScreen({
                   style={styles.input}
                 />
                 <View style={styles.modalActions}>
-                  <Button mode="outlined" onPress={() => setShowReceiveModal(false)}>
+                  <Button
+                    mode="outlined"
+                    onPress={() => setShowReceiveModal(false)}
+                  >
                     Cancel
                   </Button>
                   <Button
                     mode="contained"
                     onPress={handleReceiveSubmit}
                     loading={receiveSubmitting}
-                    disabled={receiveSubmitting || !receiveQty || parseInt(receiveQty, 10) <= 0}
+                    disabled={
+                      receiveSubmitting ||
+                      !receiveQty ||
+                      parseInt(receiveQty, 10) <= 0
+                    }
                   >
                     Receive
                   </Button>
@@ -552,5 +756,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     justifyContent: "flex-end",
+  },
+  promptActions: {
+    gap: 10,
+    marginTop: 4,
+  },
+  promptPrimaryBtn: {
+    marginBottom: 4,
   },
 });

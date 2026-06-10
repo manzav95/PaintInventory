@@ -20,6 +20,12 @@ import {
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { normalizeItemNameForSave } from "../utils/itemNameUtils";
+import {
+  todayDateInput,
+  normalizeDateInput,
+  formatRecycleDueFromLotDate,
+} from "../utils/recycleDates";
 
 const TYPE_OPTIONS = [
   { label: "Paint", value: "paint" },
@@ -39,16 +45,6 @@ function nameImpliesCustomPaint(name) {
   const t = String(name ?? "").trim();
   if (!t) return false;
   return t.startsWith("#") || /^\d/.test(t);
-}
-
-function recycleDueDateFromNow() {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 4);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
 }
 
 const CONTAINER_OPTIONS = [
@@ -131,6 +127,7 @@ export default function AddItemScreen({
   const [hexColor, setHexColor] = useState("");
   const [externalCode, setExternalCode] = useState("");
   const [rex, setRex] = useState("");
+  const [lotDate, setLotDate] = useState(todayDateInput);
   const [typeMenuOpen, setTypeMenuOpen] = useState(false);
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
@@ -180,7 +177,7 @@ export default function AddItemScreen({
 
   const handleSave = () => {
     const tid = itemId.trim();
-    const nname = name.trim();
+    const nname = normalizeItemNameForSave(name);
     const nextErr = { itemId: !tid, name: !nname };
     if (nextErr.itemId || nextErr.name) {
       setFieldErrors(nextErr);
@@ -228,6 +225,17 @@ export default function AddItemScreen({
       : location.trim();
     const hexVal = normalizeHex(hexColor);
     const rexRaw = rex.trim();
+    let lotDateVal = null;
+    if (CUSTOM_TYPES.includes(typeVal)) {
+      lotDateVal = normalizeDateInput(lotDate);
+      if (!lotDateVal) {
+        Alert.alert(
+          "Invalid",
+          "Lot date must be YYYY-MM-DD (example: 2024-06-15).",
+        );
+        return;
+      }
+    }
     const item = {
       id: tid,
       name: nname,
@@ -245,6 +253,7 @@ export default function AddItemScreen({
       ...(hexVal && { hex_color: hexVal }),
       ...(extRaw && { external_code: extRaw }),
       ...(rexRaw && { rex: rexRaw }),
+      ...(lotDateVal && { lot_date: lotDateVal }),
     };
 
     onSave(item);
@@ -606,13 +615,41 @@ export default function AddItemScreen({
 
                 {isCustomType && (
                   <View style={styles.recycleBlockDesktop}>
+                    <FieldLabel theme={theme}>Lot date (on bucket)</FieldLabel>
+                    {isWeb ? (
+                      <input
+                        type="date"
+                        value={lotDate}
+                        onChange={(e) => setLotDate(e.target.value)}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          padding: 10,
+                          fontSize: 15,
+                          borderRadius: 4,
+                          border: `1px solid ${theme.colors.outline}`,
+                          backgroundColor: theme.colors.surfaceContainerHighest,
+                          color: theme.colors.onSurface,
+                          marginBottom: 8,
+                        }}
+                      />
+                    ) : (
+                      <TextInput
+                        label="Lot date"
+                        value={lotDate}
+                        onChangeText={setLotDate}
+                        mode="outlined"
+                        style={inputStyle}
+                        placeholder="YYYY-MM-DD"
+                      />
+                    )}
                     <Text
                       style={[
                         styles.recycleDueValue,
                         { color: theme.colors.onSurface },
                       ]}
                     >
-                      Recycle due: {recycleDueDateFromNow()}
+                      Recycle due: {formatRecycleDueFromLotDate(lotDate)}
                     </Text>
                     <Text
                       style={[
@@ -620,8 +657,8 @@ export default function AddItemScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      4 months after last activity (add, check-in/out, receive,
-                      qty change).
+                      Recycle is due 9 months after the lot date, and resets 9
+                      months after each check-in, check-out, or receiving.
                     </Text>
                   </View>
                 )}
@@ -714,15 +751,23 @@ export default function AddItemScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Recycle due
+                      Lot date (on bucket)
                     </Text>
+                    <TextInput
+                      label="Lot date"
+                      value={lotDate}
+                      onChangeText={setLotDate}
+                      mode="outlined"
+                      style={inputStyle}
+                      placeholder="YYYY-MM-DD"
+                    />
                     <Text
                       style={[
                         styles.recycleDueValue,
                         { color: theme.colors.onSurface },
                       ]}
                     >
-                      {recycleDueDateFromNow()}
+                      Recycle due: {formatRecycleDueFromLotDate(lotDate)}
                     </Text>
                     <Text
                       style={[
@@ -730,7 +775,8 @@ export default function AddItemScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Starts when you save. Due 4 months after last activity.
+                      Recycle is due 9 months after the lot date, and resets 9
+                      months after each check-in, check-out, or receiving.
                     </Text>
                   </View>
                 )}

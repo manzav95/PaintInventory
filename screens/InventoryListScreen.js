@@ -205,6 +205,14 @@ export default function InventoryListScreen({
   const [scrollOffset, setScrollOffset] = useState(initialScrollOffset || 0);
   const listRef = useRef(null);
   const hasRestoredScrollRef = useRef(false);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchInputRef.current?.focus?.();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const notifyViewState = (next = {}) => {
     if (!onViewStateChange) return;
@@ -230,6 +238,16 @@ export default function InventoryListScreen({
     const id = String(itemId ?? "").trim();
     const inv = inventory.find((i) => String(i.id) === id);
     return inv?.name || `ID ${id}`;
+  };
+
+  const getItemCodeForOrder = (itemId) => {
+    const id = String(itemId ?? "").trim();
+    if (!id) return "";
+    const inv = inventory.find((i) => String(i.id) === id);
+    const ext =
+      inv?.external_code != null ? String(inv.external_code).trim() : "";
+    if (ext) return `${id} · ${ext}`;
+    return id;
   };
 
   const formatOrderColorsPreview = (order) => {
@@ -835,6 +853,7 @@ export default function InventoryListScreen({
       lineReceiveQtysRef={lineReceiveQtysRef}
       detailResetKey={receiveDetailKey}
       getItemNameForOrder={getItemNameForOrder}
+      getItemCodeForOrder={getItemCodeForOrder}
       formatOrderColorsPreview={formatOrderColorsPreview}
     />
   );
@@ -1140,6 +1159,7 @@ export default function InventoryListScreen({
               style={[styles.webContentCentered, styles.webContentCenteredFlex]}
             >
               <OutlinedSearchInput
+                ref={searchInputRef}
                 placeholder="Search colors by name or ID — Enter scans ID/barcode for check in/out"
                 onChangeText={setSearchQuery}
                 value={searchQuery}
@@ -1462,6 +1482,7 @@ export default function InventoryListScreen({
                         </View>
                         <View style={styles.tableHeaderSearchRow}>
                           <OutlinedSearchInput
+                            ref={searchInputRef}
                             placeholder="Search or Scan"
                             onChangeText={setSearchQuery}
                             value={searchQuery}
@@ -1553,14 +1574,6 @@ export default function InventoryListScreen({
                                   Color
                                 </DataTable.Title>
                                 <DataTable.Title
-                                  style={[
-                                    styles.tableCell,
-                                    styles.onOrderColCell,
-                                  ]}
-                                >
-                                  On order
-                                </DataTable.Title>
-                                <DataTable.Title
                                   style={styles.lastScannedCell}
                                   sortDirection={
                                     getSortIcon("lastScanned")
@@ -1572,6 +1585,14 @@ export default function InventoryListScreen({
                                   onPress={() => handleSort("lastScanned")}
                                 >
                                   Last Action
+                                </DataTable.Title>
+                                <DataTable.Title
+                                  style={[
+                                    styles.tableCell,
+                                    styles.onOrderColCell,
+                                  ]}
+                                >
+                                  On order
                                 </DataTable.Title>
                                 {viewMode === "inventory" &&
                                 bookFilter === "custom" ? (
@@ -1776,84 +1797,6 @@ export default function InventoryListScreen({
                                         ) : null}
                                       </DataTable.Cell>
                                       <DataTable.Cell
-                                        style={[
-                                          styles.tableCell,
-                                          styles.onOrderColCell,
-                                        ]}
-                                      >
-                                        {(() => {
-                                          const orderInfo =
-                                            onOrderSummary[item.id] ||
-                                            onOrderSummary[String(item.id)];
-                                          if (
-                                            orderInfo &&
-                                            orderInfo.quantity > 0
-                                          ) {
-                                            const expDate =
-                                              orderInfo.expectedDate
-                                                ? new Date(
-                                                    orderInfo.expectedDate,
-                                                  )
-                                                : null;
-                                            const exp = expDate
-                                              ? expDate.toLocaleDateString(
-                                                  "en-US",
-                                                  {
-                                                    month: "short",
-                                                    day: "numeric",
-                                                    year: "numeric",
-                                                  },
-                                                )
-                                              : "";
-                                            const isLate =
-                                              expDate &&
-                                              expDate.getTime() < Date.now();
-                                            const textColor = isLate
-                                              ? "#c62828"
-                                              : theme.colors.primary;
-                                            const po =
-                                              orderInfo.poNumber ||
-                                              orderInfo.po_number ||
-                                              "";
-                                            return (
-                                              <View>
-                                                <Text
-                                                  style={{
-                                                    fontSize: 12,
-                                                    color: textColor,
-                                                  }}
-                                                >
-                                                  {orderInfo.quantity} gal
-                                                </Text>
-                                                {exp ? (
-                                                  <Text
-                                                    style={{
-                                                      fontSize: 11,
-                                                      color: textColor,
-                                                      marginTop: 2,
-                                                    }}
-                                                  >
-                                                    {exp}
-                                                  </Text>
-                                                ) : null}
-                                                {po ? (
-                                                  <Text
-                                                    style={{
-                                                      fontSize: 11,
-                                                      color: textColor,
-                                                      marginTop: 2,
-                                                    }}
-                                                  >
-                                                    PO {po}
-                                                  </Text>
-                                                ) : null}
-                                              </View>
-                                            );
-                                          }
-                                          return null;
-                                        })()}
-                                      </DataTable.Cell>
-                                      <DataTable.Cell
                                         style={styles.lastScannedCell}
                                       >
                                         {(() => {
@@ -1933,6 +1876,84 @@ export default function InventoryListScreen({
                                               Never
                                             </Text>
                                           );
+                                        })()}
+                                      </DataTable.Cell>
+                                      <DataTable.Cell
+                                        style={[
+                                          styles.tableCell,
+                                          styles.onOrderColCell,
+                                        ]}
+                                      >
+                                        {(() => {
+                                          const orderInfo =
+                                            onOrderSummary[item.id] ||
+                                            onOrderSummary[String(item.id)];
+                                          if (
+                                            orderInfo &&
+                                            orderInfo.quantity > 0
+                                          ) {
+                                            const expDate =
+                                              orderInfo.expectedDate
+                                                ? new Date(
+                                                    orderInfo.expectedDate,
+                                                  )
+                                                : null;
+                                            const exp = expDate
+                                              ? expDate.toLocaleDateString(
+                                                  "en-US",
+                                                  {
+                                                    month: "short",
+                                                    day: "numeric",
+                                                    year: "numeric",
+                                                  },
+                                                )
+                                              : "";
+                                            const isLate =
+                                              expDate &&
+                                              expDate.getTime() < Date.now();
+                                            const textColor = isLate
+                                              ? "#c62828"
+                                              : theme.colors.primary;
+                                            const po =
+                                              orderInfo.poNumber ||
+                                              orderInfo.po_number ||
+                                              "";
+                                            return (
+                                              <View>
+                                                <Text
+                                                  style={{
+                                                    fontSize: 12,
+                                                    color: textColor,
+                                                  }}
+                                                >
+                                                  {orderInfo.quantity} gal
+                                                </Text>
+                                                {exp ? (
+                                                  <Text
+                                                    style={{
+                                                      fontSize: 11,
+                                                      color: textColor,
+                                                      marginTop: 2,
+                                                    }}
+                                                  >
+                                                    {exp}
+                                                  </Text>
+                                                ) : null}
+                                                {po ? (
+                                                  <Text
+                                                    style={{
+                                                      fontSize: 11,
+                                                      color: textColor,
+                                                      marginTop: 2,
+                                                    }}
+                                                  >
+                                                    PO {po}
+                                                  </Text>
+                                                ) : null}
+                                              </View>
+                                            );
+                                          }
+                                          return null;
                                         })()}
                                       </DataTable.Cell>
                                       {viewMode === "inventory" &&
@@ -2119,6 +2140,7 @@ export default function InventoryListScreen({
             </Text>
           </View>
           <OutlinedSearchInput
+            ref={searchInputRef}
             placeholder={
               viewMode === "colorBook" ? "Search colors" : "Search or Scan"
             }
@@ -2479,6 +2501,7 @@ export default function InventoryListScreen({
           </Text>
         </View>
         <OutlinedSearchInput
+          ref={searchInputRef}
           placeholder={
             viewMode === "colorBook" ? "Search colors" : "Search or Scan"
           }
@@ -3350,11 +3373,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   colorBookRow: {
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    gap: 12,
     marginBottom: 12,
   },
   colorBookCardWrap: {
-    width: "48%",
+    width: Platform.OS === "web" ? "calc((100% - 12px) / 2)" : "47%",
     marginBottom: 4,
   },
   colorBookCard: {
@@ -3373,7 +3397,8 @@ const styles = StyleSheet.create({
   colorBookGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    gap: 12,
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
@@ -3410,12 +3435,13 @@ const styles = StyleSheet.create({
   colorBookGridDesktop: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    gap: 16,
     padding: 16,
     paddingBottom: 24,
   },
   colorBookCardWrapDesktop: {
-    width: "24%",
-    marginBottom: 16,
+    width: "calc((100% - 48px) / 4)",
+    marginBottom: 0,
   },
 });

@@ -74,7 +74,7 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
       <Text
         style={[styles.receiveQtyLabel, { color: theme.colors.onSurfaceVariant }]}
       >
-        Receive now (gal)
+        Receive (gal)
       </Text>
       <NativeTextInput
         value={value}
@@ -118,6 +118,7 @@ export default function ReceivePoModal({
   lineReceiveQtysRef,
   detailResetKey,
   getItemNameForOrder,
+  getItemCodeForOrder,
   formatOrderColorsPreview,
 }) {
   const theme = useTheme();
@@ -363,6 +364,9 @@ export default function ReceivePoModal({
                     const received = lineReceivedQty(line);
                     const remaining = lineRemainingQty(line);
                     const name = getItemNameForOrder(itemId);
+                    const code = getItemCodeForOrder
+                      ? getItemCodeForOrder(itemId)
+                      : itemId;
                     return (
                       <View
                         key={`${detailResetKey}-${itemId}-${idx}`}
@@ -380,6 +384,17 @@ export default function ReceivePoModal({
                         >
                           {name}
                         </Text>
+                        {code ? (
+                          <Text
+                            style={[
+                              styles.lineCode,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {code}
+                          </Text>
+                        ) : null}
                         <Text
                           style={{
                             fontSize: 12,
@@ -537,7 +552,12 @@ const styles = StyleSheet.create({
   lineName: {
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  lineCode: {
+    fontSize: 13,
+    fontFamily: "monospace",
+    marginBottom: 8,
   },
   receiveQtyWrap: {
     marginTop: 2,

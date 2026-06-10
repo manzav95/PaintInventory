@@ -20,27 +20,9 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
-
-function getDayKey(ts) {
-  if (!ts) return null;
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function formatDayHeader(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "—";
-  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
-  const md = d.toLocaleDateString("en-US", {
-    month: "numeric",
-    day: "numeric",
-  });
-  return `${weekday} ${md}`;
-}
+import DashboardGreeting from "../components/DashboardGreeting";
+import { getDayKey, formatDayHeader } from "../utils/transactionDayUtils";
+import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 function isRecycleDue(item) {
@@ -67,10 +49,17 @@ export default function DashboardScreen({
   isRefreshing = false,
   showTransactionTable = true,
   isAdmin = false,
+  userName,
+  embeddedInShell = false,
   onOpenRecycleDue,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
+  const surfaceCardStyle = {
+    backgroundColor: theme.colors.surfaceContainerHighest,
+    borderColor: theme.colors.outlineVariant,
+    borderWidth: 1,
+  };
   const auditLogs = auditLogsFromApp;
   const auditLogsLoaded = auditLogsLoadedFromApp;
   const [searchQuery, setSearchQuery] = useState("");
@@ -82,6 +71,7 @@ export default function DashboardScreen({
   const [checkedOutListOpen, setCheckedOutListOpen] = useState(false);
   const [checkedOutListIsWeek, setCheckedOutListIsWeek] = useState(true);
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
+  const [shiftFilter, setShiftFilter] = useState(null);
 
   // Current week (Sun–Sat) and current month date ranges + labels
   const periodRange = useMemo(() => {
@@ -425,11 +415,15 @@ export default function DashboardScreen({
     return adminOnly ? "Admin" : log.userName || "Unknown";
   };
 
-  // Filter audit logs by search
+  // Filter audit logs by shift (admin) and search
   const filteredLogs = useMemo(() => {
-    if (!searchQuery.trim()) return logsByRole;
+    let rows = logsByRole;
+    if (isAdmin && shiftFilter) {
+      rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
+    }
+    if (!searchQuery.trim()) return rows;
     const query = searchQuery.toLowerCase();
-    return logsByRole.filter((log) => {
+    return rows.filter((log) => {
       const item = inventory.find((i) => i.id === log.itemId);
       const itemName = item?.name?.toLowerCase() || "";
       const userName = (log.userName || "").toLowerCase();
@@ -443,7 +437,7 @@ export default function DashboardScreen({
         itemId.includes(query)
       );
     });
-  }, [logsByRole, searchQuery, inventory]);
+  }, [logsByRole, searchQuery, inventory, isAdmin, shiftFilter]);
 
   const getActionColor = (action, details) => {
     // Handle old records with _actionType in details (for backward compatibility)
@@ -916,18 +910,31 @@ export default function DashboardScreen({
         </Pressable>
       </Modal>
 
+      {embeddedInShell && (
+        <DashboardGreeting isAdmin={isAdmin} userName={userName} />
+      )}
+
       {/* Stats Cards */}
       <View style={styles.statsRow}>
         {isAdmin && (
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Total value</Text>
+          <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
+            <Card.Content style={styles.statCardContent}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Total value
+              </Text>
               {inventoryLoaded ? (
                 <Pressable
                   onPress={() => setTotalValueListOpen(true)}
                   style={styles.statNumberPressable}
                 >
-                  <Title style={styles.statValue}>
+                  <Title
+                    style={[styles.statValue, { color: theme.colors.primary }]}
+                  >
                     $
                     {totalValue.toLocaleString("en-US", {
                       minimumFractionDigits: 2,
@@ -945,11 +952,20 @@ export default function DashboardScreen({
           </Card>
         )}
 
-        <Card style={styles.statCard}>
-          <Card.Content>
-            <Text style={styles.statLabel}>Total Gallons</Text>
+        <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
+          <Card.Content style={styles.statCardContent}>
+            <Text
+              style={[
+                styles.statLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Total Gallons
+            </Text>
             {inventoryLoaded ? (
-              <Title style={styles.statValue}>
+              <Title
+                style={[styles.statValue, { color: theme.colors.primary }]}
+              >
                 {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
               </Title>
             ) : (
@@ -962,13 +978,29 @@ export default function DashboardScreen({
         </Card>
 
         {isAdmin && (
-          <Card style={styles.statCard}>
-            <Card.Content>
-              <Text style={styles.statLabel}>Total items</Text>
+          <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
+            <Card.Content style={styles.statCardContent}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Total items
+              </Text>
               {inventoryLoaded ? (
                 <>
-                  <Title style={styles.statValue}>{inventory.length}</Title>
-                  <Text style={styles.statSubtext}>
+                  <Title
+                    style={[styles.statValue, { color: theme.colors.primary }]}
+                  >
+                    {inventory.length}
+                  </Title>
+                  <Text
+                    style={[
+                      styles.statSubtext,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
                     {(() => {
                       const typeOf = (i) => String(i?.type ?? "").toLowerCase();
                       const paintCount = inventory.filter((i) =>
@@ -995,11 +1027,17 @@ export default function DashboardScreen({
         )}
 
         <Card
-          style={[styles.statCard, styles.statCardClickable]}
+          style={[styles.statCard, surfaceCardStyle]}
+          mode="outlined"
           onPress={() => setGalPeriodWeek((prev) => !prev)}
         >
-          <Card.Content>
-            <Text style={styles.statLabel}>
+          <Card.Content style={styles.statCardContent}>
+            <Text
+              style={[
+                styles.statLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
               Checked out this {galPeriodWeek ? "week" : "month"}
             </Text>
             {auditLogsLoaded ? (
@@ -1011,12 +1049,27 @@ export default function DashboardScreen({
                   }}
                   style={styles.statNumberPressable}
                 >
-                  <Title style={styles.statValue}>
+                  <Title
+                    style={[styles.statValue, { color: theme.colors.primary }]}
+                  >
                     {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
-                    <Text style={styles.statValueUnit}> gal</Text>
+                    <Text
+                      style={[
+                        styles.statValueUnit,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      {" "}
+                      gal
+                    </Text>
                   </Title>
                 </Pressable>
-                <Text style={styles.statSubtext}>
+                <Text
+                  style={[
+                    styles.statSubtext,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
                   {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
                 </Text>
               </>
@@ -1031,21 +1084,39 @@ export default function DashboardScreen({
 
         {isAdmin && (
           <Card
-            style={[styles.statCard, styles.statCardClickable]}
+            style={[styles.statCard, surfaceCardStyle]}
+            mode="outlined"
             onPress={() =>
               setStaleDays((d) => (d === 30 ? 60 : d === 60 ? 90 : 30))
             }
           >
-            <Card.Content>
-              <Text style={styles.statLabel}>
+            <Card.Content style={styles.statCardContent}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
                 Not scanned in{" "}
-                <Text style={styles.staleDaysInline}>{staleDays}</Text> days
+                <Text
+                  style={[
+                    styles.staleDaysInline,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {staleDays}
+                </Text>{" "}
+                days
               </Text>
               <Pressable
                 onPress={() => setStaleListOpen(true)}
                 style={styles.statNumberPressable}
               >
-                <Title style={styles.statValue}>{notScannedCount}</Title>
+                <Title
+                  style={[styles.statValue, { color: theme.colors.primary }]}
+                >
+                  {notScannedCount}
+                </Title>
               </Pressable>
             </Card.Content>
           </Card>
@@ -1053,39 +1124,71 @@ export default function DashboardScreen({
 
         {recycleDueCount > 0 && onOpenRecycleDue && (
           <Card
-            style={[styles.statCard, styles.statCardClickable]}
+            style={[styles.statCard, surfaceCardStyle]}
+            mode="outlined"
             onPress={onOpenRecycleDue}
           >
-            <Card.Content>
-              <Text style={styles.statLabel}>Paint Need to Recycle</Text>
+            <Card.Content style={styles.statCardContent}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Paint Need to Recycle
+              </Text>
               <Title style={[styles.statValue, { color: "#e65100" }]}>
                 {recycleDueCount}
               </Title>
-              <Text style={styles.statSubtextHint}>Tap to View List</Text>
+              <Text
+                style={[
+                  styles.statSubtextHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Tap to View List
+              </Text>
             </Card.Content>
           </Card>
         )}
 
         {(!auditLogsLoaded || mostUsedColor) && (
           <Card
-            style={[styles.statCard, styles.statCardClickable]}
+            style={[styles.statCard, surfaceCardStyle]}
+            mode="outlined"
             onPress={
               auditLogsLoaded
                 ? () => setMostUsedByWeek((prev) => !prev)
                 : undefined
             }
           >
-            <Card.Content>
-              <Text style={styles.statLabel}>Color most checked out</Text>
+            <Card.Content style={styles.statCardContent}>
+              <Text
+                style={[
+                  styles.statLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Color most checked out
+              </Text>
               {auditLogsLoaded && mostUsedColor ? (
                 <>
                   <Title
-                    style={[styles.statValue, { fontSize: 18 }]}
+                    style={[
+                      styles.statValue,
+                      styles.statValueCompact,
+                      { color: theme.colors.primary },
+                    ]}
                     numberOfLines={1}
                   >
                     {mostUsedColor.name}
                   </Title>
-                  <Text style={styles.statSubtext}>
+                  <Text
+                    style={[
+                      styles.statSubtext,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
                     {mostUsedColor.totalGal} gal —{" "}
                     {mostUsedColor.isWeek
                       ? `week of ${mostUsedColor.periodLabel}`
@@ -1106,30 +1209,70 @@ export default function DashboardScreen({
       {showTransactionTable && (
         <>
           {/* Transaction History */}
-          <Card style={[styles.historyCard, isWeb && styles.historyCardWeb]}>
+          <Card
+            style={[
+              styles.historyCard,
+              isWeb && styles.historyCardWeb,
+              surfaceCardStyle,
+            ]}
+            mode="outlined"
+          >
             <Card.Content
-              style={isWeb ? styles.historyCardContentWeb : undefined}
+              style={[
+                styles.historyCardContent,
+                isWeb && styles.historyCardContentWeb,
+              ]}
             >
               <View style={styles.historyHeader}>
-                <Title style={styles.historyTitle}>Transaction History</Title>
+                <Title
+                  style={[
+                    styles.historyTitle,
+                    { color: theme.colors.onBackground },
+                  ]}
+                >
+                  Transaction History
+                </Title>
                 {isAdmin && isWeb && (
-                  <Button
-                    // Keep mode constant to avoid layout shift between outlined/contained
-                    mode="outlined"
-                    compact
-                    onPress={() => setReducedHistory((p) => !p)}
-                    style={[
-                      styles.reducedToggle,
-                      reducedHistory && {
-                        backgroundColor: theme.dark
-                          ? "rgba(255,255,255,0.08)"
-                          : "rgba(0,0,0,0.06)",
-                      },
-                    ]}
-                    contentStyle={styles.reducedToggleContent}
-                  >
-                    {reducedHistory ? "Reduced" : "Standard"}
-                  </Button>
+                  <View style={styles.historyAdminControls}>
+                    <View style={styles.shiftToggleRow}>
+                      <Button
+                        mode={shiftFilter === "day" ? "contained" : "outlined"}
+                        compact
+                        onPress={() =>
+                          setShiftFilter((f) => (f === "day" ? null : "day"))
+                        }
+                      >
+                        {SHIFT_LABELS.day}
+                      </Button>
+                      <Button
+                        mode={
+                          shiftFilter === "swing" ? "contained" : "outlined"
+                        }
+                        compact
+                        onPress={() =>
+                          setShiftFilter((f) => (f === "swing" ? null : "swing"))
+                        }
+                      >
+                        {SHIFT_LABELS.swing}
+                      </Button>
+                    </View>
+                    <Button
+                      mode="outlined"
+                      compact
+                      onPress={() => setReducedHistory((p) => !p)}
+                      style={[
+                        styles.reducedToggle,
+                        reducedHistory && {
+                          backgroundColor: theme.dark
+                            ? "rgba(255,255,255,0.08)"
+                            : "rgba(0,0,0,0.06)",
+                        },
+                      ]}
+                      contentStyle={styles.reducedToggleContent}
+                    >
+                      {reducedHistory ? "Reduced" : "Standard"}
+                    </Button>
+                  </View>
                 )}
                 <OutlinedSearchInput
                   placeholder="Search transactions..."
@@ -1192,7 +1335,7 @@ export default function DashboardScreen({
                       </DataTable.Header>
 
                       {filteredLogs.slice(0, 500).map((log, index) => {
-                        const showDayDividers = isWeb && isAdmin;
+                        const showDayDividers = isWeb;
                         const dayKey = showDayDividers
                           ? getDayKey(log.timestamp)
                           : null;
@@ -1404,21 +1547,21 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 16,
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 16,
   },
   statCard: {
     flex: 1,
-    minWidth: 200,
-    elevation: 2,
+    minWidth: 180,
+    borderRadius: 12,
   },
-  statCardClickable: {
-    backgroundColor: "rgba(0,0,0,0.06)",
+  statCardContent: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   statLabel: {
-    fontSize: 12,
-    color: "#666",
-    marginBottom: 8,
+    fontSize: 11,
+    marginBottom: 4,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -1432,22 +1575,23 @@ const styles = StyleSheet.create({
     color: "#888",
   },
   statValue: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: "bold",
-    color: "#6f95ab",
+    lineHeight: 28,
+  },
+  statValueCompact: {
+    fontSize: 18,
+    lineHeight: 24,
   },
   statValueUnit: {
-    fontSize: 18,
-    color: "#666",
+    fontSize: 14,
   },
   statSubtext: {
-    fontSize: 12,
-    color: "#999",
-    marginTop: 4,
+    fontSize: 10,
+    marginTop: 2,
   },
   statSubtextHint: {
     fontSize: 10,
-    color: "#999",
     marginTop: 2,
     fontStyle: "italic",
   },
@@ -1532,10 +1676,13 @@ const styles = StyleSheet.create({
   staleDaysInline: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#444",
   },
   historyCard: {
-    elevation: 2,
+    borderRadius: 12,
+  },
+  historyCardContent: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
   },
   historyCardWeb: {
     flex: 1,
@@ -1621,6 +1768,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: "100%",
     paddingVertical: 10,
+  },
+  historyAdminControls: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+  },
+  shiftToggleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
   },
   dayDividerText: {
     fontSize: 13,

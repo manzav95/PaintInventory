@@ -25,6 +25,7 @@ import version from "../version";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import InventoryService from "../services/inventoryService";
+import LoginHistoryModal from "../components/LoginHistoryModal";
 
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
@@ -59,6 +60,7 @@ export default function SettingsScreen({
   );
   const [paintSuffix, setPaintSuffix] = useState("");
   const [savingSuffix, setSavingSuffix] = useState(false);
+  const [loginHistoryOpen, setLoginHistoryOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -187,6 +189,23 @@ export default function SettingsScreen({
                     color={theme.colors.primary}
                   />
                 </View>
+                <Divider style={styles.divider} />
+                <Text
+                  style={[
+                    styles.settingDescription,
+                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
+                  ]}
+                >
+                  View sign-in history for all users (timestamp per login).
+                </Text>
+                <Button
+                  mode="outlined"
+                  onPress={() => setLoginHistoryOpen(true)}
+                  style={styles.adminButton}
+                  icon="account-clock"
+                >
+                  User login history
+                </Button>
                 <Divider style={styles.divider} />
                 <Text
                   style={[
@@ -338,6 +357,10 @@ export default function SettingsScreen({
           </View>
         </View>
       )}
+      <LoginHistoryModal
+        visible={loginHistoryOpen}
+        onDismiss={() => setLoginHistoryOpen(false)}
+      />
     </View>
   );
 }

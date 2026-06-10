@@ -19,6 +19,8 @@ import {
 import AuditService from "../services/auditService";
 import NotificationsBell from "../components/NotificationsBell";
 import version from "../version";
+import { formatDayHeader } from "../utils/transactionDayUtils";
+import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 
 function formatAction(action, details) {
   if (action === "update" && details?._actionType === "check_in")
@@ -116,6 +118,7 @@ export default function HomeScreen({
   const auditLogsLoaded = useCachedAudit || auditLogsLocal.length > 0;
   // Admin only: 'all' = full transaction history, 'reduced' = what standard users see
   const [transactionHistoryView, setTransactionHistoryView] = useState("all");
+  const [shiftFilter, setShiftFilter] = useState(null);
 
   const loadAuditLogs = async () => {
     if (onRefreshAuditLogs) {
@@ -185,16 +188,16 @@ export default function HomeScreen({
     return timeFiltered;
   }, [auditLogs, weekAgoStart, todayStart, isAdmin, transactionHistoryView]);
 
+  const logsForDisplay = useMemo(() => {
+    if (!isAdmin || !shiftFilter) return recentTransactionLogs;
+    return recentTransactionLogs.filter((log) =>
+      logMatchesShift(log.timestamp, shiftFilter),
+    );
+  }, [recentTransactionLogs, isAdmin, shiftFilter]);
+
   const transactionLogsByDay = useMemo(() => {
     const byDay = {};
-    const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    ).getTime();
-    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
-    recentTransactionLogs.forEach((log) => {
+    logsForDisplay.forEach((log) => {
       const t = log.timestamp ? new Date(log.timestamp) : null;
       if (!t) return;
       const dayStart = new Date(
@@ -208,22 +211,11 @@ export default function HomeScreen({
     });
     return Object.values(byDay)
       .sort((a, b) => b.dayStart - a.dayStart)
-      .map((group) => {
-        let dateLabel;
-        if (group.dayStart === todayStart) dateLabel = "Today";
-        else if (group.dayStart === yesterdayStart) dateLabel = "Yesterday";
-        else {
-          const d = new Date(group.dayStart);
-          dateLabel = d.toLocaleDateString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-            year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-          });
-        }
-        return { ...group, dateLabel };
-      });
-  }, [recentTransactionLogs]);
+      .map((group) => ({
+        ...group,
+        dateLabel: formatDayHeader(group.logs[0]?.timestamp),
+      }));
+  }, [logsForDisplay]);
 
   const getDisplayUserName = (log) => {
     const u = (log.userName || "").trim().toLowerCase();
@@ -278,6 +270,26 @@ export default function HomeScreen({
         </Text>
         {isAdmin && (
           <View style={styles.transactionToggleRow}>
+            <Button
+              mode={shiftFilter === "day" ? "contained" : "outlined"}
+              compact
+              onPress={() =>
+                setShiftFilter((f) => (f === "day" ? null : "day"))
+              }
+              style={styles.transactionToggleBtn}
+            >
+              {SHIFT_LABELS.day}
+            </Button>
+            <Button
+              mode={shiftFilter === "swing" ? "contained" : "outlined"}
+              compact
+              onPress={() =>
+                setShiftFilter((f) => (f === "swing" ? null : "swing"))
+              }
+              style={styles.transactionToggleBtn}
+            >
+              {SHIFT_LABELS.swing}
+            </Button>
             <Button
               mode="contained"
               compact
@@ -342,16 +354,28 @@ export default function HomeScreen({
         ) : (
           transactionLogsByDay.map((dayGroup) => (
             <View key={dayGroup.key} style={styles.transactionDayBlock}>
-              {isAdmin && (
+              <View style={styles.dayDividerWrap}>
                 <Text
                   style={[
-                    styles.transactionDayHeader,
-                    { color: theme.colors.primary },
+                    styles.dayDividerText,
+                    {
+                      color: theme.dark ? "#c0c4cc" : "#666",
+                    },
                   ]}
                 >
                   {dayGroup.dateLabel}
                 </Text>
-              )}
+                <View
+                  style={[
+                    styles.dayDividerLine,
+                    {
+                      backgroundColor: theme.dark
+                        ? "rgba(255,255,255,0.18)"
+                        : "rgba(0,0,0,0.12)",
+                    },
+                  ]}
+                />
+              </View>
               {dayGroup.logs.map((log, index) => {
                 const actionText = formatAction(log.action, log.details);
                 const color = getActionColor(log.action, log.details);
@@ -826,13 +850,22 @@ const styles = StyleSheet.create({
   transactionDayBlock: {
     marginTop: 16,
   },
-  transactionDayHeader: {
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 8,
-    paddingBottom: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(0,0,0,0.12)",
+  dayDividerWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  dayDividerText: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginRight: 12,
+  },
+  dayDividerLine: {
+    height: 2,
+    flex: 1,
+    borderRadius: 1,
   },
   emptyLogs: {
     fontSize: 14,

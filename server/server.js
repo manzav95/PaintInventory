@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const fs = require('fs');
 const db = require('./database');
+const { Database } = require('./database');
 const { sendLowStockAlertEmail } = require('./lowStockAlertEmail');
 
 // Try to load optional dependencies (for Excel export)
@@ -43,7 +44,7 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
-// Recompute custom paint/stain recycle_date from latest audit activity (add, check-in/out, receive, manual qty).
+// Recompute custom paint/stain recycle_date (9 months after latest check-in/out/receiving, or lot date).
 app.post('/api/items/sync-recycle-dates', async (req, res) => {
   try {
     const result = await db.syncAllCustomRecycleDatesFromAudit();
@@ -127,7 +128,15 @@ app.put('/api/items/:id', async (req, res) => {
     // Extract action type flag (if present) and remove it from updates before saving
     const actionType = updates._actionType;
     const quantityChange = updates._quantityChange;
-    const recycleDateProvided = Object.prototype.hasOwnProperty.call(updates, 'recycle_date');
+    const lotDateProvided = Object.prototype.hasOwnProperty.call(updates, 'lot_date');
+    if (lotDateProvided) {
+      const lotRaw = updates.lot_date;
+      const lot =
+        lotRaw != null && String(lotRaw).trim() !== ""
+          ? String(lotRaw).trim()
+          : null;
+      updates.lot_date = lot;
+    }
 
     console.log('Extracted actionType:', actionType, 'quantityChange:', quantityChange, 'for item:', id);
 
@@ -211,8 +220,10 @@ app.put('/api/items/:id', async (req, res) => {
       // Log audit with appropriate action type
       await db.addAuditLog(auditActionType, id, auditUserName, auditDetails);
       if (
-        !recycleDateProvided &&
-        ["add", "check_in", "check_out", "receiving", "update"].includes(auditActionType)
+        lotDateProvided ||
+        auditActionType === "check_in" ||
+        auditActionType === "check_out" ||
+        auditActionType === "receiving"
       ) {
         await db.updateRecycleDateFromLastActivity(id);
       }
@@ -405,12 +416,57 @@ app.get('/api/reports/summary', async (req, res) => {
   try {
     const fromDate = (req.query.from && String(req.query.from).trim()) || null;
     const toDate = (req.query.to && String(req.query.to).trim()) || null;
-    const groupBy = req.query.groupBy === 'month' ? 'month' : 'week';
+    const groupBy =
+      req.query.groupBy === 'month'
+        ? 'month'
+        : req.query.groupBy === 'day'
+          ? 'day'
+          : 'week';
     const summary = await db.getReportsSummary(fromDate, toDate, groupBy);
     res.json(summary);
   } catch (error) {
     console.error('Error fetching reports summary:', error);
     res.status(500).json({ error: 'Failed to fetch reports summary' });
+  }
+});
+
+app.get('/api/reports/custom-colors', async (req, res) => {
+  try {
+    const fromDate = (req.query.from && String(req.query.from).trim()) || null;
+    const toDate = (req.query.to && String(req.query.to).trim()) || null;
+    const groupBy = req.query.groupBy === 'month' ? 'month' : 'week';
+    const report = await db.getCustomColorsOrderReport(fromDate, toDate, groupBy);
+    res.json(report);
+  } catch (error) {
+    console.error('Error fetching custom colors report:', error);
+    res.status(500).json({ error: 'Failed to fetch custom colors report' });
+  }
+});
+
+// Record user login (client calls on sign-in)
+app.post('/api/login-log', async (req, res) => {
+  try {
+    const userName = (req.body && req.body.userName && String(req.body.userName).trim()) || '';
+    if (!userName) {
+      return res.status(400).json({ error: 'userName required' });
+    }
+    const result = await db.addLoginLog(userName);
+    res.json(result);
+  } catch (error) {
+    console.error('Error recording login:', error);
+    res.status(500).json({ error: 'Failed to record login' });
+  }
+});
+
+// Login history for admin settings
+app.get('/api/login-log', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
+    const logs = await db.getLoginLogs(limit);
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching login logs:', error);
+    res.status(500).json({ error: 'Failed to fetch login logs' });
   }
 });
 

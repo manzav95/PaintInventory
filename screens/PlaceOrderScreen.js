@@ -109,7 +109,8 @@ function getMaterialTypeLabelAndColor(item, theme) {
 }
 
 /** Column count from actual content width (main pane when sidebar is open). */
-function gridColumnCount(contentWidth) {
+function gridColumnCount(contentWidth, isDesktop) {
+  if (isDesktop) return contentWidth >= 360 ? 3 : 1;
   if (contentWidth >= 680) return 3;
   if (contentWidth >= 420) return 2;
   return 1;
@@ -119,10 +120,19 @@ function getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop) {
   const scrollPad = 32;
   if (embeddedInShell) {
     const sidebar = isNarrowDesktop ? SHELL_SIDEBAR_NARROW : SHELL_SIDEBAR_WIDE;
-    const shellChrome = sidebar + 56;
-    return Math.max(280, windowWidth - shellChrome - scrollPad);
+    const shellChrome = 40 + sidebar + 20 + scrollPad;
+    return Math.max(280, windowWidth - shellChrome);
   }
   return Math.max(280, Math.min(PAGE_MAX_WIDTH, windowWidth) - scrollPad);
+}
+
+/** Web desktop uses container % so three cards fit with even gaps. */
+function getGridCellWidthStyle(numCols, colW) {
+  if (Platform.OS === "web" && numCols > 1) {
+    const gapTotal = GRID_GAP * (numCols - 1);
+    return { width: `calc((100% - ${gapTotal}px) / ${numCols})` };
+  }
+  return { width: colW };
 }
 
 /** Non-AP bundles: paint with paint, stain with stain, etc. */
@@ -259,8 +269,8 @@ export default function PlaceOrderScreen({
     () => getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop),
     [windowWidth, embeddedInShell, isNarrowDesktop],
   );
-  const numCols = gridColumnCount(contentWidth);
   const isDesktop = isWeb && windowWidth >= DESKTOP_BREAKPOINT;
+  const numCols = gridColumnCount(contentWidth, isDesktop);
 
   const [filterTab, setFilterTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -581,24 +591,19 @@ export default function PlaceOrderScreen({
                   {bundle.title}
                 </Text>
                 <View style={styles.grid}>
-                  {bundle.items.map((item, index) => {
+                  {bundle.items.map((item) => {
                     const id = String(item.id);
                     const st = lineState[id] || {};
                     const custom = isCustomColorItem(item);
                     const { label: typeLabel, color: typeColor } =
                       getMaterialTypeLabelAndColor(item, theme);
                     const onHand = item.quantity ?? 0;
-                    const rowEnd = (index + 1) % numCols === 0;
                     return (
                       <View
                         key={`${bundle.key}-${id}`}
                         style={[
                           styles.gridCell,
-                          {
-                            width: colW,
-                            marginRight: rowEnd ? 0 : GRID_GAP,
-                            marginBottom: GRID_GAP,
-                          },
+                          getGridCellWidthStyle(numCols, colW),
                         ]}
                       >
                         <Card
@@ -838,13 +843,14 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     justifyContent: "flex-start",
     width: "100%",
+    gap: GRID_GAP,
   },
   gridCell: {
     flexGrow: 0,
     flexShrink: 0,
   },
   itemCard: {
-    flex: 1,
+    width: "100%",
     elevation: 2,
     ...(Platform.OS === "web"
       ? { boxShadow: "0px 1px 3px rgba(0,0,0,0.12)" }

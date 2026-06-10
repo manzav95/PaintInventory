@@ -69,9 +69,11 @@ export default function AppSidebar({
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.headerRow}>
-        <Title style={[styles.title, { color: theme.colors.onBackground }]}>
-          Paint Inventory
-        </Title>
+        <View style={styles.headerTitleBlock}>
+          <Title style={[styles.title, { color: theme.colors.onBackground }]}>
+            Paint Inventory
+          </Title>
+        </View>
         <View style={styles.headerIcons}>
           <NotificationsBell
             inventory={inventory}
@@ -181,9 +183,6 @@ export default function AppSidebar({
       )}
 
       <View style={styles.footer}>
-        <Text style={[styles.footerText, { color: theme.colors.onSurfaceVariant }]}>
-          {isAdmin ? "Admin" : userName}
-        </Text>
         <Button mode="text" compact onPress={onSwitchUser}>
           Switch user
         </Button>
@@ -203,11 +202,16 @@ const styles = StyleSheet.create({
   scrollContent: { paddingBottom: 24, gap: 6 },
   headerRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     marginBottom: 8,
   },
-  title: { fontSize: 20, flex: 1 },
+  headerTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 4,
+  },
+  title: { fontSize: 20 },
   headerIcons: { flexDirection: "row", alignItems: "center" },
   sectionLabel: {
     fontSize: 11,
@@ -220,6 +224,5 @@ const styles = StyleSheet.create({
   navButton: { marginBottom: 4 },
   navButtonContent: { justifyContent: "flex-start" },
   footer: { marginTop: 20, paddingTop: 12 },
-  footerText: { fontSize: 13 },
   version: { fontSize: 11, marginTop: 4 },
 });

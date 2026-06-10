@@ -54,10 +54,14 @@ class Database {
       const recycleSync = await this.syncAllCustomRecycleDatesFromAudit();
       if (recycleSync.updated > 0) {
         console.log(
-          `Recycle dates backfilled for ${recycleSync.updated} custom item(s)` +
-            (recycleSync.fromFallback
-              ? ` (${recycleSync.fromFallback} from created/updated dates)`
-              : ""),
+          `Recycle due dates recomputed for ${recycleSync.updated} custom item(s)` +
+            (recycleSync.fromActivity
+              ? ` (${recycleSync.fromActivity} from activity`
+              : "") +
+            (recycleSync.fromLot
+              ? `${recycleSync.fromActivity ? ", " : " ("}${recycleSync.fromLot} from lot date`
+              : "") +
+            (recycleSync.fromActivity || recycleSync.fromLot ? ")" : "."),
         );
       }
       console.log("Connected to PostgreSQL database");
@@ -161,6 +165,13 @@ class Database {
     `);
     await client.query(`
       DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'lot_date') THEN
+          ALTER TABLE items ADD COLUMN lot_date TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'external_code') THEN
           ALTER TABLE items ADD COLUMN external_code TEXT UNIQUE DEFAULT NULL;
         END IF;
@@ -230,6 +241,15 @@ class Database {
       )
     `);
     console.log("Audit log table ready");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS login_log (
+        id SERIAL PRIMARY KEY,
+        user_name TEXT NOT NULL,
+        logged_in_at TEXT NOT NULL
+      )
+    `);
+    console.log("Login log table ready");
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS orders (
@@ -372,7 +392,19 @@ class Database {
       : null;
     const displayOrder = item.display_order != null && !isNaN(Number(item.display_order)) ? Number(item.display_order) : 0;
     const hexColor = item.hex_color != null && String(item.hex_color).trim() !== "" ? String(item.hex_color).trim() : null;
-    const recycleDate = item.recycle_date != null && String(item.recycle_date).trim() !== "" ? String(item.recycle_date).trim() : null;
+    const lotDate =
+      item.lot_date != null && String(item.lot_date).trim() !== ""
+        ? String(item.lot_date).trim()
+        : null;
+    let recycleDate =
+      item.recycle_date != null && String(item.recycle_date).trim() !== ""
+        ? String(item.recycle_date).trim()
+        : null;
+    const isCustomType = type === "custom_paint" || type === "custom_stain";
+    if (isCustomType) {
+      const effectiveLot = lotDate || new Date().toISOString().slice(0, 10);
+      recycleDate = Database.recycleDueDateFromLotDate(effectiveLot);
+    }
     let externalCode = item.external_code != null && String(item.external_code).trim() !== ""
       ? String(item.external_code).trim()
       : null;
@@ -395,8 +427,8 @@ class Database {
         : null;
     try {
       await this.pool.query(
-        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, recycle_date, external_code, rex, is_mixing)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
         [
           item.id,
           item.name,
@@ -412,6 +444,7 @@ class Database {
           type,
           displayOrder,
           hexColor,
+          isCustomType ? lotDate || new Date().toISOString().slice(0, 10) : lotDate,
           recycleDate,
           externalCode,
           rex,
@@ -442,6 +475,7 @@ class Database {
         type,
         display_order: displayOrder,
         hex_color: hexColor,
+        lot_date: isCustomType ? lotDate || new Date().toISOString().slice(0, 10) : lotDate,
         recycle_date: recycleDate,
         external_code: externalCode,
         rex,
@@ -467,6 +501,7 @@ class Database {
       "display_order",
       "hex_color",
       "recycle_date",
+      "lot_date",
       "external_code",
       "rex",
       "is_mixing",
@@ -507,6 +542,9 @@ class Database {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else if (key === "recycle_date") {
+          const v = updates[key];
+          values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
+        } else if (key === "lot_date") {
           const v = updates[key];
           values.push(v != null && String(v).trim() !== "" ? String(v).trim() : null);
         } else if (key === "external_code") {
@@ -635,6 +673,28 @@ class Database {
           ? JSON.parse(row.details || "{}")
           : row.details || {},
     }));
+  }
+
+  async addLoginLog(userName) {
+    const trimmed = String(userName ?? "").trim();
+    if (!trimmed) return { success: false, error: "userName required" };
+    const result = await this.pool.query(
+      `INSERT INTO login_log (user_name, logged_in_at)
+       VALUES ($1, $2) RETURNING id, user_name, logged_in_at`,
+      [trimmed, new Date().toISOString()],
+    );
+    return { success: true, entry: result.rows[0] };
+  }
+
+  async getLoginLogs(limit = 500) {
+    const result = await this.pool.query(
+      `SELECT id, user_name, logged_in_at
+       FROM login_log
+       ORDER BY logged_in_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows;
   }
 
   async upsertItemJobHistory(itemId, jobName) {
@@ -966,6 +1026,7 @@ class Database {
       await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", ["received", orderId]);
       updatedOrder.status = "received";
     }
+    await this.applyLotDateFromOrderIfNeeded(itemId, order);
     return { success: true, receivedQuantity: receiveQty, order: await this.getOrderById(orderId) };
   }
 
@@ -1129,25 +1190,52 @@ class Database {
     return { success: true };
   }
 
-  /** Activity that resets custom paint/stain recycle clock (due = last activity + 4 months). */
+  /** Custom paint/stain recycle due = lot date + 9 months. */
+  static CUSTOM_RECYCLE_MONTHS = 9;
+
+  static recycleDueDateFromLotDate(lotDateStr) {
+    const s = lotDateStr != null ? String(lotDateStr).trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const d = new Date(`${s}T12:00:00`);
+    if (isNaN(d.getTime())) return null;
+    d.setMonth(d.getMonth() + Database.CUSTOM_RECYCLE_MONTHS);
+    return d.toISOString().slice(0, 10);
+  }
+
+  static lotDateFromOrderPlacedAt(placedAt) {
+    if (!placedAt) return null;
+    const s = String(placedAt).trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+
+  /** Actions that reset custom recycle due date (activity date + 9 months). */
   static recycleActivityActions() {
-    return ["add", "check_in", "check_out", "receiving", "update"];
+    return ["check_in", "check_out", "receiving"];
   }
 
   static recycleDueDateFromActivityIso(isoTimestamp) {
     const d = new Date(isoTimestamp);
     if (isNaN(d.getTime())) return null;
-    d.setMonth(d.getMonth() + 4);
+    d.setMonth(d.getMonth() + Database.CUSTOM_RECYCLE_MONTHS);
     return d.toISOString().slice(0, 10);
   }
 
-  async getLastActivityTimestampForItem(itemId) {
+  async getLastRecycleActivityTimestampForItem(itemId) {
     const id = itemId != null ? String(itemId).trim() : "";
     if (!id) return null;
     const actions = Database.recycleActivityActions();
     const result = await this.pool.query(
       `SELECT timestamp FROM audit_log
-       WHERE "itemId" = $1 AND action = ANY($2::text[])
+       WHERE "itemId" = $1
+         AND (
+           action = ANY($2::text[])
+           OR (
+             action = 'update'
+             AND details IS NOT NULL
+             AND trim(details) <> ''
+             AND COALESCE((details::jsonb)->>'_actionType', '') = ANY($2::text[])
+           )
+         )
        ORDER BY timestamp DESC
        LIMIT 1`,
       [id, actions],
@@ -1156,26 +1244,9 @@ class Database {
   }
 
   /**
-   * Latest timestamp to base recycle due date on: audit activity first, then item dates.
+   * Set recycle_date from latest check-in/out/receiving for custom_paint/custom_stain.
    */
-  async getRecycleBaselineTimestampForItem(itemId, item = null) {
-    const auditTs = await this.getLastActivityTimestampForItem(itemId);
-    if (auditTs) return { timestamp: auditTs, source: "audit" };
-    const it = item || (await this.getItem(itemId));
-    if (!it) return null;
-    const candidates = [it.createdAt, it.updatedAt, it.lastScanned];
-    for (const ts of candidates) {
-      if (ts && !isNaN(new Date(ts).getTime())) {
-        return { timestamp: ts, source: "item_dates" };
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Set recycle_date (due date) from latest activity for custom_paint/custom_stain.
-   */
-  async updateRecycleDateFromLastActivity(itemId, { onlyIfMissing = false } = {}) {
+  async updateRecycleDateFromLastActivity(itemId) {
     const id = itemId != null ? String(itemId).trim() : "";
     if (!id) return { success: false };
     const item = await this.getItem(id);
@@ -1184,53 +1255,381 @@ class Database {
     if (t !== "custom_paint" && t !== "custom_stain") {
       return { success: true, skipped: true };
     }
-    const existing = item.recycle_date != null ? String(item.recycle_date).trim() : "";
-    if (onlyIfMissing && existing) {
-      return { success: true, skipped: true, reason: "has_date" };
+    const activityTs = await this.getLastRecycleActivityTimestampForItem(id);
+    if (!activityTs) {
+      return this.updateRecycleDateFromLotDate(id);
     }
-    const baseline = await this.getRecycleBaselineTimestampForItem(id, item);
-    if (!baseline) return { success: true, skipped: true, reason: "no_timestamp" };
-    const recycleDate = Database.recycleDueDateFromActivityIso(baseline.timestamp);
+    const recycleDate = Database.recycleDueDateFromActivityIso(activityTs);
     if (!recycleDate) return { success: false, error: "Invalid activity timestamp" };
     await this.updateItem(id, { recycle_date: recycleDate });
-    return {
-      success: true,
-      recycle_date: recycleDate,
-      usedFallback: baseline.source === "item_dates",
-    };
+    return { success: true, recycle_date: recycleDate, source: "activity" };
   }
 
-  /** Backfill recycle_date for custom items missing a due date. */
+  /**
+   * Set recycle_date from lot_date for custom_paint/custom_stain.
+   */
+  async updateRecycleDateFromLotDate(itemId) {
+    const id = itemId != null ? String(itemId).trim() : "";
+    if (!id) return { success: false };
+    const item = await this.getItem(id);
+    if (!item) return { success: false, error: "Item not found" };
+    const t = (item.type || "").toLowerCase();
+    if (t !== "custom_paint" && t !== "custom_stain") {
+      return { success: true, skipped: true };
+    }
+    const lot =
+      item.lot_date != null ? String(item.lot_date).trim() : "";
+    if (!lot) return { success: true, skipped: true, reason: "no_lot_date" };
+    const recycleDate = Database.recycleDueDateFromLotDate(lot);
+    if (!recycleDate) return { success: false, error: "Invalid lot date" };
+    await this.updateItem(id, { recycle_date: recycleDate });
+    return { success: true, recycle_date: recycleDate, lot_date: lot };
+  }
+
+  async applyLotDateFromOrderIfNeeded(itemId, order) {
+    const id = itemId != null ? String(itemId).trim() : "";
+    if (!id || !order) return { success: true, skipped: true };
+    const item = await this.getItem(id);
+    if (!item) return { success: true, skipped: true };
+    const t = (item.type || "").toLowerCase();
+    if (t !== "custom_paint" && t !== "custom_stain") {
+      return { success: true, skipped: true };
+    }
+    const existingLot =
+      item.lot_date != null ? String(item.lot_date).trim() : "";
+    if (existingLot) return { success: true, skipped: true, reason: "has_lot_date" };
+    const lotDate = Database.lotDateFromOrderPlacedAt(order.placed_at);
+    if (!lotDate) return { success: true, skipped: true, reason: "no_order_date" };
+    const recycleDate = Database.recycleDueDateFromLotDate(lotDate);
+    await this.updateItem(id, { lot_date: lotDate, recycle_date: recycleDate });
+    return { success: true, lot_date: lotDate, recycle_date: recycleDate };
+  }
+
+  /** Recompute recycle_date: latest check-in/out/receiving + 9 months, else lot date + 9 months. */
   async syncAllCustomRecycleDatesFromAudit() {
     const result = await this.pool.query(
-      `SELECT id, type, recycle_date FROM items WHERE lower(type) IN ('custom_paint', 'custom_stain')`,
+      `SELECT id, type, lot_date, recycle_date FROM items WHERE lower(type) IN ('custom_paint', 'custom_stain')`,
     );
     let updated = 0;
     let skipped = 0;
-    let fromFallback = 0;
+    let fromActivity = 0;
+    let fromLot = 0;
     for (const row of result.rows) {
-      const hasDate =
-        row.recycle_date != null && String(row.recycle_date).trim() !== "";
-      if (hasDate) {
+      const activityTs = await this.getLastRecycleActivityTimestampForItem(row.id);
+      const lot = row.lot_date != null ? String(row.lot_date).trim() : "";
+      let expected = null;
+      let source = null;
+      if (activityTs) {
+        expected = Database.recycleDueDateFromActivityIso(activityTs);
+        source = "activity";
+      } else if (lot) {
+        expected = Database.recycleDueDateFromLotDate(lot);
+        source = "lot";
+      }
+      if (!expected) {
         skipped += 1;
         continue;
       }
-      const r = await this.updateRecycleDateFromLastActivity(row.id);
-      if (r.success && !r.skipped) {
-        updated += 1;
-        if (r.usedFallback) fromFallback += 1;
-      } else {
+      const current =
+        row.recycle_date != null ? String(row.recycle_date).trim() : "";
+      if (current === expected) {
         skipped += 1;
+        continue;
       }
+      await this.updateItem(row.id, { recycle_date: expected });
+      updated += 1;
+      if (source === "activity") fromActivity += 1;
+      else if (source === "lot") fromLot += 1;
     }
-    return { success: true, updated, skipped, fromFallback, total: result.rows.length };
+    return { success: true, updated, skipped, fromActivity, fromLot, total: result.rows.length };
+  }
+
+  /**
+   * Custom paint/stain orders: totals, job breakdown, color breakdown, per week/month.
+   */
+  async getCustomColorsOrderReport(fromDate, toDate, groupBy = "week") {
+    const trunc = groupBy === "month" ? "month" : "week";
+    const from =
+      fromDate || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
+    const to = toDate || new Date().toISOString().slice(0, 10);
+
+    const formatBucketLabel = (d) => {
+      if (!d) return "";
+      const dt = d instanceof Date ? d : new Date(d);
+      if (Number.isNaN(dt.getTime())) return String(d);
+      if (trunc === "month") {
+        return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      }
+      const end = new Date(dt);
+      end.setDate(end.getDate() + 6);
+      return `${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    };
+
+    const result = await this.pool.query(
+      `SELECT
+         date_trunc($1, (o.placed_at::timestamptz)) AS bucket,
+         ol.item_id,
+         ol.quantity,
+         ol.job_name,
+         i.name AS item_name,
+         i.type AS item_type
+       FROM orders o
+       JOIN order_lines ol ON ol.order_id = o.id
+       JOIN items i ON i.id = ol.item_id
+       WHERE lower(i.type) IN ('custom_paint', 'custom_stain')
+         AND (o.placed_at::timestamptz) >= $2::date
+         AND (o.placed_at::timestamptz) < ($3::date + interval '1 day')
+       ORDER BY o.placed_at ASC`,
+      [trunc, from, to],
+    );
+
+    const byJobMap = new Map();
+    const byColorMap = new Map();
+    const bucketMap = new Map();
+    let totalQuantity = 0;
+    let lineCount = 0;
+
+    const ensureJob = (jobName) => {
+      const key = jobName || "(No job)";
+      if (!byJobMap.has(key)) {
+        byJobMap.set(key, {
+          jobName: key,
+          totalQuantity: 0,
+          colors: new Map(),
+        });
+      }
+      return byJobMap.get(key);
+    };
+
+    const ensureColor = (itemId, itemName, itemType) => {
+      const id = String(itemId);
+      if (!byColorMap.has(id)) {
+        byColorMap.set(id, {
+          itemId: id,
+          itemName: itemName || id,
+          type: itemType || "custom_paint",
+          totalQuantity: 0,
+          jobs: new Map(),
+        });
+      }
+      return byColorMap.get(id);
+    };
+
+    const ensureBucket = (bucketDate) => {
+      const key = bucketDate
+        ? Database.bucketKeyFromDate(bucketDate, trunc)
+        : "unknown";
+      if (!bucketMap.has(key)) {
+        bucketMap.set(key, {
+          key,
+          label: formatBucketLabel(bucketDate),
+          totalQuantity: 0,
+          colors: new Map(),
+          jobs: new Map(),
+        });
+      }
+      return bucketMap.get(key);
+    };
+
+    for (const row of result.rows) {
+      const qty = parseInt(row.quantity, 10) || 0;
+      if (qty <= 0) continue;
+      lineCount += 1;
+      totalQuantity += qty;
+
+      const itemId = String(row.item_id);
+      const itemName = row.item_name || itemId;
+      const itemType = (row.item_type || "custom_paint").toLowerCase();
+      const jobName =
+        row.job_name != null && String(row.job_name).trim() !== ""
+          ? String(row.job_name).trim()
+          : "(No job)";
+
+      const job = ensureJob(jobName);
+      job.totalQuantity += qty;
+      const jobColor = job.colors.get(itemId) || {
+        itemId,
+        itemName,
+        type: itemType,
+        quantity: 0,
+      };
+      jobColor.quantity += qty;
+      job.colors.set(itemId, jobColor);
+
+      const color = ensureColor(itemId, itemName, itemType);
+      color.totalQuantity += qty;
+      color.jobs.set(jobName, (color.jobs.get(jobName) || 0) + qty);
+
+      const bucket = ensureBucket(row.bucket);
+      bucket.totalQuantity += qty;
+      bucket.colors.set(
+        itemId,
+        (bucket.colors.get(itemId) || 0) + qty,
+      );
+      bucket.jobs.set(jobName, (bucket.jobs.get(jobName) || 0) + qty);
+    }
+
+    for (const periodDate of Database.enumerateReportPeriods(from, to, trunc)) {
+      ensureBucket(periodDate);
+    }
+
+    const byJob = [...byJobMap.values()]
+      .map((j) => ({
+        jobName: j.jobName,
+        totalQuantity: j.totalQuantity,
+        colors: [...j.colors.values()].sort((a, b) =>
+          String(a.itemName).localeCompare(String(b.itemName)),
+        ),
+      }))
+      .sort((a, b) => b.totalQuantity - a.totalQuantity);
+
+    const byColor = [...byColorMap.values()]
+      .map((c) => ({
+        itemId: c.itemId,
+        itemName: c.itemName,
+        type: c.type,
+        totalQuantity: c.totalQuantity,
+        jobs: [...c.jobs.entries()]
+          .map(([jobName, quantity]) => ({ jobName, quantity }))
+          .sort((a, b) => b.quantity - a.quantity),
+      }))
+      .sort((a, b) => b.totalQuantity - a.totalQuantity);
+
+    const sortedBuckets = [...bucketMap.values()].sort((a, b) =>
+      a.key.localeCompare(b.key),
+    );
+
+    const bucketDetails = sortedBuckets.map((b) => ({
+      label: b.label,
+      totalQuantity: b.totalQuantity,
+      colors: [...b.colors.entries()]
+        .map(([itemId, quantity]) => {
+          const c = byColorMap.get(itemId);
+          return {
+            itemId,
+            itemName: c?.itemName || itemId,
+            quantity,
+          };
+        })
+        .sort((a, b) => b.quantity - a.quantity),
+      jobs: [...b.jobs.entries()]
+        .map(([jobName, quantity]) => ({ jobName, quantity }))
+        .sort((a, b) => b.quantity - a.quantity),
+    }));
+
+    return {
+      from,
+      to,
+      groupBy: trunc,
+      totals: {
+        totalQuantity,
+        lineCount,
+        colorCount: byColorMap.size,
+        jobCount: byJobMap.size,
+      },
+      byJob,
+      byColor,
+      buckets: sortedBuckets.map((b) => b.label),
+      bucketTotals: sortedBuckets.map((b) => b.totalQuantity),
+      bucketDetails,
+    };
+  }
+
+  static normalizeUsageMaterialType(raw) {
+    const t = String(raw || "").toLowerCase().trim();
+    if (t === "custom_paint") return "paint";
+    if (t === "custom_stain") return "stain";
+    if (["paint", "primer", "clear", "stain"].includes(t)) return t;
+    return null;
+  }
+
+  static emptyUsageByType() {
+    return { paint: 0, primer: 0, clear: 0, stain: 0 };
+  }
+
+  static roundUsageByType(obj) {
+    const out = Database.emptyUsageByType();
+    for (const k of Object.keys(out)) {
+      out[k] = Math.round((obj[k] || 0) * 10) / 10;
+    }
+    return out;
+  }
+
+  static bucketKeyFromDate(d, trunc) {
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return "unknown";
+    if (trunc === "month") {
+      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+    }
+    if (trunc === "day") {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, "0");
+      const day = String(dt.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+    const cur = new Date(dt);
+    cur.setHours(12, 0, 0, 0);
+    const day = cur.getDay();
+    cur.setDate(cur.getDate() - ((day + 6) % 7));
+    return cur.toISOString();
+  }
+
+  /** All period starts from from→to (includes current incomplete month/week/day). */
+  static enumerateReportPeriods(from, to, trunc) {
+    const periods = [];
+    const start = new Date(`${from}T12:00:00`);
+    const end = new Date(`${to}T12:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return periods;
+    }
+
+    if (trunc === "day") {
+      const cur = new Date(start);
+      while (cur <= end) {
+        periods.push(new Date(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+      return periods;
+    }
+
+    if (trunc === "month") {
+      let y = start.getFullYear();
+      let m = start.getMonth();
+      const endY = end.getFullYear();
+      const endM = end.getMonth();
+      while (y < endY || (y === endY && m <= endM)) {
+        periods.push(new Date(y, m, 1, 12, 0, 0, 0));
+        m += 1;
+        if (m > 11) {
+          m = 0;
+          y += 1;
+        }
+      }
+      return periods;
+    }
+
+    const mondayStart = (d) => {
+      const cur = new Date(d);
+      cur.setHours(12, 0, 0, 0);
+      const day = cur.getDay();
+      cur.setDate(cur.getDate() - ((day + 6) % 7));
+      return cur;
+    };
+    let cur = mondayStart(start);
+    const endWeek = mondayStart(end);
+    while (cur <= endWeek) {
+      periods.push(new Date(cur));
+      cur.setDate(cur.getDate() + 7);
+    }
+    return periods;
   }
 
   /**
    * Aggregated metrics for Reports screen (week or month buckets).
    */
   async getReportsSummary(fromDate, toDate, groupBy = "week") {
-    const trunc = groupBy === "month" ? "month" : "week";
+    const trunc =
+      groupBy === "month" ? "month" : groupBy === "day" ? "day" : "week";
     const from = fromDate || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
     const to = toDate || new Date().toISOString().slice(0, 10);
 
@@ -1274,6 +1673,19 @@ class Database {
       [trunc, from, to],
     );
 
+    const usageTypeRows = await this.pool.query(
+      `SELECT
+         date_trunc($1, (mu.entry_date::date)) AS bucket,
+         COALESCE(NULLIF(LOWER(TRIM(mu.material_type)), ''), LOWER(i.type), '') AS mat_type,
+         COALESCE(SUM(mu.qty_gallons), 0)::float AS usage_gallons
+       FROM material_usage mu
+       LEFT JOIN items i ON i.id = mu.item_id
+       WHERE (mu.entry_date::date) >= $2::date
+         AND (mu.entry_date::date) < ($3::date + interval '1 day')
+       GROUP BY bucket, mat_type`,
+      [trunc, from, to],
+    );
+
     const bucketMap = new Map();
 
     const ensureBucket = (key, label) => {
@@ -1287,6 +1699,7 @@ class Database {
           orderValue: 0,
           materialUsageGallons: 0,
           materialUsageCount: 0,
+          materialUsageByType: Database.emptyUsageByType(),
         });
       }
       return bucketMap.get(key);
@@ -1299,14 +1712,28 @@ class Database {
       if (trunc === "month") {
         return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
       }
+      if (trunc === "day") {
+        return dt.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
       const end = new Date(dt);
       end.setDate(end.getDate() + 6);
       return `${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
     };
 
+    const rowBucket = (bucket) => {
+      const key = bucket
+        ? Database.bucketKeyFromDate(bucket, trunc)
+        : "unknown";
+      return ensureBucket(key, formatBucketLabel(bucket));
+    };
+
     for (const row of auditRows.rows) {
-      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
-      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      const b = rowBucket(row.bucket);
       let details = row.details;
       if (typeof details === "string") {
         try {
@@ -1329,17 +1756,28 @@ class Database {
     }
 
     for (const row of orderRows.rows) {
-      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
-      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      const b = rowBucket(row.bucket);
       b.orderQuantity += parseFloat(row.order_quantity) || 0;
       b.orderValue += parseFloat(row.order_value) || 0;
     }
 
     for (const row of usageRows.rows) {
-      const key = row.bucket ? new Date(row.bucket).toISOString() : "unknown";
-      const b = ensureBucket(key, formatBucketLabel(row.bucket));
+      const b = rowBucket(row.bucket);
       b.materialUsageGallons += parseFloat(row.usage_gallons) || 0;
       b.materialUsageCount += parseInt(row.usage_count, 10) || 0;
+    }
+
+    for (const row of usageTypeRows.rows) {
+      const b = rowBucket(row.bucket);
+      const matType = Database.normalizeUsageMaterialType(row.mat_type);
+      const gal = parseFloat(row.usage_gallons) || 0;
+      if (matType && gal > 0) {
+        b.materialUsageByType[matType] += gal;
+      }
+    }
+
+    for (const periodDate of Database.enumerateReportPeriods(from, to, trunc)) {
+      rowBucket(periodDate);
     }
 
     const sorted = [...bucketMap.values()].sort((a, b) =>
@@ -1354,6 +1792,9 @@ class Database {
         acc.orderValue += b.orderValue;
         acc.materialUsageGallons += b.materialUsageGallons;
         acc.materialUsageCount += b.materialUsageCount;
+        for (const k of Object.keys(acc.materialUsageByType)) {
+          acc.materialUsageByType[k] += b.materialUsageByType[k] || 0;
+        }
         return acc;
       },
       {
@@ -1363,8 +1804,23 @@ class Database {
         orderValue: 0,
         materialUsageGallons: 0,
         materialUsageCount: 0,
+        materialUsageByType: Database.emptyUsageByType(),
       },
     );
+    totals.materialUsageByType = Database.roundUsageByType(
+      totals.materialUsageByType,
+    );
+
+    const bucketDetails = sorted.map((b) => ({
+      label: b.label,
+      checkoutGallons: Math.round(b.checkoutGallons * 10) / 10,
+      receivingGallons: Math.round(b.receivingGallons * 10) / 10,
+      orderQuantity: Math.round(b.orderQuantity),
+      orderValue: Math.round(b.orderValue * 100) / 100,
+      materialUsageGallons: Math.round(b.materialUsageGallons * 10) / 10,
+      materialUsageCount: b.materialUsageCount,
+      materialUsageByType: Database.roundUsageByType(b.materialUsageByType),
+    }));
 
     return {
       from,
@@ -1377,6 +1833,7 @@ class Database {
       orderValue: sorted.map((b) => Math.round(b.orderValue * 100) / 100),
       materialUsageGallons: sorted.map((b) => Math.round(b.materialUsageGallons * 10) / 10),
       materialUsageCount: sorted.map((b) => b.materialUsageCount),
+      bucketDetails,
       totals,
     };
   }
@@ -1389,3 +1846,4 @@ class Database {
 const db = new Database();
 
 module.exports = db;
+module.exports.Database = Database;

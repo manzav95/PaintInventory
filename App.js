@@ -34,6 +34,15 @@ import {
   DARK_SURFACE_ELEVATED,
   DARK_BORDER,
 } from './utils/themeColors';
+import {
+  recordUserActivity,
+  getLastUserActivity,
+  isIdleExpired,
+  clearUserActivity,
+  isAdminUser,
+} from './utils/idleSession';
+import useIdleLogout from './utils/useIdleLogout';
+import LoginLogService from './services/loginLogService';
 
 const NEUTRAL_LIGHT = {
   bg: '#f0f0f0',
@@ -116,6 +125,7 @@ export default function App() {
   const [userName, setUserName] = useState(null);
   const isAdmin = userName === 'admin123';
   const actorName = isAdmin ? 'Admin' : (userName || 'unknown');
+  const idleLogoutTriggeredRef = useRef(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -298,6 +308,19 @@ export default function App() {
     try {
       const stored = await AsyncStorage.getItem('@inventory_user_name');
       if (stored) {
+        if (!isAdminUser(stored)) {
+          const last = await getLastUserActivity();
+          if (isIdleExpired(last)) {
+            await AsyncStorage.removeItem('@inventory_user_name');
+            await clearUserActivity();
+            setCurrentScreen('login');
+            return;
+          }
+          if (!last) {
+            await recordUserActivity();
+          }
+        }
+        idleLogoutTriggeredRef.current = false;
         setUserName(stored);
         setCurrentScreen(stored === 'admin123' ? 'home' : 'list');
       } else {
@@ -313,17 +336,38 @@ export default function App() {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     await AsyncStorage.setItem('@inventory_user_name', trimmed);
+    await recordUserActivity();
+    LoginLogService.recordLogin(trimmed).catch(() => {});
+    idleLogoutTriggeredRef.current = false;
     setUserName(trimmed);
-    setCurrentScreen('list');
+    setCurrentScreen(trimmed === 'admin123' ? 'home' : 'list');
   };
 
   const handleSwitchUser = async () => {
     await AsyncStorage.removeItem('@inventory_user_name');
+    await clearUserActivity();
     setUserName(null);
     setSelectedItem(null);
     setPreviousScreen('home');
     setCurrentScreen('login');
   };
+
+  const handleIdleLogout = useCallback(async () => {
+    if (idleLogoutTriggeredRef.current) return;
+    idleLogoutTriggeredRef.current = true;
+    await AsyncStorage.removeItem('@inventory_user_name');
+    await clearUserActivity();
+    setUserName(null);
+    setSelectedItem(null);
+    setPreviousScreen('home');
+    setCurrentScreen('login');
+    Alert.alert(
+      'Session ended',
+      'You were logged out after 5 hours of inactivity.',
+    );
+  }, []);
+
+  const idleTouchCaptureProps = useIdleLogout(userName, handleIdleLogout);
 
   const initializeApp = async () => {
     try {
@@ -421,8 +465,9 @@ export default function App() {
       const needsRecycleBackfill = items.some((i) => {
         const t = (i.type || '').toLowerCase();
         const isCustom = t === 'custom_paint' || t === 'custom_stain';
-        const hasDate = i.recycle_date != null && String(i.recycle_date).trim() !== '';
-        return isCustom && !hasDate;
+        const hasRecycle =
+          i.recycle_date != null && String(i.recycle_date).trim() !== '';
+        return isCustom && !hasRecycle;
       });
       if (needsRecycleBackfill && !recycleSyncInFlight.current) {
         recycleSyncInFlight.current = true;
@@ -800,8 +845,8 @@ export default function App() {
         ...(Object.prototype.hasOwnProperty.call(item, 'hex_color') && {
           hex_color: item.hex_color,
         }),
-        ...(Object.prototype.hasOwnProperty.call(item, 'recycle_date') && {
-          recycle_date: item.recycle_date,
+        ...(Object.prototype.hasOwnProperty.call(item, 'lot_date') && {
+          lot_date: item.lot_date,
         }),
         ...(Object.prototype.hasOwnProperty.call(item, 'external_code') && {
           external_code: item.external_code,
@@ -1015,6 +1060,7 @@ export default function App() {
               isRefreshing={isRefreshing}
               showTransactionTable={!isNarrowDesktop}
               isAdmin={isAdmin}
+              userName={userName}
               embeddedInShell={embeddedInShell}
               onOpenRecycleDue={() => {
                 setRecycleDueFilter(true);
@@ -1329,7 +1375,10 @@ export default function App() {
 
   return (
     <PaperProvider theme={paperTheme}>
-      <View style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}>
+      <View
+        {...idleTouchCaptureProps}
+        style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}
+      >
         <StatusBar style="auto" />
         {shellWrapped}
         {isActionLoading && (

@@ -5,18 +5,15 @@ import { TextInput, useTheme } from "react-native-paper";
 /**
  * Outlined search field without left/right icon slots (avoids Searchbar magnify + clear dot).
  */
-export default function OutlinedSearchInput({
-  value,
-  onChangeText,
-  placeholder,
-  style,
-  dense = true,
-  ...rest
-}) {
+const OutlinedSearchInput = React.forwardRef(function OutlinedSearchInput(
+  { value, onChangeText, placeholder, style, dense = true, ...rest },
+  ref,
+) {
   const theme = useTheme();
 
   return (
     <TextInput
+      ref={ref}
       mode="outlined"
       dense={dense}
       placeholder={placeholder}
@@ -30,7 +27,9 @@ export default function OutlinedSearchInput({
       {...rest}
     />
   );
-}
+});
+
+export default OutlinedSearchInput;
 
 const styles = StyleSheet.create({
   root: {

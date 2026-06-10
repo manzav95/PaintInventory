@@ -602,6 +602,12 @@ export default function UpcomingOrdersScreen({
     return parts.join(" · ");
   };
 
+  const formatGroupSummary = (orders, totalsByType) => {
+    const count = Array.isArray(orders) ? orders.length : 0;
+    const poPart = `${count} PO${count === 1 ? "" : "s"}`;
+    return `${poPart} · ${formatTotalsByType(totalsByType)}`;
+  };
+
   /** All POs sorted by ETA ascending: earliest ETA at top, latest at bottom. Search filter applied. */
   const ordersSortedByEta = useMemo(() => {
     const list = dateViewMode != null ? orders || [] : filteredOrders;
@@ -1492,7 +1498,7 @@ export default function UpcomingOrdersScreen({
                               { color: theme.colors.onSurfaceVariant },
                             ]}
                           >
-                            {formatTotalsByType(group.totalsByType)}
+                            {formatGroupSummary(group.orders, group.totalsByType)}
                           </Text>
                           <Text
                             style={[
@@ -1551,7 +1557,7 @@ export default function UpcomingOrdersScreen({
                               { color: theme.colors.onSurfaceVariant },
                             ]}
                           >
-                            {formatTotalsByType(group.totalsByType)}
+                            {formatGroupSummary(group.orders, group.totalsByType)}
                           </Text>
                           <Text
                             style={[
