@@ -31,9 +31,22 @@ import {
 import AuditService from "../services/auditService";
 import OrderService from "../services/orderService";
 import InventoryService from "../services/inventoryService";
+import { parseGallonQuantity } from "../utils/gallonQuantity";
+import {
+  getMaterialTypeLabel,
+  getMaterialTypeColor,
+} from "../utils/materialTypes";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
-const STANDARD_TYPES = ["paint", "primer", "clear", "catalyst", "stain", "dye"];
+const STANDARD_TYPES = [
+  "paint",
+  "precat",
+  "primer",
+  "clear",
+  "catalyst",
+  "stain",
+  "dye",
+];
 
 function isCustomType(item) {
   return CUSTOM_TYPES.includes((item.type || "").toLowerCase());
@@ -250,6 +263,12 @@ export default function InventoryListScreen({
     return id;
   };
 
+  const getItemTypeForOrder = (itemId) => {
+    const id = String(itemId ?? "").trim();
+    const inv = inventory.find((i) => String(i.id) === id);
+    return inv?.type ? String(inv.type).toLowerCase() : "";
+  };
+
   const formatOrderColorsPreview = (order) => {
     const lines = order?.lines || [];
     const names = lines.map((l) => getItemNameForOrder(l.itemId ?? l.item_id));
@@ -303,11 +322,19 @@ export default function InventoryListScreen({
         const remaining = lineRemainingQty(line);
         if (remaining <= 0) continue;
         const raw = lineReceiveQtysRef.current[itemId];
-        const qty =
-          raw === undefined || raw === null || String(raw).trim() === ""
-            ? 0
-            : parseInt(String(raw).trim(), 10);
-        if (isNaN(qty) || qty <= 0) continue;
+        if (raw === undefined || raw === null || String(raw).trim() === "") {
+          continue;
+        }
+        const parsed = parseGallonQuantity(raw, getItemTypeForOrder(itemId));
+        if (!parsed.ok) {
+          Alert.alert(
+            "Invalid quantity",
+            `${getItemNameForOrder(itemId)}: ${parsed.error}`,
+          );
+          return;
+        }
+        const qty = parsed.value;
+        if (qty <= 0) continue;
         if (qty > remaining) {
           Alert.alert(
             "Invalid quantity",
@@ -579,6 +606,8 @@ export default function InventoryListScreen({
     if (a === "check_out") return "Checked out";
     if (a === "receiving" || (a === "update" && d?._actionType === "receiving"))
       return "Receiving";
+    if (a === "recycled" || (a === "update" && d?._actionType === "recycled"))
+      return "Recycled";
     if (a === "update" && d?._actionType === "check_in") return "Checked in";
     if (a === "update" && d?._actionType === "check_out") return "Checked out";
     if (a === "add") return "Added";
@@ -854,6 +883,7 @@ export default function InventoryListScreen({
       detailResetKey={receiveDetailKey}
       getItemNameForOrder={getItemNameForOrder}
       getItemCodeForOrder={getItemCodeForOrder}
+      getItemTypeForOrder={getItemTypeForOrder}
       formatOrderColorsPreview={formatOrderColorsPreview}
     />
   );
@@ -980,33 +1010,8 @@ export default function InventoryListScreen({
             })()}
             {(() => {
               const t = item.type ? String(item.type).toLowerCase() : "";
-              const label =
-                t === "custom_paint"
-                  ? "Custom Paint"
-                  : t === "custom_stain"
-                    ? "Custom Stain"
-                    : item.type
-                      ? String(item.type).charAt(0).toUpperCase() +
-                        String(item.type).slice(1).toLowerCase()
-                      : "";
-              const materialTypeColor =
-                t === "paint" || t === "custom_paint"
-                  ? "#1565c0"
-                  : t === "clear"
-                    ? "#e65100"
-                    : t === "stain" || t === "custom_stain"
-                      ? "#2e7d32"
-                      : t === "primer"
-                        ? theme.dark
-                          ? "#f5f5dc"
-                          : "#5d4037"
-                        : t === "dye"
-                          ? "#7e57c2"
-                          : t === "catalyst"
-                            ? "#9a7b00"
-                            : theme.dark
-                              ? "#fff"
-                              : "#666";
+              const label = getMaterialTypeLabel(t);
+              const materialTypeColor = getMaterialTypeColor(t, theme);
               if (!label) return null;
               return (
                 <Text
@@ -1710,39 +1715,9 @@ export default function InventoryListScreen({
                                           const t = item.type
                                             ? String(item.type).toLowerCase()
                                             : "";
-                                          const label =
-                                            t === "custom_paint"
-                                              ? "Custom Paint"
-                                              : t === "custom_stain"
-                                                ? "Custom Stain"
-                                                : item.type
-                                                  ? String(item.type)
-                                                      .charAt(0)
-                                                      .toUpperCase() +
-                                                    String(item.type)
-                                                      .slice(1)
-                                                      .toLowerCase()
-                                                  : "";
+                                          const label = getMaterialTypeLabel(t);
                                           const materialTypeColor =
-                                            t === "paint" ||
-                                            t === "custom_paint"
-                                              ? "#1565c0"
-                                              : t === "clear"
-                                                ? "#e65100"
-                                                : t === "stain" ||
-                                                    t === "custom_stain"
-                                                  ? "#2e7d32"
-                                                  : t === "primer"
-                                                    ? theme.dark
-                                                      ? "#f5f5dc"
-                                                      : "#5d4037"
-                                                    : t === "dye"
-                                                      ? "#7e57c2"
-                                                      : t === "catalyst"
-                                                        ? "#9a7b00"
-                                                        : theme.dark
-                                                          ? "#fff"
-                                                          : "#666";
+                                            getMaterialTypeColor(t, theme);
                                           return (
                                             <Text
                                               style={[

@@ -13,6 +13,11 @@ import { Card, Text, Button, TextInput, useTheme } from "react-native-paper";
 import PageHeader from "../components/PageHeader";
 import { getContrastingTextColors } from "../utils/colorUtils";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import {
+  allowsHalfGallon,
+  parseGallonQuantity,
+  formatGallonQuantity,
+} from "../utils/gallonQuantity";
 
 function lineItemId(line) {
   return line?.itemId ?? line?.item_id;
@@ -62,8 +67,10 @@ function getValidHex(hex) {
 
 export default function CheckInOutScreen({
   item,
+  isAdmin = false,
   onCheckIn,
   onCheckOut,
+  onRecyclePaint,
   onCancel,
   onOrderSummary = {},
   onReceiveDelivery,
@@ -78,7 +85,7 @@ export default function CheckInOutScreen({
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [quantity, setQuantity] = useState("");
-  const [action, setAction] = useState(null); // 'in' | 'out'
+  const [action, setAction] = useState(null); // 'in' | 'out' | 'recycle'
   const [showDeliveryPrompt, setShowDeliveryPrompt] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -87,6 +94,7 @@ export default function CheckInOutScreen({
 
   const quickQtyEnabledTypes = new Set([
     "paint",
+    "precat",
     "stain",
     "dye",
     "clear",
@@ -97,7 +105,10 @@ export default function CheckInOutScreen({
     .toLowerCase()
     .trim();
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
-  const quickQtyOptions = [5, 10, 15, 20];
+  const halfGallonItem = allowsHalfGallon(itemType);
+  const quickQtyOptions = halfGallonItem
+    ? [0.5, 1, 5, 10]
+    : [5, 10, 15, 20];
 
   const itemIdStr = item?.id != null ? String(item.id) : "";
   const hasUpcomingOrder =
@@ -140,29 +151,27 @@ export default function CheckInOutScreen({
   };
 
   const handleSubmit = () => {
-    const qty = parseFloat(quantity);
-    const currentQty = Number(item.quantity) || 0;
-
-    if (isNaN(qty) || qty <= 0) {
-      showAlert(
-        "Invalid Quantity",
-        "Please enter a valid quantity greater than 0.",
-      );
+    const parsed = parseGallonQuantity(quantity, itemType);
+    if (!parsed.ok) {
+      showAlert("Invalid Quantity", parsed.error);
       return;
     }
+    const qty = parsed.value;
+    const currentQty = Number(item.quantity) || 0;
 
-    if (action === "out") {
+    if (action === "out" || action === "recycle") {
+      const label = action === "recycle" ? "recycle" : "check out";
       if (currentQty <= 0) {
         showAlert(
-          "Cannot check out",
-          "This item currently has 0 gallons available to check out.",
+          `Cannot ${label}`,
+          `This item currently has 0 gallons available to ${label}.`,
         );
         return;
       }
       if (qty > currentQty) {
         showAlert(
-          "Cannot check out",
-          `Only ${currentQty} gallon${currentQty !== 1 ? "s" : ""} available. You cannot check out ${qty} gallons.`,
+          `Cannot ${label}`,
+          `Only ${currentQty} gallon${currentQty !== 1 ? "s" : ""} available. You cannot ${label} ${qty} gallons.`,
         );
         return;
       }
@@ -172,6 +181,8 @@ export default function CheckInOutScreen({
       onCheckIn(qty);
     } else if (action === "out") {
       onCheckOut(qty);
+    } else if (action === "recycle") {
+      onRecyclePaint?.(qty);
     }
   };
 
@@ -221,11 +232,15 @@ export default function CheckInOutScreen({
   };
 
   const handleReceiveSubmit = async () => {
-    const qty = parseInt(receiveQty, 10);
-    if (!selectedOrder || isNaN(qty) || qty <= 0) {
-      showAlert("Invalid", "Select a PO and enter a valid quantity.");
+    const parsed = parseGallonQuantity(receiveQty, itemType);
+    if (!selectedOrder || !parsed.ok) {
+      showAlert(
+        "Invalid",
+        parsed.error || "Select a PO and enter a valid quantity.",
+      );
       return;
     }
+    const qty = parsed.value;
     if (qty > remainingQty) {
       showAlert(
         "Invalid",
@@ -305,7 +320,7 @@ export default function CheckInOutScreen({
               },
             ]}
           >
-            Current Quantity: {item.quantity || 0} gallons
+            Current Quantity: {formatGallonQuantity(item.quantity || 0)} gallons
           </Text>
         </View>
 
@@ -357,6 +372,21 @@ export default function CheckInOutScreen({
                     Receiving Delivery
                   </Button>
                 )}
+                {isAdmin && onRecyclePaint ? (
+                  <Button
+                    mode={action === "recycle" ? "contained" : "outlined"}
+                    onPress={() => setAction("recycle")}
+                    style={[
+                      styles.actionButton,
+                      action === "recycle" && styles.selectedButton,
+                    ]}
+                    icon="recycle"
+                    buttonColor={action === "recycle" ? "#558b2f" : undefined}
+                    textColor={action === "recycle" ? "#fff" : undefined}
+                  >
+                    Recycle
+                  </Button>
+                ) : null}
               </View>
 
               {action && (
@@ -387,7 +417,13 @@ export default function CheckInOutScreen({
                     </View>
                   )}
                   <TextInput
-                    label={`Quantity to ${action === "in" ? "add" : "remove"} (gallons)`}
+                    label={
+                      action === "in"
+                        ? "Quantity to add (gallons)"
+                        : action === "recycle"
+                          ? "Quantity to recycle (gallons)"
+                          : "Quantity to remove (gallons)"
+                    }
                     value={quantity}
                     onChangeText={setQuantity}
                     mode="outlined"
@@ -408,8 +444,11 @@ export default function CheckInOutScreen({
                       onPress={handleSubmit}
                       style={styles.button}
                       disabled={!quantity || parseFloat(quantity) <= 0}
+                      buttonColor={
+                        action === "recycle" ? "#558b2f" : undefined
+                      }
                     >
-                      Submit
+                      {action === "recycle" ? "Confirm Recycle" : "Submit"}
                     </Button>
                   </View>
                 </>

@@ -30,6 +30,21 @@ import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
 } from "../utils/poItemLabels";
+import {
+  allowsHalfGallon,
+  normalizeStoredGallons,
+  parseGallonQuantity,
+  sanitizeGallonInput,
+  formatGallonQuantity,
+} from "../utils/gallonQuantity";
+
+function lineGallonQty(line, field = "ordered") {
+  const raw =
+    field === "received"
+      ? line.received_quantity ?? line.receivedQuantity
+      : line.quantity ?? line.qty;
+  return normalizeStoredGallons(raw);
+}
 
 const MAX_AUTOCOMPLETE = 20;
 const CUSTOM_ORDER_TYPES = ["custom_paint", "custom_stain"];
@@ -166,13 +181,10 @@ function formatMonthRange(monthStart) {
 function isBackOrder(order) {
   if (order.status !== "open") return false;
   const lines = order.lines || [];
-  const someReceived = lines.some(
-    (l) => (parseInt(l.received_quantity, 10) || 0) > 0,
-  );
+  const someReceived = lines.some((l) => lineGallonQty(l, "received") > 0);
   const someRemaining = lines.some(
     (l) =>
-      (parseInt(l.received_quantity, 10) || 0) <
-      (parseInt(l.quantity, 10) || 0),
+      lineGallonQty(l, "received") < lineGallonQty(l, "ordered"),
   );
   return someReceived && someRemaining;
 }
@@ -180,7 +192,7 @@ function isBackOrder(order) {
 function isExistingOrder(order) {
   if (order.status !== "open") return false;
   const lines = order.lines || [];
-  return lines.every((l) => (parseInt(l.received_quantity, 10) || 0) === 0);
+  return lines.every((l) => lineGallonQty(l, "received") === 0);
 }
 
 /** ETA = placed_at + lead_time_days. Used for sorting (earliest first). */
@@ -348,9 +360,10 @@ export default function UpcomingOrdersScreen({
           (i) => String(i.id) === String(itemId),
         );
         const jobTrim = (l.jobName || "").trim();
+        const parsed = parseGallonQuantity(l.quantity, invItem?.type);
         return {
           itemId,
-          quantity: parseInt(String(l.quantity).trim(), 10),
+          quantity: parsed.ok ? parsed.value : NaN,
           job_name:
             invItem && isCustomColorInventoryItem(invItem) && jobTrim
               ? jobTrim
@@ -476,7 +489,7 @@ export default function UpcomingOrdersScreen({
     const qtys = {};
     (order.lines || []).forEach((l) => {
       const id = String(l.itemId);
-      qtys[id] = String(parseInt(l.received_quantity, 10) || 0);
+      qtys[id] = String(lineGallonQty(l, "received"));
     });
     setReceivedLineQtys(qtys);
   };
@@ -490,10 +503,17 @@ export default function UpcomingOrdersScreen({
     const orderLines = editingReceivedOrder.lines || [];
     const lines = orderLines.map((l) => {
       const itemId = String(l.itemId);
-      const ordered = parseInt(l.quantity, 10) || 0;
+      const ordered = lineGallonQty(l, "ordered");
+      const invItem = (inventory || []).find(
+        (i) => String(i.id) === itemId,
+      );
+      const parsed = parseGallonQuantity(
+        receivedLineQtys[itemId],
+        invItem?.type,
+      );
       const received = Math.max(
         0,
-        Math.min(ordered, parseInt(receivedLineQtys[itemId], 10) || 0),
+        Math.min(ordered, parsed.ok ? parsed.value : 0),
       );
       return { itemId: l.itemId, received_quantity: received };
     });
@@ -580,7 +600,7 @@ export default function UpcomingOrdersScreen({
         );
         const type =
           item && item.type ? String(item.type).toLowerCase() : "other";
-        const qty = parseInt(line.quantity, 10) || 0;
+        const qty = lineGallonQty(line, "ordered");
         byType[type] = (byType[type] || 0) + qty;
       }
     }
@@ -806,8 +826,8 @@ export default function UpcomingOrdersScreen({
           {(order.lines || []).length > 0 && (
             <View style={styles.linesList}>
               {(order.lines || []).map((line, idx) => {
-                const received = parseInt(line.received_quantity, 10) || 0;
-                const ordered = parseInt(line.quantity, 10) || 0;
+                const received = lineGallonQty(line, "received");
+                const ordered = lineGallonQty(line, "ordered");
                 const lineReceivedDate = formatReceivedDate(line);
                 const showLineDate = !singleReceivedDate && lineReceivedDate;
                 return (
@@ -1223,6 +1243,10 @@ export default function UpcomingOrdersScreen({
                 const showJobLine =
                   selInv && isCustomColorInventoryItem(selInv);
                 const isFocused = focusedLineIndex === index;
+                const lineInvItem = (inventory || []).find(
+                  (i) => String(i.id) === String(line.itemId),
+                );
+                const lineHalfOk = allowsHalfGallon(lineInvItem?.type);
                 return (
                   <View
                     key={index}
@@ -1328,11 +1352,17 @@ export default function UpcomingOrdersScreen({
                         )}
                       </View>
                       <TextInput
-                        label="Qty"
+                        label={lineHalfOk ? "Qty (0.5 ok)" : "Qty"}
                         value={line.quantity}
-                        onChangeText={(v) => updateLine(index, "quantity", v)}
+                        onChangeText={(v) =>
+                          updateLine(
+                            index,
+                            "quantity",
+                            sanitizeGallonInput(v, lineHalfOk),
+                          )
+                        }
                         mode="outlined"
-                        keyboardType="number-pad"
+                        keyboardType={lineHalfOk ? "decimal-pad" : "number-pad"}
                         style={[styles.input, styles.lineQty]}
                       />
                       {lines.length > 1 ? (
@@ -1622,10 +1652,14 @@ export default function UpcomingOrdersScreen({
               {editingReceivedOrder &&
                 (editingReceivedOrder.lines || []).map((line, idx) => {
                   const itemId = String(line.itemId);
-                  const ordered = parseInt(line.quantity, 10) || 0;
+                  const ordered = lineGallonQty(line, "ordered");
+                  const invItem = (inventory || []).find(
+                    (i) => String(i.id) === itemId,
+                  );
+                  const halfOk = allowsHalfGallon(invItem?.type);
                   const receivedVal =
                     receivedLineQtys[itemId] ??
-                    String(parseInt(line.received_quantity, 10) || 0);
+                    String(lineGallonQty(line, "received"));
                   return (
                     <View key={idx} style={styles.receivedModalRow}>
                       <Text
@@ -1643,16 +1677,19 @@ export default function UpcomingOrdersScreen({
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        Ordered: {ordered} gal
+                        Ordered: {formatGallonQuantity(ordered)} gal
                       </Text>
                       <TextInput
                         label="Received (gal)"
                         value={receivedVal}
                         onChangeText={(v) =>
-                          setReceivedQtyForLine(line.itemId, v)
+                          setReceivedQtyForLine(
+                            line.itemId,
+                            sanitizeGallonInput(v, halfOk),
+                          )
                         }
                         mode="outlined"
-                        keyboardType="number-pad"
+                        keyboardType={halfOk ? "decimal-pad" : "number-pad"}
                         style={styles.receivedModalInput}
                       />
                     </View>

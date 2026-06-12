@@ -16,6 +16,13 @@ const pool = new Pool({
     : false,
 });
 
+/** Parse gallon qty from API/DB (supports 0.5 increments). */
+function parseStoredGallons(val) {
+  const n = parseFloat(val);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 2) / 2;
+}
+
 /** Normalize API row for AP vs mixing: single boolean is_mixing (default true). */
 function normalizeItemPoFields(row) {
   if (!row) return row;
@@ -285,6 +292,32 @@ class Database {
     `);
     await client.query(`
       DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'items' AND column_name = 'quantity' AND udt_name = 'int4'
+        ) THEN
+          ALTER TABLE items ALTER COLUMN quantity TYPE REAL USING quantity::real;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'order_lines' AND column_name = 'quantity' AND udt_name = 'int4'
+        ) THEN
+          ALTER TABLE order_lines ALTER COLUMN quantity TYPE REAL USING quantity::real;
+        END IF;
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'order_lines' AND column_name = 'received_quantity' AND udt_name = 'int4'
+        ) THEN
+          ALTER TABLE order_lines ALTER COLUMN received_quantity TYPE REAL USING received_quantity::real;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'order_lines' AND column_name = 'job_name') THEN
           ALTER TABLE order_lines ADD COLUMN job_name TEXT NOT NULL DEFAULT '';
         END IF;
@@ -386,7 +419,7 @@ class Database {
   async addItem(item) {
     const now = new Date().toISOString();
     const price = item.price != null && !isNaN(Number(item.price)) ? Number(item.price) : null;
-    const allowedTypes = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain"];
+    const allowedTypes = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain", "precat"];
     const type = item.type && allowedTypes.includes(String(item.type).toLowerCase())
       ? String(item.type).toLowerCase()
       : null;
@@ -410,7 +443,7 @@ class Database {
       : null;
     // If no explicit external code provided and this is a paint/custom_paint,
     // auto-derive one from the global suffix setting: <id><suffix>.
-    if (!externalCode && (type === "paint" || type === "custom_paint")) {
+    if (!externalCode && (type === "paint" || type === "custom_paint" || type === "precat")) {
       const suffix = await this.getSetting("paint_external_suffix");
       const trimmed = suffix != null ? String(suffix).trim() : "";
       if (trimmed) {
@@ -533,7 +566,7 @@ class Database {
           values.push(v == null || v === "" ? null : (isNaN(Number(v)) ? null : Number(v)));
         } else if (key === "type") {
           const v = updates[key];
-          const allowed = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain"];
+          const allowed = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain", "precat"];
           values.push(v && allowed.includes(String(v).toLowerCase()) ? String(v).toLowerCase() : null);
         } else if (key === "display_order") {
           const v = updates[key];
@@ -777,7 +810,7 @@ class Database {
     const orderId = result.rows[0].id;
     for (const line of lines || []) {
       const itemId = line.itemId || line.item_id;
-      const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
+      const qty = Math.max(0, parseStoredGallons(line.quantity) || 0);
       if (!itemId || qty <= 0) continue;
       const jobName =
         line.job_name != null
@@ -868,7 +901,7 @@ class Database {
     await this.pool.query("DELETE FROM order_lines WHERE order_id = $1", [id]);
     for (const line of lines || []) {
       const itemId = line.itemId || line.item_id;
-      const qty = Math.max(0, parseInt(line.quantity, 10) || 0);
+      const qty = Math.max(0, parseStoredGallons(line.quantity) || 0);
       if (!itemId || qty <= 0) continue;
       const jobName =
         line.job_name != null
@@ -911,8 +944,8 @@ class Database {
     const byItem = {};
     for (const row of result.rows) {
       const id = row.item_id;
-      const ordered = parseInt(row.quantity, 10) || 0;
-      const received = parseInt(row.received_quantity, 10) || 0;
+      const ordered = parseStoredGallons(row.quantity) || 0;
+      const received = parseStoredGallons(row.received_quantity) || 0;
       const remaining = Math.max(0, ordered - received);
       if (remaining <= 0) continue;
       const placed = new Date(row.placed_at);
@@ -1008,9 +1041,12 @@ class Database {
     if (order.status !== "open") return { success: false, error: "Order is not open for receiving" };
     const line = (order.lines || []).find((l) => String(l.itemId) === String(itemId));
     if (!line) return { success: false, error: "Item not on this order" };
-    const ordered = parseInt(line.quantity, 10) || 0;
-    const alreadyReceived = parseInt(line.received_quantity, 10) || 0;
-    const receiveQty = Math.max(0, Math.min(quantity, ordered - alreadyReceived));
+    const ordered = parseStoredGallons(line.quantity) || 0;
+    const alreadyReceived = parseStoredGallons(line.received_quantity) || 0;
+    const receiveQty = Math.max(
+      0,
+      Math.min(parseStoredGallons(quantity), ordered - alreadyReceived),
+    );
     if (receiveQty <= 0) return { success: false, error: "No quantity remaining to receive for this line" };
     const now = new Date().toISOString();
     const newReceived = alreadyReceived + receiveQty;
@@ -1020,7 +1056,7 @@ class Database {
     );
     const updatedOrder = await this.getOrderById(orderId);
     const allReceived = (updatedOrder.lines || []).every(
-      (l) => (parseInt(l.received_quantity, 10) || 0) >= (parseInt(l.quantity, 10) || 0),
+      (l) => (parseStoredGallons(l.received_quantity) || 0) >= (parseStoredGallons(l.quantity) || 0),
     );
     if (allReceived) {
       await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", ["received", orderId]);
@@ -1098,11 +1134,11 @@ class Database {
     if (order.status !== "received") return { success: false, error: "Only completed (received) orders can have received quantities adjusted" };
     for (const entry of lines || []) {
       const itemId = (entry.itemId != null ? entry.itemId : entry.item_id) != null ? String(entry.itemId != null ? entry.itemId : entry.item_id).trim() : null;
-      const receivedQty = Math.max(0, parseInt(entry.received_quantity, 10) || 0);
+      const receivedQty = Math.max(0, parseStoredGallons(entry.received_quantity) || 0);
       if (!itemId) continue;
       const line = (order.lines || []).find((l) => String(l.itemId) === String(itemId));
       if (!line) continue;
-      const ordered = parseInt(line.quantity, 10) || 0;
+      const ordered = parseStoredGallons(line.quantity) || 0;
       const newReceived = Math.min(receivedQty, ordered);
       const newReceivedAt = newReceived > 0 ? (line.received_at || new Date().toISOString()) : null;
       await this.pool.query(
@@ -1112,7 +1148,7 @@ class Database {
     }
     const updated = await this.getOrderById(id);
     const anyRemaining = (updated.lines || []).some(
-      (l) => (parseInt(l.received_quantity, 10) || 0) < (parseInt(l.quantity, 10) || 0),
+      (l) => (parseStoredGallons(l.received_quantity) || 0) < (parseStoredGallons(l.quantity) || 0),
     );
     if (anyRemaining) {
       await this.pool.query("UPDATE orders SET status = $1 WHERE id = $2", ["open", id]);
@@ -1210,7 +1246,7 @@ class Database {
 
   /** Actions that reset custom recycle due date (activity date + 9 months). */
   static recycleActivityActions() {
-    return ["check_in", "check_out", "receiving"];
+    return ["check_out", "receiving"];
   }
 
   static recycleDueDateFromActivityIso(isoTimestamp) {
@@ -1244,7 +1280,7 @@ class Database {
   }
 
   /**
-   * Set recycle_date from latest check-in/out/receiving for custom_paint/custom_stain.
+   * Set recycle_date from latest check-out/receiving for custom_paint/custom_stain.
    */
   async updateRecycleDateFromLastActivity(itemId) {
     const id = itemId != null ? String(itemId).trim() : "";
@@ -1305,7 +1341,7 @@ class Database {
     return { success: true, lot_date: lotDate, recycle_date: recycleDate };
   }
 
-  /** Recompute recycle_date: latest check-in/out/receiving + 9 months, else lot date + 9 months. */
+  /** Recompute recycle_date: latest check-out/receiving + 9 months, else lot date + 9 months. */
   async syncAllCustomRecycleDatesFromAudit() {
     const result = await this.pool.query(
       `SELECT id, type, lot_date, recycle_date FROM items WHERE lower(type) IN ('custom_paint', 'custom_stain')`,
@@ -1432,7 +1468,7 @@ class Database {
     };
 
     for (const row of result.rows) {
-      const qty = parseInt(row.quantity, 10) || 0;
+      const qty = parseStoredGallons(row.quantity) || 0;
       if (qty <= 0) continue;
       lineCount += 1;
       totalQuantity += qty;
@@ -1537,7 +1573,7 @@ class Database {
 
   static normalizeUsageMaterialType(raw) {
     const t = String(raw || "").toLowerCase().trim();
-    if (t === "custom_paint") return "paint";
+    if (t === "custom_paint" || t === "precat") return "paint";
     if (t === "custom_stain") return "stain";
     if (["paint", "primer", "clear", "stain"].includes(t)) return t;
     return null;

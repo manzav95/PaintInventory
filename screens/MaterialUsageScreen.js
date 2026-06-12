@@ -196,7 +196,7 @@ function getMaterialTypeColor(type, theme) {
   if (!type || typeof type !== "string")
     return theme?.colors?.onSurfaceVariant ?? "#666";
   const t = (type || "").toLowerCase().trim();
-  if (t === "paint" || t === "custom_paint") return "#1565c0";
+  if (t === "paint" || t === "custom_paint" || t === "precat") return "#1565c0";
   if (t === "clear") return "#e65100";
   if (t === "stain" || t === "custom_stain") return "#2e7d32";
   if (t === "primer") return theme?.dark ? "#f5f5dc" : "#5d4037";
@@ -491,7 +491,8 @@ export default function MaterialUsageScreen({
       rows.forEach((row) => {
         const type = getResolvedMaterialType(row, inventory);
         const qty = Number(row.qty_gallons) || 0;
-        if (type === "paint" || type === "custom_paint") t.paint += qty;
+        if (type === "paint" || type === "custom_paint" || type === "precat")
+          t.paint += qty;
         else if (type === "clear") t.clear += qty;
         else if (type === "primer") t.primer += qty;
         else if (type === "stain" || type === "custom_stain") t.stain += qty;
@@ -537,7 +538,8 @@ export default function MaterialUsageScreen({
     filteredLogs.forEach((row) => {
       const type = getResolvedMaterialType(row, inventory);
       const qty = Number(row.qty_gallons) || 0;
-      if (type === "paint" || type === "custom_paint") t.paint += qty;
+      if (type === "paint" || type === "custom_paint" || type === "precat")
+        t.paint += qty;
       else if (type === "clear") t.clear += qty;
       else if (type === "primer") t.primer += qty;
       else if (type === "stain" || type === "custom_stain") t.stain += qty;

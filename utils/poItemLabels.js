@@ -3,6 +3,7 @@
 export const AP_TYPES = ["clear", "primer", "catalyst"];
 export const MIXING_TYPES = [
   "paint",
+  "precat",
   "dye",
   "custom_paint",
   "custom_stain",

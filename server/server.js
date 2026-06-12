@@ -44,7 +44,7 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
-// Recompute custom paint/stain recycle_date (9 months after latest check-in/out/receiving, or lot date).
+// Recompute custom paint/stain recycle_date (9 months after latest check-out/receiving, or lot date).
 app.post('/api/items/sync-recycle-dates', async (req, res) => {
   try {
     const result = await db.syncAllCustomRecycleDatesFromAudit();
@@ -167,8 +167,13 @@ app.put('/api/items/:id', async (req, res) => {
       // Determine action type for audit log
       let auditActionType = 'update';
       
-      // If action type was explicitly set (check_in/check_out/receiving), use it
-      if (actionType === 'check_in' || actionType === 'check_out' || actionType === 'receiving') {
+      // If action type was explicitly set (check_in/check_out/receiving/recycled), use it
+      if (
+        actionType === 'check_in' ||
+        actionType === 'check_out' ||
+        actionType === 'receiving' ||
+        actionType === 'recycled'
+      ) {
         auditActionType = actionType;
         console.log('Setting audit action to:', auditActionType, 'for item:', id);
       } else if (newQuantity !== undefined && oldQuantity !== undefined) {
@@ -221,7 +226,6 @@ app.put('/api/items/:id', async (req, res) => {
       await db.addAuditLog(auditActionType, id, auditUserName, auditDetails);
       if (
         lotDateProvided ||
-        auditActionType === "check_in" ||
         auditActionType === "check_out" ||
         auditActionType === "receiving"
       ) {
@@ -646,7 +650,7 @@ app.post('/api/orders/:id/receive', async (req, res) => {
     if (isNaN(orderId)) return res.status(400).json({ success: false, error: 'Invalid order ID' });
     const { itemId, quantity } = req.body;
     if (!itemId || quantity == null) return res.status(400).json({ success: false, error: 'itemId and quantity are required' });
-    const receiveQty = Math.max(0, parseInt(quantity, 10) || 0);
+    const receiveQty = Math.max(0, Math.round(parseFloat(quantity) * 2) / 2 || 0);
     if (receiveQty <= 0) return res.status(400).json({ success: false, error: 'Quantity must be greater than 0' });
     const result = await db.receiveOrderLine(orderId, String(itemId).trim(), receiveQty);
     if (!result.success) return res.status(result.error === 'Order not found' ? 404 : 400).json(result);

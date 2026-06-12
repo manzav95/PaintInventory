@@ -25,18 +25,14 @@ import {
   todayDateInput,
   normalizeDateInput,
   formatRecycleDueFromLotDate,
+  RECYCLE_DUE_RESET_HINT,
 } from "../utils/recycleDates";
-
-const TYPE_OPTIONS = [
-  { label: "Paint", value: "paint" },
-  { label: "Primer", value: "primer" },
-  { label: "Clear", value: "clear" },
-  { label: "Catalyst", value: "catalyst" },
-  { label: "Stain", value: "stain" },
-  { label: "Dye", value: "dye" },
-  { label: "Custom Paint", value: "custom_paint" },
-  { label: "Custom Stain", value: "custom_stain" },
-];
+import { MATERIAL_TYPE_OPTIONS as TYPE_OPTIONS } from "../utils/materialTypes";
+import {
+  allowsHalfGallon,
+  parseGallonQuantity,
+  sanitizeGallonInput,
+} from "../utils/gallonQuantity";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const CUSTOM_CONTAINER_LOCATION = "Custom Container";
@@ -45,6 +41,13 @@ function nameImpliesCustomPaint(name) {
   const t = String(name ?? "").trim();
   if (!t) return false;
   return t.startsWith("#") || /^\d/.test(t);
+}
+
+function idImpliesPrecat(id) {
+  return String(id ?? "")
+    .trim()
+    .toUpperCase()
+    .startsWith("T75");
 }
 
 const CONTAINER_OPTIONS = [
@@ -139,13 +142,23 @@ export default function AddItemScreen({
   });
 
   const isCustomType = CUSTOM_TYPES.includes(type);
+  const usesCustomContainer = isCustomType || type === "precat";
   const inputStyle = isWideDesktop ? styles.inputDesktop : styles.input;
 
   useEffect(() => {
-    if (CUSTOM_TYPES.includes(type)) {
+    if (CUSTOM_TYPES.includes(type) || type === "precat") {
       setLocation(CUSTOM_CONTAINER_LOCATION);
     }
   }, [type]);
+
+  const handleItemIdChange = (text) => {
+    setItemId(text);
+    setFieldErrors((e) => ({ ...e, itemId: false }));
+    if (idImpliesPrecat(text)) {
+      setType("precat");
+      setLocation(CUSTOM_CONTAINER_LOCATION);
+    }
+  };
 
   const handleNameChange = (text) => {
     setName(text);
@@ -217,12 +230,15 @@ export default function AddItemScreen({
 
     const priceNum = price.trim() === "" ? undefined : parseFloat(price);
     let typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
-    if (nameImpliesCustomPaint(nname)) {
+    if (idImpliesPrecat(tid)) {
+      typeVal = "precat";
+    } else if (nameImpliesCustomPaint(nname)) {
       typeVal = "custom_paint";
     }
-    const locationVal = CUSTOM_TYPES.includes(typeVal)
-      ? CUSTOM_CONTAINER_LOCATION
-      : location.trim();
+    const locationVal =
+      CUSTOM_TYPES.includes(typeVal) || typeVal === "precat"
+        ? CUSTOM_CONTAINER_LOCATION
+        : location.trim();
     const hexVal = normalizeHex(hexColor);
     const rexRaw = rex.trim();
     let lotDateVal = null;
@@ -236,10 +252,16 @@ export default function AddItemScreen({
         return;
       }
     }
+    const qtyParsed = parseGallonQuantity(quantity, typeVal);
+    if (!qtyParsed.ok) {
+      Alert.alert("Invalid quantity", qtyParsed.error);
+      return;
+    }
+
     const item = {
       id: tid,
       name: nname,
-      quantity: parseInt(quantity) || 0,
+      quantity: qtyParsed.value,
       location: locationVal,
       createdAt: new Date().toISOString(),
       is_mixing: poCategory !== "ap",
@@ -379,12 +401,12 @@ export default function AddItemScreen({
         <View>
           <FieldLabel theme={theme}>Container</FieldLabel>
           <WebSelect
-            value={isCustomType ? CUSTOM_CONTAINER_LOCATION : location}
+            value={usesCustomContainer ? CUSTOM_CONTAINER_LOCATION : location}
             onChange={setLocation}
             options={CONTAINER_OPTIONS}
             placeholder="Select container"
             theme={theme}
-            disabled={isCustomType}
+            disabled={usesCustomContainer}
           />
         </View>
       );
@@ -397,8 +419,8 @@ export default function AddItemScreen({
           onDismiss={() => setLocationMenuOpen(false)}
           anchor={
             <Pressable
-              onPress={() => !isCustomType && setLocationMenuOpen(true)}
-              disabled={isCustomType}
+              onPress={() => !usesCustomContainer && setLocationMenuOpen(true)}
+              disabled={usesCustomContainer}
               style={[
                 styles.typeTrigger,
                 {
@@ -414,13 +436,17 @@ export default function AddItemScreen({
                     : theme.colors.onSurfaceVariant,
                 }}
               >
-                {(isCustomType ? CUSTOM_CONTAINER_LOCATION : location)
+                {(usesCustomContainer ? CUSTOM_CONTAINER_LOCATION : location)
                   ? (CONTAINER_OPTIONS.find(
                       (o) =>
                         o.value ===
-                        (isCustomType ? CUSTOM_CONTAINER_LOCATION : location),
+                        (usesCustomContainer
+                          ? CUSTOM_CONTAINER_LOCATION
+                          : location),
                     )?.label ??
-                    (isCustomType ? CUSTOM_CONTAINER_LOCATION : location))
+                    (usesCustomContainer
+                      ? CUSTOM_CONTAINER_LOCATION
+                      : location))
                   : "Select container"}
               </Text>
             </Pressable>
@@ -520,10 +546,7 @@ export default function AddItemScreen({
                     <TextInput
                       label="Paint ID *"
                       value={itemId}
-                      onChangeText={(t) => {
-                        setItemId(t);
-                        setFieldErrors((e) => ({ ...e, itemId: false }));
-                      }}
+                      onChangeText={handleItemIdChange}
                       mode="outlined"
                       style={inputStyle}
                       dense
@@ -572,11 +595,15 @@ export default function AddItemScreen({
                     <TextInput
                       label="Quantity"
                       value={quantity}
-                      onChangeText={setQuantity}
+                      onChangeText={(t) =>
+                        setQuantity(sanitizeGallonInput(t, allowsHalfGallon(type)))
+                      }
                       mode="outlined"
                       style={inputStyle}
                       dense
-                      keyboardType="numeric"
+                      keyboardType={
+                        allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
+                      }
                       right={<TextInput.Affix text="gal" />}
                     />
                   </FormCol>
@@ -657,8 +684,7 @@ export default function AddItemScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Recycle is due 9 months after the lot date, and resets 9
-                      months after each check-in, check-out, or receiving.
+                      {RECYCLE_DUE_RESET_HINT}
                     </Text>
                   </View>
                 )}
@@ -677,10 +703,7 @@ export default function AddItemScreen({
                 <TextInput
                   label="Paint ID *"
                   value={itemId}
-                  onChangeText={(t) => {
-                    setItemId(t);
-                    setFieldErrors((e) => ({ ...e, itemId: false }));
-                  }}
+                  onChangeText={handleItemIdChange}
                   placeholder="Required – enter a custom ID"
                   mode="outlined"
                   style={inputStyle}
@@ -715,10 +738,14 @@ export default function AddItemScreen({
                 <TextInput
                   label="Quantity (Gallons)"
                   value={quantity}
-                  onChangeText={setQuantity}
+                  onChangeText={(t) =>
+                    setQuantity(sanitizeGallonInput(t, allowsHalfGallon(type)))
+                  }
                   mode="outlined"
                   style={inputStyle}
-                  keyboardType="numeric"
+                  keyboardType={
+                    allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
+                  }
                   right={<TextInput.Affix text="gal" />}
                 />
                 <TextInput
@@ -775,8 +802,7 @@ export default function AddItemScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Recycle is due 9 months after the lot date, and resets 9
-                      months after each check-in, check-out, or receiving.
+                      {RECYCLE_DUE_RESET_HINT}
                     </Text>
                   </View>
                 )}

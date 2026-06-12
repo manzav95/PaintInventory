@@ -8,16 +8,17 @@ import {
   Alert,
   KeyboardAvoidingView,
   Pressable,
+  Modal,
 } from "react-native";
 import {
   Card,
-  Title,
   Text,
   Button,
   useTheme,
   IconButton,
   TextInput,
 } from "react-native-paper";
+import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import OrderService from "../services/orderService";
 import { openEmailWithOrderSpreadsheet } from "../utils/orderSpreadsheet";
 import {
@@ -26,6 +27,15 @@ import {
 } from "../utils/poItemLabels";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT, useAppLayout } from "../utils/layout";
+import {
+  allowsHalfGallon,
+  parseGallonQuantity,
+  sanitizeGallonInput,
+} from "../utils/gallonQuantity";
+import {
+  getMaterialTypeLabel,
+  getMaterialTypeColor,
+} from "../utils/materialTypes";
 
 const PAGE_MAX_WIDTH = 1200;
 const GRID_GAP = 12;
@@ -78,34 +88,10 @@ function getDefaultLeadTimeDays(lineItems, inventory) {
 
 function getMaterialTypeLabelAndColor(item, theme) {
   const t = item.type ? String(item.type).toLowerCase() : "";
-  const label =
-    t === "custom_paint"
-      ? "Custom Paint"
-      : t === "custom_stain"
-        ? "Custom Stain"
-        : item.type
-          ? String(item.type).charAt(0).toUpperCase() +
-            String(item.type).slice(1).toLowerCase()
-          : "";
-  const color =
-    t === "paint" || t === "custom_paint"
-      ? "#1565c0"
-      : t === "clear"
-        ? "#e65100"
-        : t === "stain" || t === "custom_stain"
-          ? "#2e7d32"
-          : t === "primer"
-            ? theme.dark
-              ? "#f5f5dc"
-              : "#5d4037"
-            : t === "dye"
-              ? "#7e57c2"
-              : t === "catalyst"
-                ? "#9a7b00"
-                : theme.dark
-                  ? "#fff"
-                  : "#666";
-  return { label, color };
+  return {
+    label: getMaterialTypeLabel(t),
+    color: getMaterialTypeColor(t, theme),
+  };
 }
 
 /** Column count from actual content width (main pane when sidebar is open). */
@@ -139,6 +125,7 @@ function getGridCellWidthStyle(numCols, colW) {
 const TYPE_BUNDLE_ORDER = [
   "dye",
   "paint",
+  "precat",
   "custom_paint",
   "stain",
   "custom_stain",
@@ -149,6 +136,7 @@ const TYPE_BUNDLE_ORDER = [
 
 const TYPE_BUNDLE_TITLE = {
   paint: "Paint",
+  precat: "PreCat",
   custom_paint: "Custom Paint",
   custom_stain: "Custom Stain",
   stain: "Stain",
@@ -276,20 +264,29 @@ export default function PlaceOrderScreen({
   const [searchQuery, setSearchQuery] = useState("");
   /** itemId -> { qty: string, job: string } */
   const [lineState, setLineState] = useState({});
+  /** Stable display order for cart lines */
+  const [orderLineIds, setOrderLineIds] = useState([]);
+  const [addModalItem, setAddModalItem] = useState(null);
+  const [modalQty, setModalQty] = useState("");
+  const [modalJob, setModalJob] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const setQty = useCallback((itemId, qty) => {
-    setLineState((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] || {}), qty },
-    }));
-  }, []);
+  const inventoryById = useMemo(() => {
+    const map = new Map();
+    for (const item of inventory || []) {
+      if (item?.id != null) map.set(String(item.id), item);
+    }
+    return map;
+  }, [inventory]);
 
-  const setJob = useCallback((itemId, job) => {
-    setLineState((prev) => ({
-      ...prev,
-      [itemId]: { ...(prev[itemId] || {}), job },
-    }));
+  const removeFromOrder = useCallback((itemId) => {
+    const id = String(itemId);
+    setLineState((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setOrderLineIds((prev) => prev.filter((x) => x !== id));
   }, []);
 
   const filteredItems = useMemo(() => {
@@ -309,13 +306,76 @@ export default function PlaceOrderScreen({
     [filteredItems, filterTab],
   );
 
+  const orderLines = useMemo(() => {
+    return orderLineIds
+      .map((id) => {
+        const item = inventoryById.get(id);
+        const st = lineState[id];
+        if (!item || !st) return null;
+        const parsed = parseGallonQuantity(st.qty, item.type);
+        if (!parsed.ok) return null;
+        return { id, item, qty: parsed.value, job: (st.job || "").trim() };
+      })
+      .filter(Boolean);
+  }, [orderLineIds, lineState, inventoryById]);
+
+  const orderTotalGal = useMemo(
+    () => orderLines.reduce((sum, l) => sum + l.qty, 0),
+    [orderLines],
+  );
+
+  const closeAddModal = useCallback(() => {
+    setAddModalItem(null);
+    setModalQty("");
+    setModalJob("");
+  }, []);
+
+  const openAddModal = useCallback(
+    (item) => {
+      if (!item?.id) return;
+      const id = String(item.id);
+      const st = lineState[id] || {};
+      setAddModalItem(item);
+      setModalQty(st.qty ? String(st.qty) : "");
+      setModalJob(st.job ? String(st.job) : "");
+    },
+    [lineState],
+  );
+
+  const confirmAddModal = useCallback(() => {
+    if (!addModalItem?.id) return;
+    const parsed = parseGallonQuantity(modalQty, addModalItem.type);
+    if (!parsed.ok) {
+      Alert.alert("Invalid quantity", parsed.error);
+      return;
+    }
+    const qty = parsed.value;
+    const custom = isCustomColorItem(addModalItem);
+    const job = modalJob.trim();
+    if (custom && !job) {
+      Alert.alert("Job required", "Enter a job number for custom colors.");
+      return;
+    }
+    const id = String(addModalItem.id);
+    setLineState((prev) => ({
+      ...prev,
+      [id]: {
+        qty: String(qty),
+        job: custom ? job : "",
+      },
+    }));
+    setOrderLineIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    closeAddModal();
+  }, [addModalItem, modalQty, modalJob, closeAddModal]);
+
   const handleSubmit = async () => {
     const lines = [];
     for (const item of inventory) {
       const st = lineState[String(item.id)];
       if (!st) continue;
-      const qty = parseInt(String(st.qty || "").trim(), 10);
-      if (!qty || qty <= 0) continue;
+      const parsed = parseGallonQuantity(st.qty, item.type);
+      if (!parsed.ok) continue;
+      const qty = parsed.value;
       const job = (st.job || "").trim();
       lines.push({
         item,
@@ -430,6 +490,9 @@ export default function PlaceOrderScreen({
       }
 
       setLineState({});
+      setOrderLineIds([]);
+      closeAddModal();
+      setSearchQuery("");
       onOrderCreated?.();
     } catch (e) {
       const errMsg = e.message || "Failed to create order.";
@@ -463,10 +526,14 @@ export default function PlaceOrderScreen({
         style={styles.keyboardInner}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+        <View
+          style={[
+            styles.stickyPanel,
+            {
+              backgroundColor: listBg,
+              borderBottomColor: theme.colors.outlineVariant,
+            },
+          ]}
         >
           <PageHeader
             title="Place Order"
@@ -476,10 +543,112 @@ export default function PlaceOrderScreen({
           <Text
             style={[styles.intro, { color: theme.colors.onSurfaceVariant }]}
           >
-            Enter quantities to create an open purchase order and copy a table
-            for accounting. Add a PO number later under Purchase Orders.
+            Tap an item to enter quantity. Your order stays pinned above while
+            you browse.
           </Text>
 
+          <OutlinedSearchInput
+            placeholder="Search name or code"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={styles.filterSearch}
+          />
+
+          <View
+            style={[
+              styles.orderCart,
+              {
+                borderColor: theme.colors.outlineVariant,
+                backgroundColor: cardBg,
+              },
+            ]}
+          >
+            <View style={styles.orderCartHeader}>
+              <Text
+                style={[styles.orderCartTitle, { color: theme.colors.onSurface }]}
+              >
+                Current order
+              </Text>
+              <Text
+                style={[
+                  styles.orderCartMeta,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {orderLines.length} line{orderLines.length === 1 ? "" : "s"} ·{" "}
+                {orderTotalGal} gal
+              </Text>
+            </View>
+            {orderLines.length === 0 ? (
+              <Text
+                style={[
+                  styles.orderCartEmpty,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                No items yet — tap a card below to add.
+              </Text>
+            ) : (
+              <ScrollView
+                style={styles.orderCartScroll}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {orderLines.map((line) => (
+                  <View
+                    key={line.id}
+                    style={[
+                      styles.orderLineRow,
+                      { borderTopColor: theme.colors.outlineVariant },
+                    ]}
+                  >
+                    <View style={styles.orderLineMain}>
+                      <Text
+                        style={[
+                          styles.orderLineName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {line.item.name || line.id}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.orderLineSub,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {line.id}
+                        {line.job ? ` · Job ${line.job}` : ""}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.orderLineQty,
+                        { color: theme.colors.primary },
+                      ]}
+                    >
+                      {line.qty} gal
+                    </Text>
+                    <IconButton
+                      icon="close"
+                      size={18}
+                      onPress={() => removeFromOrder(line.id)}
+                      style={styles.orderLineRemove}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
           <View
             style={[
               styles.tabBar,
@@ -553,16 +722,11 @@ export default function PlaceOrderScreen({
             })}
           </View>
 
-          <TextInput
-            mode="outlined"
-            placeholder="Search name or code"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            style={[
-              styles.searchInput,
-              { backgroundColor: theme.colors.surface },
-            ]}
-          />
+          <Text
+            style={[styles.browseHint, { color: theme.colors.onSurfaceVariant }]}
+          >
+            Tap a card to add or update quantity.
+          </Text>
 
           {filteredItems.length === 0 ? (
             <View style={styles.emptyList}>
@@ -594,13 +758,19 @@ export default function PlaceOrderScreen({
                   {bundle.items.map((item) => {
                     const id = String(item.id);
                     const st = lineState[id] || {};
-                    const custom = isCustomColorItem(item);
+                    const orderQtyParsed = parseGallonQuantity(
+                      st.qty,
+                      item.type,
+                    );
+                    const orderQty = orderQtyParsed.ok ? orderQtyParsed.value : 0;
+                    const inOrder = orderQty > 0;
                     const { label: typeLabel, color: typeColor } =
                       getMaterialTypeLabelAndColor(item, theme);
                     const onHand = item.quantity ?? 0;
                     return (
-                      <View
+                      <Pressable
                         key={`${bundle.key}-${id}`}
+                        onPress={() => openAddModal(item)}
                         style={[
                           styles.gridCell,
                           getGridCellWidthStyle(numCols, colW),
@@ -611,8 +781,10 @@ export default function PlaceOrderScreen({
                             styles.itemCard,
                             {
                               backgroundColor: cardBg,
-                              borderWidth: StyleSheet.hairlineWidth,
-                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: inOrder ? 2 : StyleSheet.hairlineWidth,
+                              borderColor: inOrder
+                                ? theme.colors.primary
+                                : theme.colors.outlineVariant,
                             },
                           ]}
                         >
@@ -677,36 +849,7 @@ export default function PlaceOrderScreen({
                                 ID: {item.id != null ? String(item.id) : "—"}
                               </Text>
                             </Text>
-                            <View style={styles.inputsRowWrap}>
-                              <View style={styles.inputsLeft}>
-                                <View style={styles.inputsRow}>
-                                  <TextInput
-                                    mode="outlined"
-                                    dense
-                                    label="QTY"
-                                    value={st.qty ?? ""}
-                                    onChangeText={(t) => setQty(id, t)}
-                                    keyboardType="number-pad"
-                                    maxLength={4}
-                                    style={styles.inputQty}
-                                  />
-                                  {custom ? (
-                                    <TextInput
-                                      mode="outlined"
-                                      dense
-                                      label="Job"
-                                      value={st.job ?? ""}
-                                      onChangeText={(t) => setJob(id, t)}
-                                      placeholder="#"
-                                      keyboardType="number-pad"
-                                      maxLength={10}
-                                      style={styles.inputJob}
-                                    />
-                                  ) : (
-                                    <View style={styles.inputJobSpacer} />
-                                  )}
-                                </View>
-                              </View>
+                            <View style={styles.cardFooterRow}>
                               {typeLabel ? (
                                 <View
                                   style={[
@@ -730,11 +873,23 @@ export default function PlaceOrderScreen({
                                     {typeLabel}
                                   </Text>
                                 </View>
+                              ) : (
+                                <View />
+                              )}
+                              {inOrder ? (
+                                <Text
+                                  style={[
+                                    styles.inOrderBadge,
+                                    { color: theme.colors.primary },
+                                  ]}
+                                >
+                                  Order: {orderQty} gal
+                                </Text>
                               ) : null}
                             </View>
                           </Card.Content>
                         </Card>
-                      </View>
+                      </Pressable>
                     );
                   })}
                 </View>
@@ -757,14 +912,112 @@ export default function PlaceOrderScreen({
               mode="contained"
               onPress={handleSubmit}
               loading={submitting}
-              disabled={submitting}
+              disabled={submitting || orderLines.length === 0}
               icon="email"
               style={styles.submitBtn}
             >
               Submit Order
+              {orderLines.length > 0
+                ? ` (${orderLines.length} line${orderLines.length === 1 ? "" : "s"})`
+                : ""}
             </Button>
           </View>
         </View>
+
+        <Modal
+          visible={!!addModalItem}
+          transparent
+          animationType="fade"
+          onRequestClose={closeAddModal}
+        >
+          <Pressable style={styles.modalOverlay} onPress={closeAddModal}>
+            <Pressable
+              style={[
+                styles.addModalContent,
+                { backgroundColor: theme.colors.surface },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              {addModalItem ? (
+                <>
+                  <Text
+                    style={[
+                      styles.addModalTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    Add to order
+                  </Text>
+                  <Text
+                    style={[
+                      styles.addModalName,
+                      { color: theme.colors.onSurface },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {addModalItem.name || "Unnamed item"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.addModalId,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    ID: {String(addModalItem.id)}
+                  </Text>
+                  <TextInput
+                    mode="outlined"
+                    label={
+                      allowsHalfGallon(addModalItem.type)
+                        ? "Quantity (gal, 0.5 ok)"
+                        : "Quantity (gal)"
+                    }
+                    value={modalQty}
+                    onChangeText={(t) =>
+                      setModalQty(
+                        sanitizeGallonInput(t, allowsHalfGallon(addModalItem.type)),
+                      )
+                    }
+                    onSubmitEditing={
+                      isCustomColorItem(addModalItem)
+                        ? undefined
+                        : confirmAddModal
+                    }
+                    keyboardType={
+                      allowsHalfGallon(addModalItem.type)
+                        ? "decimal-pad"
+                        : "number-pad"
+                    }
+                    maxLength={5}
+                    autoFocus
+                    style={styles.addModalInput}
+                  />
+                  {isCustomColorItem(addModalItem) ? (
+                    <TextInput
+                      mode="outlined"
+                      label="Job number"
+                      value={modalJob}
+                      onChangeText={setModalJob}
+                      onSubmitEditing={confirmAddModal}
+                      placeholder="#"
+                      keyboardType="number-pad"
+                      maxLength={10}
+                      style={styles.addModalInput}
+                    />
+                  ) : null}
+                  <View style={styles.addModalActions}>
+                    <Button mode="outlined" onPress={closeAddModal}>
+                      Cancel
+                    </Button>
+                    <Button mode="contained" onPress={confirmAddModal}>
+                      Add to order
+                    </Button>
+                  </View>
+                </>
+              ) : null}
+            </Pressable>
+          </Pressable>
+        </Modal>
       </KeyboardAvoidingView>
     </View>
   );
@@ -794,13 +1047,84 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: 20 },
   titleCentered: { textAlign: "center" },
   headerRight: { width: 48 },
+  stickyPanel: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    zIndex: 2,
+    ...(Platform.OS === "web" ? { position: "sticky", top: 0 } : {}),
+  },
   scroll: { flex: 1 },
   scrollContent: {
     paddingHorizontal: 16,
     paddingBottom: 100,
-    paddingTop: 4,
+    paddingTop: 12,
   },
-  intro: { fontSize: 13, marginBottom: 12, lineHeight: 18 },
+  intro: { fontSize: 13, marginBottom: 10, lineHeight: 18 },
+  filterSearch: {
+    marginBottom: 10,
+  },
+  orderCart: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+    marginBottom: 4,
+  },
+  orderCartHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    marginBottom: 6,
+    gap: 8,
+  },
+  orderCartTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  orderCartMeta: {
+    fontSize: 12,
+  },
+  orderCartEmpty: {
+    fontSize: 13,
+    paddingBottom: 8,
+    fontStyle: "italic",
+  },
+  orderCartScroll: {
+    maxHeight: 140,
+  },
+  orderLineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  orderLineMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  orderLineName: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  orderLineSub: {
+    fontSize: 11,
+    marginTop: 2,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  orderLineQty: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  orderLineRemove: {
+    margin: 0,
+  },
+  browseHint: {
+    fontSize: 12,
+    marginBottom: 12,
+  },
   tabBar: {
     flexDirection: "row",
     width: "100%",
@@ -824,7 +1148,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.2,
   },
-  searchInput: { marginBottom: 12 },
   emptyList: { paddingVertical: 24, alignItems: "center" },
   bundleSection: {},
   bundleSectionSpaced: {
@@ -896,49 +1219,31 @@ const styles = StyleSheet.create({
     textTransform: "lowercase",
   },
   compactMeta: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  inputsRowWrap: {
+  cardFooterRow: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
+    justifyContent: "space-between",
     gap: 6,
-  },
-  inputsLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-  inputsRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
+    minHeight: 28,
   },
   typeBadge: {
-    flexShrink: 0,
+    flexShrink: 1,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 4,
     borderRadius: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    alignSelf: "flex-end",
-    marginBottom: 2,
-    maxWidth: "46%",
+    maxWidth: "55%",
   },
   typeBadgeText: {
     fontSize: 11,
     fontWeight: "700",
   },
-  inputQty: {
-    width: 62,
-    maxWidth: 62,
-    marginBottom: 0,
-  },
-  inputJob: {
-    width: 124,
-    maxWidth: 124,
-    marginBottom: 0,
-  },
-  inputJobSpacer: {
-    flex: 1,
-    minHeight: 1,
+  inOrderBadge: {
+    fontSize: 12,
+    fontWeight: "700",
+    flexShrink: 0,
   },
   footer: {
     padding: 16,
@@ -952,5 +1257,42 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     width: "100%",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  addModalContent: {
+    width: "100%",
+    maxWidth: 400,
+    borderRadius: 12,
+    padding: 20,
+  },
+  addModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  addModalName: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  addModalId: {
+    fontSize: 12,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    marginBottom: 16,
+  },
+  addModalInput: {
+    marginBottom: 12,
+  },
+  addModalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 4,
   },
 });

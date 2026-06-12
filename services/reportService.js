@@ -86,7 +86,7 @@ function emptyUsageByType() {
 
 function normalizeUsageType(raw) {
   const t = String(raw || "").toLowerCase().trim();
-  if (t === "custom_paint") return "paint";
+  if (t === "custom_paint" || t === "precat") return "paint";
   if (t === "custom_stain") return "stain";
   if (["paint", "primer", "clear", "stain"].includes(t)) return t;
   return null;
@@ -200,7 +200,7 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
   const ensureBucket = (placedAt) => ensureBucketKey(bucketKeyForDate(placedAt, trunc));
 
   for (const row of lines) {
-    const qty = parseInt(row.quantity, 10) || 0;
+    const qty = Math.round(parseFloat(row.quantity) * 2) / 2 || 0;
     if (qty <= 0) continue;
     lineCount += 1;
     totalQuantity += qty;
@@ -462,7 +462,7 @@ async function buildClientSummary(from, to, groupBy) {
     const key = bucketKeyForDate(placed, trunc);
     const b = ensureBucket(key);
     for (const line of order.lines || []) {
-      const q = parseInt(line.quantity, 10) || 0;
+      const q = Math.round(parseFloat(line.quantity) * 2) / 2 || 0;
       const itemId = String(line.itemId || line.item_id || "");
       b.orderQuantity += q;
       b.orderValue += q * (priceById[itemId] || 0);

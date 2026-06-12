@@ -15,6 +15,7 @@ import {
   IconButton,
   ActivityIndicator,
 } from "react-native-paper";
+import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
 
 function lineOrderedQty(line) {
   const q = line?.quantity ?? line?.qty;
@@ -52,6 +53,7 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   itemId,
   initialQty,
   remaining,
+  allowHalf,
   onQtyChange,
 }) {
   const theme = useTheme();
@@ -62,9 +64,7 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   }, [itemId, initialQty]);
 
   const handleChange = (text) => {
-    const cleaned = String(text ?? "")
-      .replace(/[^\d]/g, "")
-      .slice(0, 4);
+    const cleaned = sanitizeGallonInput(text, allowHalf).slice(0, 5);
     setValue(cleaned);
     onQtyChange(itemId, cleaned);
   };
@@ -81,8 +81,16 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
         onChangeText={handleChange}
         placeholder={String(remaining)}
         placeholderTextColor={theme.colors.onSurfaceVariant}
-        keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
-        inputMode="numeric"
+        keyboardType={
+          allowHalf
+            ? Platform.OS === "ios"
+              ? "decimal-pad"
+              : "numeric"
+            : Platform.OS === "ios"
+              ? "number-pad"
+              : "numeric"
+        }
+        inputMode={allowHalf ? "decimal" : "numeric"}
         returnKeyType="done"
         blurOnSubmit={false}
         autoCorrect={false}
@@ -119,6 +127,7 @@ export default function ReceivePoModal({
   detailResetKey,
   getItemNameForOrder,
   getItemCodeForOrder,
+  getItemTypeForOrder,
   formatOrderColorsPreview,
 }) {
   const theme = useTheme();
@@ -425,6 +434,9 @@ export default function ReceivePoModal({
                               lineReceiveQtysRef.current[itemId] ?? remaining,
                             )}
                             remaining={remaining}
+                            allowHalf={allowsHalfGallon(
+                              getItemTypeForOrder?.(itemId),
+                            )}
                             onQtyChange={handleQtyChange}
                           />
                         ) : null}

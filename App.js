@@ -753,6 +753,56 @@ export default function App() {
     });
   };
 
+  const handleRecyclePaint = async (quantity) => {
+    if (!scannedItem || !isAdmin) return;
+    await runWithLoading('Recording recycle...', async () => {
+      try {
+        const result = await InventoryService.updateQuantity(
+          scannedItem.id,
+          -quantity,
+          actorName,
+          'recycled',
+        );
+        if (result.success) {
+          await loadInventory();
+          Alert.alert(
+            'Recycled',
+            `Recycled ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`,
+          );
+          await AuditService.log({
+            type: 'recycled',
+            user: actorName,
+            itemId: scannedItem.id,
+            quantity,
+            newQuantity: result.item.quantity,
+          });
+        } else {
+          const msg = result.error || 'Failed to record recycle.';
+          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+            window.alert(`Cannot recycle\n\n${msg}`);
+          } else {
+            Alert.alert('Cannot recycle', msg);
+          }
+          return;
+        }
+      } catch (err) {
+        await enqueueQuantityAction({
+          itemId: scannedItem.id,
+          change: -quantity,
+          userName: actorName,
+          actionType: 'recycled',
+        });
+        Alert.alert(
+          'Saved offline',
+          `Recycle for "${scannedItem.name}" will sync when you are back online.`,
+        );
+      }
+      setScannedItem(null);
+      const target = previousScreen || 'list';
+      setCurrentScreen(target);
+    });
+  };
+
   const handleAddItem = async (item) => {
     if (!isAdmin) {
       Alert.alert('Not Allowed', 'Only admin can add new inventory items.');
@@ -993,9 +1043,8 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can change inventory quantities.');
       return;
     }
-    const actionType = change > 0 ? 'check_in' : 'check_out';
     await runWithLoading('Updating quantity...', async () => {
-      const result = await InventoryService.updateQuantity(itemId, change, actorName, actionType);
+      const result = await InventoryService.updateQuantity(itemId, change, actorName, null);
       if (result.success) {
         await loadInventory();
         if (selectedItem && selectedItem.id === itemId) {
@@ -1153,8 +1202,10 @@ export default function App() {
           <CheckInOutScreen
             embeddedInShell={embeddedInShell}
             item={scannedItem}
+            isAdmin={isAdmin}
             onCheckIn={handleCheckIn}
             onCheckOut={handleCheckOut}
+            onRecyclePaint={handleRecyclePaint}
             onCancel={exitCheckInFlow}
             onOrderSummary={onOrderSummary}
             onReceiveDelivery={handleReceiveDelivery}

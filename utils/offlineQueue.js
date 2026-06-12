@@ -31,7 +31,7 @@ export async function enqueueQuantityAction({ itemId, change, userName, actionTy
     id: String(itemId ?? "").trim(),
     change: Number(change) || 0,
     userName: userName || null,
-    actionType: actionType || null, // 'check_in' | 'check_out' | 'receiving' | null
+    actionType: actionType || null, // 'check_in' | 'check_out' | 'receiving' | 'recycled' | null
     orderId: orderId || null,
     createdAt: new Date().toISOString(),
   };

@@ -1,6 +1,10 @@
 /** Months after lot/order date until custom paint/stain must be recycled. */
 export const CUSTOM_RECYCLE_MONTHS = 9;
 
+/** Shown on custom color item forms — when recycle due date resets. */
+export const RECYCLE_DUE_RESET_HINT =
+  "Recycle is due 9 months after the lot date, and resets 9 months after check-out or receiving.";
+
 export function normalizeDateInput(raw) {
   const s = String(raw ?? "").trim();
   if (!s) return null;

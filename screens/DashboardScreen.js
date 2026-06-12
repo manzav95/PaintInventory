@@ -374,6 +374,7 @@ export default function DashboardScreen({
       a === "check_in" ||
       a === "check_out" ||
       a === "receiving" ||
+      a === "recycled" ||
       a === "delete"
     )
       return true;
@@ -382,7 +383,8 @@ export default function DashboardScreen({
       d?._actionType &&
       (d._actionType === "check_in" ||
         d._actionType === "check_out" ||
-        d._actionType === "receiving")
+        d._actionType === "receiving" ||
+        d._actionType === "recycled")
     )
       return true;
     return false;
@@ -410,7 +412,8 @@ export default function DashboardScreen({
         !(
           log.details?._actionType === "check_in" ||
           log.details?._actionType === "check_out" ||
-          log.details?._actionType === "receiving"
+          log.details?._actionType === "receiving" ||
+          log.details?._actionType === "recycled"
         ));
     return adminOnly ? "Admin" : log.userName || "Unknown";
   };
@@ -448,6 +451,8 @@ export default function DashboardScreen({
         return "#e57373"; // Subtle red
       } else if (details._actionType === "receiving") {
         return "#64b5f6"; // Blue for receiving
+      } else if (details._actionType === "recycled") {
+        return "#558b2f";
       }
     }
 
@@ -458,6 +463,8 @@ export default function DashboardScreen({
         return "#e57373"; // Subtle red
       case "receiving":
         return "#64b5f6"; // Blue for receiving
+      case "recycled":
+        return "#558b2f";
       case "add":
         return "#64b5f6"; // Subtle blue
       case "delete":
@@ -480,6 +487,8 @@ export default function DashboardScreen({
         return "Checked Out";
       } else if (details._actionType === "receiving") {
         return "Receiving";
+      } else if (details._actionType === "recycled") {
+        return "Recycled";
       }
     }
 
@@ -492,6 +501,8 @@ export default function DashboardScreen({
       return "Checked Out";
     } else if (action === "receiving") {
       return "Receiving";
+    } else if (action === "recycled") {
+      return "Recycled";
     } else if (action === "update") {
       // If it's an update with quantity change, it's a manual adjustment
       // (check_in/check_out are now logged separately)
@@ -514,14 +525,16 @@ export default function DashboardScreen({
         action === "check_in" ||
         action === "check_out" ||
         action === "receiving" ||
+        action === "recycled" ||
         (action === "update" &&
           details._actionType &&
           (details._actionType === "check_in" ||
             details._actionType === "check_out" ||
-            details._actionType === "receiving"));
+            details._actionType === "receiving" ||
+            details._actionType === "recycled"));
 
       if (isCheckInOut) {
-        // For check_in and check_out, show the quantity change amount
+        // For check_in/check_out/receiving/recycled, show the quantity change amount
         if (typeof details.quantityChange === "number") {
           return Math.abs(details.quantityChange);
         } else if (typeof details._quantityChange === "number") {
@@ -559,11 +572,13 @@ export default function DashboardScreen({
         action === "check_in" ||
         action === "check_out" ||
         action === "receiving" ||
+        action === "recycled" ||
         (action === "update" &&
           details._actionType &&
           (details._actionType === "check_in" ||
             details._actionType === "check_out" ||
-            details._actionType === "receiving"));
+            details._actionType === "receiving" ||
+            details._actionType === "recycled"));
 
       if (isCheckInOut && typeof details.quantity === "number") {
         return details.quantity;
@@ -1234,13 +1249,16 @@ export default function DashboardScreen({
                 </Title>
                 {isAdmin && isWeb && (
                   <View style={styles.historyAdminControls}>
-                    <View style={styles.shiftToggleRow}>
+                    <View style={styles.historyShiftGroup}>
                       <Button
                         mode={shiftFilter === "day" ? "contained" : "outlined"}
                         compact
                         onPress={() =>
                           setShiftFilter((f) => (f === "day" ? null : "day"))
                         }
+                        style={styles.historyToggleBtn}
+                        contentStyle={styles.historyToggleContent}
+                        labelStyle={styles.historyToggleLabel}
                       >
                         {SHIFT_LABELS.day}
                       </Button>
@@ -1252,23 +1270,20 @@ export default function DashboardScreen({
                         onPress={() =>
                           setShiftFilter((f) => (f === "swing" ? null : "swing"))
                         }
+                        style={styles.historyToggleBtn}
+                        contentStyle={styles.historyToggleContent}
+                        labelStyle={styles.historyToggleLabel}
                       >
                         {SHIFT_LABELS.swing}
                       </Button>
                     </View>
                     <Button
-                      mode="outlined"
+                      mode={reducedHistory ? "contained" : "outlined"}
                       compact
                       onPress={() => setReducedHistory((p) => !p)}
-                      style={[
-                        styles.reducedToggle,
-                        reducedHistory && {
-                          backgroundColor: theme.dark
-                            ? "rgba(255,255,255,0.08)"
-                            : "rgba(0,0,0,0.06)",
-                        },
-                      ]}
-                      contentStyle={styles.reducedToggleContent}
+                      style={styles.historyToggleBtn}
+                      contentStyle={styles.historyToggleContent}
+                      labelStyle={styles.historyToggleLabel}
                     >
                       {reducedHistory ? "Reduced" : "Standard"}
                     </Button>
@@ -1695,13 +1710,17 @@ const styles = StyleSheet.create({
   historyHeader: {
     marginBottom: 16,
   },
-  reducedToggle: {
-    alignSelf: "flex-start",
-    marginBottom: 10,
-    minWidth: 110,
+  historyToggleBtn: {
+    minWidth: 0,
   },
-  reducedToggleContent: {
-    height: 36,
+  historyToggleContent: {
+    height: 34,
+    paddingHorizontal: 10,
+  },
+  historyToggleLabel: {
+    fontSize: 13,
+    marginHorizontal: 4,
+    lineHeight: 18,
   },
   historyTitle: {
     fontSize: 20,
@@ -1771,13 +1790,13 @@ const styles = StyleSheet.create({
   },
   historyAdminControls: {
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
+    marginBottom: 10,
   },
-  shiftToggleRow: {
+  historyShiftGroup: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    alignItems: "center",
     gap: 6,
   },
   dayDividerText: {

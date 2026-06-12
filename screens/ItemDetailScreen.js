@@ -27,19 +27,16 @@ import {
   normalizeDateInput,
   formatRecycleDueFromLotDate,
   formatDateDisplay,
+  RECYCLE_DUE_RESET_HINT,
 } from "../utils/recycleDates";
 import { normalizeItemNameForSave } from "../utils/itemNameUtils";
-
-const TYPE_OPTIONS = [
-  { label: "Paint", value: "paint" },
-  { label: "Primer", value: "primer" },
-  { label: "Clear", value: "clear" },
-  { label: "Catalyst", value: "catalyst" },
-  { label: "Stain", value: "stain" },
-  { label: "Dye", value: "dye" },
-  { label: "Custom Paint", value: "custom_paint" },
-  { label: "Custom Stain", value: "custom_stain" },
-];
+import { MATERIAL_TYPE_OPTIONS as TYPE_OPTIONS } from "../utils/materialTypes";
+import {
+  allowsHalfGallon,
+  parseGallonQuantity,
+  sanitizeGallonInput,
+  formatGallonQuantity,
+} from "../utils/gallonQuantity";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -349,11 +346,21 @@ export default function ItemDetailScreen({
       ? externalCodeInput.trim()
       : null;
     const rexVal = rexInput.trim() ? rexInput.trim() : null;
+    let qtyVal = 0;
+    if (quantity.trim() !== "") {
+      const qtyParsed = parseGallonQuantity(quantity, typeVal);
+      if (!qtyParsed.ok) {
+        Alert.alert("Invalid quantity", qtyParsed.error);
+        return;
+      }
+      qtyVal = qtyParsed.value;
+    }
+
     const updatedItem = {
       ...item,
       id: trimmedId || item?.id,
       name: trimmedName,
-      quantity: quantity.trim() === "" ? 0 : parseInt(quantity, 10) || 0,
+      quantity: qtyVal,
       location,
       ...(type !== "custom_paint" &&
         type !== "custom_stain" &&
@@ -421,15 +428,17 @@ export default function ItemDetailScreen({
     <TextInput
       label={isWideDesktop ? "Quantity" : "Quantity (Gallons)"}
       value={quantity}
-      onChangeText={setQuantity}
+      onChangeText={(t) =>
+        setQuantity(sanitizeGallonInput(t, allowsHalfGallon(type)))
+      }
       mode="outlined"
-      keyboardType="numeric"
+      keyboardType={allowsHalfGallon(type) ? "decimal-pad" : "number-pad"}
       style={inputStyle}
       dense={isWideDesktop}
       right={<TextInput.Affix text="gal" />}
     />
   ) : (
-    <ReadOnlyValue>{quantity} gal</ReadOnlyValue>
+    <ReadOnlyValue>{formatGallonQuantity(quantity)} gal</ReadOnlyValue>
   );
 
   const colorSection = isAdmin ? (
@@ -538,8 +547,7 @@ export default function ItemDetailScreen({
           <Text
             style={[styles.recycleHint, { color: theme.colors.onSurfaceVariant }]}
           >
-            Recycle is due 9 months after the lot date, and resets 9 months after
-            each check-in, check-out, or receiving.
+            {RECYCLE_DUE_RESET_HINT}
           </Text>
         </>
       ) : (

@@ -302,11 +302,15 @@ class InventoryService {
       const currentQty = Number(item.quantity) || 0;
       const newQuantity = currentQty + change;
 
-      // For check-out, do not allow negative stock; return a clear error instead of clamping
-      if (actionType === 'check_out' && newQuantity < 0) {
+      // For check-out / recycle, do not allow negative stock
+      if (
+        (actionType === 'check_out' || actionType === 'recycled') &&
+        newQuantity < 0
+      ) {
+        const verb = actionType === 'recycled' ? 'recycle' : 'check out';
         return {
           success: false,
-          error: `Only ${currentQty} gallon${currentQty !== 1 ? 's' : ''} available. You cannot check out ${Math.abs(change)} gallons.`,
+          error: `Only ${currentQty} gallon${currentQty !== 1 ? 's' : ''} available. You cannot ${verb} ${Math.abs(change)} gallons.`,
         };
       }
 

@@ -44,11 +44,13 @@ function getActionColor(action, details) {
     if (details._actionType === "check_in") return "#81c784";
     if (details._actionType === "check_out") return "#e57373";
     if (details._actionType === "receiving") return "#64b5f6";
+    if (details._actionType === "recycled") return "#558b2f";
   }
   switch (action) {
     case "check_in": return "#81c784";
     case "check_out": return "#e57373";
     case "receiving": return "#64b5f6";
+    case "recycled": return "#558b2f";
     case "add": return "#64b5f6";
     case "delete": return "#f44336";
     case "update": return "#ba68c8";
@@ -62,12 +64,14 @@ function formatAction(action, details) {
     if (details._actionType === "check_in") return "Checked In";
     if (details._actionType === "check_out") return "Checked Out";
     if (details._actionType === "receiving") return "Receiving";
+    if (details._actionType === "recycled") return "Recycled";
   }
   const map = {
     add: "New Entry",
     check_in: "Checked In",
     check_out: "Checked Out",
     receiving: "Receiving",
+    recycled: "Recycled",
     update: "Manual Adjustment",
     delete: "Deleted",
     change_id: "ID Changed",
@@ -82,9 +86,10 @@ function getQuantity(action, details) {
     action === "check_in" ||
     action === "check_out" ||
     action === "receiving" ||
+    action === "recycled" ||
     (action === "update" &&
       details._actionType &&
-      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
+      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving" || details._actionType === "recycled"));
   if (isCheckInOut) {
     const q = details.quantityChange ?? details._quantityChange;
     if (typeof q === "number") return Math.abs(q);
@@ -103,7 +108,8 @@ function getTotalQuantity(action, details) {
     action === "check_in" ||
     action === "check_out" ||
     action === "receiving" ||
-    (action === "update" && details._actionType && (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving"));
+    action === "recycled" ||
+    (action === "update" && details._actionType && (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving" || details._actionType === "recycled"));
   if (isCheckInOut && typeof details.quantity === "number") return details.quantity;
   if (action === "update" && typeof details.quantity === "number") return details.quantity;
   if (action === "add" && typeof details.quantity === "number") return details.quantity;
@@ -116,7 +122,7 @@ function getDisplayUserName(log) {
   if (u && u !== "unknown") return log.userName;
   const adminOnly =
     ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-    (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving"));
+    (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving" || log.details?._actionType === "recycled"));
   return adminOnly ? "Admin" : (log.userName || "Unknown");
 }
 
@@ -124,8 +130,8 @@ function filterToStandardUserVisible(logs) {
   return logs.filter((log) => {
     const a = log.action;
     const d = log.details;
-    if (a === "check_in" || a === "check_out" || a === "receiving" || a === "delete") return true;
-    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving")) return true;
+    if (a === "check_in" || a === "check_out" || a === "receiving" || a === "recycled" || a === "delete") return true;
+    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving" || d._actionType === "recycled")) return true;
     return false;
   });
 }

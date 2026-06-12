@@ -33,6 +33,9 @@ function formatAction(action, details) {
   if (action === "update" && details?._actionType === "receiving")
     return "Receiving";
   if (action === "receiving") return "Receiving";
+  if (action === "update" && details?._actionType === "recycled")
+    return "Recycled";
+  if (action === "recycled") return "Recycled";
   if (action === "update") return "Manual Adjustment";
   if (action === "delete") return "Deleted";
   if (action === "change_id") return "ID Changed";
@@ -49,6 +52,9 @@ function getActionColor(action, details) {
   if (action === "update" && details?._actionType === "receiving")
     return "#64b5f6";
   if (action === "receiving") return "#64b5f6";
+  if (action === "update" && details?._actionType === "recycled")
+    return "#558b2f";
+  if (action === "recycled") return "#558b2f";
   if (action === "add") return "#64b5f6";
   if (action === "delete") return "#f44336";
   if (action === "update") return "#ba68c8";
@@ -61,11 +67,13 @@ function getQuantityDisplay(action, details) {
     action === "check_in" ||
     action === "check_out" ||
     action === "receiving" ||
+    action === "recycled" ||
     (action === "update" &&
       details._actionType &&
       (details._actionType === "check_in" ||
         details._actionType === "check_out" ||
-        details._actionType === "receiving"));
+        details._actionType === "receiving" ||
+        details._actionType === "recycled"));
   if (isCheckInOut && typeof details.quantityChange === "number") {
     return String(details.quantityChange);
   }
@@ -162,6 +170,7 @@ export default function HomeScreen({
         a === "check_in" ||
         a === "check_out" ||
         a === "receiving" ||
+        a === "recycled" ||
         a === "delete"
       )
         return true;
@@ -170,7 +179,8 @@ export default function HomeScreen({
         d?._actionType &&
         (d._actionType === "check_in" ||
           d._actionType === "check_out" ||
-          d._actionType === "receiving")
+          d._actionType === "receiving" ||
+          d._actionType === "recycled")
       )
         return true;
       return false;
@@ -232,7 +242,8 @@ export default function HomeScreen({
         !(
           log.details?._actionType === "check_in" ||
           log.details?._actionType === "check_out" ||
-          log.details?._actionType === "receiving"
+          log.details?._actionType === "receiving" ||
+          log.details?._actionType === "recycled"
         ));
     return adminOnly ? "Admin" : log.userName || "Unknown";
   };
