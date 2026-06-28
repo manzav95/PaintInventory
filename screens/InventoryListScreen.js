@@ -325,7 +325,9 @@ export default function InventoryListScreen({
         if (raw === undefined || raw === null || String(raw).trim() === "") {
           continue;
         }
-        const parsed = parseGallonQuantity(raw, getItemTypeForOrder(itemId));
+        const parsed = parseGallonQuantity(raw, getItemTypeForOrder(itemId), {
+          allowZero: true,
+        });
         if (!parsed.ok) {
           Alert.alert(
             "Invalid quantity",
@@ -371,10 +373,7 @@ export default function InventoryListScreen({
         lineCount += 1;
       }
       if (lineCount === 0) {
-        Alert.alert(
-          "Nothing to receive",
-          "Enter a quantity greater than 0 for at least one line that still has stock due.",
-        );
+        closeReceivePoModal();
         return;
       }
       await onRefresh?.();

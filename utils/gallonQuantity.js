@@ -11,19 +11,28 @@ export function isHalfGallonIncrement(n) {
 
 /**
  * Parse a gallon quantity string for a given material type.
+ * @param {string|number} raw
+ * @param {string|boolean} typeOrAllowHalf - material type or legacy allowHalf flag
+ * @param {{ allowZero?: boolean }} [options]
  * @returns {{ ok: boolean, value?: number, error?: string }}
  */
-export function parseGallonQuantity(raw, typeOrAllowHalf) {
+export function parseGallonQuantity(raw, typeOrAllowHalf, options = {}) {
+  const allowZero = options?.allowZero === true;
   const allowHalf =
     typeof typeOrAllowHalf === "boolean"
       ? typeOrAllowHalf
       : allowsHalfGallon(typeOrAllowHalf);
   const s = String(raw ?? "").trim();
   if (!s) {
+    if (allowZero) return { ok: true, value: 0 };
     return { ok: false, error: "Enter a quantity greater than 0." };
   }
   const n = parseFloat(s);
-  if (!Number.isFinite(n) || n <= 0) {
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: "Enter a valid quantity." };
+  }
+  if (n === 0) {
+    if (allowZero) return { ok: true, value: 0 };
     return { ok: false, error: "Enter a quantity greater than 0." };
   }
   if (allowHalf) {

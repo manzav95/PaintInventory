@@ -19,6 +19,8 @@ import {
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
 
+const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
+
 function lineItemId(line) {
   return line?.itemId ?? line?.item_id;
 }
@@ -104,6 +106,8 @@ export default function CheckInOutScreen({
   const itemType = String(item?.type || "")
     .toLowerCase()
     .trim();
+  const isCustomColor = CUSTOM_COLOR_TYPES.has(itemType);
+  const showRecycleButton = isAdmin && onRecyclePaint && isCustomColor;
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
   const halfGallonItem = allowsHalfGallon(itemType);
   const quickQtyOptions = halfGallonItem
@@ -137,6 +141,13 @@ export default function CheckInOutScreen({
     receiveOrdersLoaded,
     onRefreshReceiveOrders,
   ]);
+
+  useEffect(() => {
+    if (action === "recycle" && !showRecycleButton) {
+      setAction(null);
+      setQuantity("");
+    }
+  }, [action, showRecycleButton]);
 
   const showAlert = (title, message) => {
     if (
@@ -372,7 +383,7 @@ export default function CheckInOutScreen({
                     Receiving Delivery
                   </Button>
                 )}
-                {isAdmin && onRecyclePaint ? (
+                {showRecycleButton ? (
                   <Button
                     mode={action === "recycle" ? "contained" : "outlined"}
                     onPress={() => setAction("recycle")}
@@ -403,15 +414,17 @@ export default function CheckInOutScreen({
                       </Text>
                       <View style={styles.quickQtyRow}>
                         {quickQtyOptions.map((v) => (
-                          <Button
-                            key={String(v)}
-                            mode="outlined"
-                            compact
-                            onPress={() => setQuantity(String(v))}
-                            style={styles.quickQtyButton}
-                          >
-                            {v}
-                          </Button>
+                          <View key={String(v)} style={styles.quickQtyCell}>
+                            <Button
+                              mode="outlined"
+                              compact
+                              onPress={() => setQuantity(String(v))}
+                              style={styles.quickQtyButton}
+                              contentStyle={styles.quickQtyButtonContent}
+                            >
+                              {v}
+                            </Button>
+                          </View>
                         ))}
                       </View>
                     </View>
@@ -730,14 +743,18 @@ const styles = StyleSheet.create({
   },
   quickQtyRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
+    alignItems: "stretch",
+    gap: 10,
+  },
+  quickQtyCell: {
+    flex: 1,
+    minWidth: 0,
   },
   quickQtyButton: {
-    flexGrow: 1,
-    flexBasis: "24%",
-    minWidth: 92,
-    marginBottom: 10,
+    width: "100%",
+  },
+  quickQtyButtonContent: {
+    width: "100%",
   },
   submitRow: {
     flexDirection: "row",

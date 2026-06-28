@@ -114,13 +114,14 @@ export default function SimpleLineChart({
     if (w && w > 0) setLayoutWidth(w);
   }, []);
 
+  // Scroll to latest period when data changes — not when user picks a point.
   useEffect(() => {
     if (!scrollable || !scrollRef.current) return;
     const timer = setTimeout(() => {
       scrollRef.current?.scrollToEnd?.({ animated: false });
     }, 50);
     return () => clearTimeout(timer);
-  }, [scrollable, data.length, chartWidth, selectedIndex]);
+  }, [scrollable, data.length, chartWidth]);
 
   const activeIndex =
     selectedIndex != null &&

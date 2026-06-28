@@ -4,6 +4,12 @@ import AuditService from "./auditService";
 import OrderService from "./orderService";
 import MaterialUsageService from "./materialUsageService";
 import InventoryService from "./inventoryService";
+import {
+  bucketKeyForCalendarDate,
+  calendarDateParts,
+  formatYearMonthBucketLabel,
+  resolveCustomColorsRange,
+} from "../utils/reportBuckets";
 
 const API_URL = config.API_URL;
 
@@ -19,17 +25,40 @@ function getWeekStart(d) {
 function normalizeGroupBy(groupBy) {
   if (groupBy === "month") return "month";
   if (groupBy === "day") return "day";
+  if (groupBy === "year") return "year";
+  if (groupBy === "lifetime") return "lifetime";
+  return "week";
+}
+
+function normalizeTimelineGroupBy(groupBy) {
+  if (groupBy === "year" || groupBy === "lifetime") {
+    return normalizeCustomColorsGroupBy(groupBy);
+  }
+  return normalizeGroupBy(groupBy);
+}
+
+/** Custom colors report supports week, month, year, and lifetime buckets. */
+function normalizeCustomColorsGroupBy(groupBy) {
+  if (groupBy === "month") return "month";
+  if (groupBy === "year") return "year";
+  if (groupBy === "lifetime") return "lifetime";
   return "week";
 }
 
 function bucketKeyForDate(date, groupBy) {
+  const gb =
+    groupBy === "lifetime" || groupBy === "year" || groupBy === "month"
+      ? groupBy
+      : normalizeGroupBy(groupBy);
+  const calKey = bucketKeyForCalendarDate(date, gb);
+  if (calKey) return calKey;
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return "unknown";
-  const gb = normalizeGroupBy(groupBy);
-  if (gb === "month") {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  }
   if (gb === "day") {
+    const parts = calendarDateParts(date);
+    if (parts) {
+      return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+    }
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
@@ -39,8 +68,15 @@ function bucketKeyForDate(date, groupBy) {
 }
 
 function parseBucketDate(key, groupBy) {
-  const gb = normalizeGroupBy(groupBy);
+  const gb =
+    groupBy === "lifetime" || groupBy === "year"
+      ? groupBy
+      : normalizeGroupBy(groupBy);
   const s = String(key);
+  if (gb === "lifetime") return new Date(`${new Date().getFullYear()}-01-01T12:00:00`);
+  if (gb === "year" && /^\d{4}$/.test(s)) {
+    return new Date(`${s}-01-01T12:00:00`);
+  }
   if (gb === "day" && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
     return new Date(`${s}T12:00:00`);
   }
@@ -52,12 +88,11 @@ function parseBucketDate(key, groupBy) {
 
 function formatBucketLabel(key, groupBy) {
   if (key === "unknown") return "—";
-  const gb = normalizeGroupBy(groupBy);
+  const ymLabel = formatYearMonthBucketLabel(key, groupBy);
+  if (ymLabel) return ymLabel;
+  const gb = groupBy === "year" ? "year" : normalizeGroupBy(groupBy);
   const d = parseBucketDate(key, gb);
   if (Number.isNaN(d.getTime())) return String(key);
-  if (gb === "month") {
-    return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-  }
   if (gb === "day") {
     return d.toLocaleDateString("en-US", {
       weekday: "short",
@@ -107,11 +142,22 @@ function addUsageByType(target, type, gallons) {
 
 /** Every period from from→to, including the current incomplete month/week/day. */
 function enumerateBucketKeys(from, to, groupBy) {
-  const gb = normalizeGroupBy(groupBy);
+  if (groupBy === "lifetime") return ["lifetime"];
+  const gb = groupBy === "year" ? "year" : normalizeGroupBy(groupBy);
   const keys = [];
   const start = new Date(`${from}T12:00:00`);
   const end = new Date(`${to}T12:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return keys;
+
+  if (gb === "year") {
+    let y = start.getFullYear();
+    const endY = end.getFullYear();
+    while (y <= endY) {
+      keys.push(String(y));
+      y += 1;
+    }
+    return keys;
+  }
 
   if (gb === "day") {
     const cur = new Date(start);
@@ -197,7 +243,10 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
     return bucketMap.get(key);
   };
 
-  const ensureBucket = (placedAt) => ensureBucketKey(bucketKeyForDate(placedAt, trunc));
+  const ensureBucket = (placedAt) => {
+    if (trunc === "lifetime") return ensureBucketKey("lifetime");
+    return ensureBucketKey(bucketKeyForDate(placedAt, trunc));
+  };
 
   for (const row of lines) {
     const qty = Math.round(parseFloat(row.quantity) * 2) / 2 || 0;
@@ -300,7 +349,7 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
 }
 
 async function buildClientCustomColorsReport(from, to, groupBy) {
-  const trunc = normalizeGroupBy(groupBy);
+  const trunc = normalizeCustomColorsGroupBy(groupBy);
   const [orders, items] = await Promise.all([
     OrderService.getOrders(500),
     InventoryService.getAllItems().catch(() => []),
@@ -346,7 +395,7 @@ async function fetchCustomColorsFromApi(baseUrl, from, to, groupBy) {
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  params.set("groupBy", normalizeGroupBy(groupBy));
+  params.set("groupBy", normalizeCustomColorsGroupBy(groupBy));
   const url = `${baseUrl.replace(/\/$/, "")}/api/reports/custom-colors?${params.toString()}`;
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
@@ -544,6 +593,237 @@ async function buildClientSummary(from, to, groupBy) {
   };
 }
 
+async function buildItemActivityReport(from, to) {
+  const [auditLogs, orders, usageRows, items] = await Promise.all([
+    AuditService.list(2000),
+    OrderService.getOrders(500),
+    MaterialUsageService.list(null, 2000, { from, to }),
+    InventoryService.getAllItems().catch(() => []),
+  ]);
+
+  const priceById = {};
+  const stats = new Map();
+
+  const ensure = (itemId) => {
+    const id = String(itemId || "").trim();
+    if (!id) return null;
+    if (!stats.has(id)) {
+      const inv = (items || []).find((i) => String(i.id) === id);
+      stats.set(id, {
+        itemId: id,
+        name: inv?.name || id,
+        type: inv?.type || "",
+        external_code: inv?.external_code || "",
+        checkoutGallons: 0,
+        receivingGallons: 0,
+        orderQuantity: 0,
+        orderValue: 0,
+        usageGallons: 0,
+      });
+    }
+    return stats.get(id);
+  };
+
+  for (const item of items || []) {
+    if (item?.id != null) ensure(String(item.id));
+    const p = item.price != null ? Number(item.price) : 0;
+    if (item.id != null && !Number.isNaN(p)) priceById[String(item.id)] = p;
+  }
+
+  for (const row of auditLogs || []) {
+    const ts = row.timestamp;
+    if (!inDateRange(ts, from, to)) continue;
+    const itemId = String(row.itemId ?? row.item_id ?? "").trim();
+    const entry = ensure(itemId);
+    if (!entry) continue;
+    let details = row.details;
+    if (typeof details === "string") {
+      try {
+        details = JSON.parse(details || "{}");
+      } catch {
+        details = {};
+      }
+    }
+    const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+    const action = row.action;
+    const actionType = details?._actionType;
+    const isCheckout =
+      action === "check_out" ||
+      (action === "update" && actionType === "check_out");
+    const isReceiving =
+      action === "receiving" ||
+      (action === "update" && actionType === "receiving");
+    if (isCheckout) entry.checkoutGallons += qty;
+    if (isReceiving) entry.receivingGallons += qty;
+  }
+
+  for (const order of orders || []) {
+    const placed = order.placed_at || order.placedAt;
+    if (!inDateRange(placed, from, to)) continue;
+    for (const line of order.lines || []) {
+      const itemId = String(line.itemId || line.item_id || "").trim();
+      const entry = ensure(itemId);
+      if (!entry) continue;
+      const q = Math.round(parseFloat(line.quantity) * 2) / 2 || 0;
+      entry.orderQuantity += q;
+      entry.orderValue += q * (priceById[itemId] || 0);
+    }
+  }
+
+  for (const row of usageRows || []) {
+    const ed = row.entry_date;
+    if (!inDateRange(ed, from, to)) continue;
+    const itemId = String(row.item_id ?? row.itemId ?? "").trim();
+    const entry = ensure(itemId);
+    if (!entry) continue;
+    entry.usageGallons += parseFloat(row.qty_gallons) || 0;
+  }
+
+  return [...stats.values()]
+    .map((row) => ({
+      ...row,
+      checkoutGallons: Math.round(row.checkoutGallons * 10) / 10,
+      receivingGallons: Math.round(row.receivingGallons * 10) / 10,
+      orderQuantity: Math.round(row.orderQuantity * 10) / 10,
+      orderValue: Math.round(row.orderValue * 100) / 100,
+      usageGallons: Math.round(row.usageGallons * 10) / 10,
+    }))
+    .sort((a, b) =>
+      String(a.name || a.itemId).localeCompare(String(b.name || b.itemId)),
+    );
+}
+
+async function buildItemTimelineReport(itemId, from, to, groupBy) {
+  const id = String(itemId || "").trim();
+  if (!id) return null;
+
+  const trunc = normalizeTimelineGroupBy(groupBy);
+  const range =
+    trunc === "year" || trunc === "lifetime"
+      ? resolveCustomColorsRange(from, to, trunc)
+      : {
+          from:
+            from ||
+            new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10),
+          to: to || new Date().toISOString().slice(0, 10),
+        };
+  const fromDate = range.from;
+  const toDate = range.to;
+
+  const bucketMap = new Map();
+  const ensureBucketKey = (key) => {
+    if (!bucketMap.has(key)) {
+      bucketMap.set(key, {
+        key,
+        label: formatBucketLabel(key, trunc),
+        checkoutGallons: 0,
+        receivingGallons: 0,
+        orderQuantity: 0,
+        usageGallons: 0,
+      });
+    }
+    return bucketMap.get(key);
+  };
+
+  const ensureBucketForDate = (date) => {
+    if (trunc === "lifetime") return ensureBucketKey("lifetime");
+    return ensureBucketKey(bucketKeyForDate(date, trunc));
+  };
+
+  for (const key of enumerateBucketKeys(fromDate, toDate, trunc)) {
+    ensureBucketKey(key);
+  }
+
+  const [auditLogs, orders, usageRows, items] = await Promise.all([
+    AuditService.list(2000),
+    OrderService.getOrders(500),
+    MaterialUsageService.list(null, 2000, { from: fromDate, to: toDate }),
+    InventoryService.getAllItems().catch(() => []),
+  ]);
+
+  const inv = (items || []).find((i) => String(i.id) === id);
+
+  for (const row of auditLogs || []) {
+    const rowId = String(row.itemId ?? row.item_id ?? "").trim();
+    if (rowId !== id) continue;
+    const ts = row.timestamp;
+    if (!inDateRange(ts, fromDate, toDate)) continue;
+    let details = row.details;
+    if (typeof details === "string") {
+      try {
+        details = JSON.parse(details || "{}");
+      } catch {
+        details = {};
+      }
+    }
+    const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+    const action = row.action;
+    const actionType = details?._actionType;
+    const isCheckout =
+      action === "check_out" ||
+      (action === "update" && actionType === "check_out");
+    const isReceiving =
+      action === "receiving" ||
+      (action === "update" && actionType === "receiving");
+    const bucket = ensureBucketForDate(ts);
+    if (isCheckout) bucket.checkoutGallons += qty;
+    if (isReceiving) bucket.receivingGallons += qty;
+  }
+
+  for (const order of orders || []) {
+    const placed = order.placed_at || order.placedAt;
+    if (!inDateRange(placed, fromDate, toDate)) continue;
+    for (const line of order.lines || []) {
+      const lineId = String(line.itemId || line.item_id || "").trim();
+      if (lineId !== id) continue;
+      const q = Math.round(parseFloat(line.quantity) * 2) / 2 || 0;
+      ensureBucketForDate(placed).orderQuantity += q;
+    }
+  }
+
+  for (const row of usageRows || []) {
+    const rowId = String(row.item_id ?? row.itemId ?? "").trim();
+    if (rowId !== id) continue;
+    const ed = row.entry_date;
+    if (!inDateRange(ed, fromDate, toDate)) continue;
+    ensureBucketForDate(ed).usageGallons += parseFloat(row.qty_gallons) || 0;
+  }
+
+  const sorted = [...bucketMap.values()].sort((a, b) =>
+    a.key.localeCompare(b.key),
+  );
+
+  const roundGal = (n) => Math.round(n * 10) / 10;
+  const checkoutGallons = sorted.map((b) => roundGal(b.checkoutGallons));
+  const receivingGallons = sorted.map((b) => roundGal(b.receivingGallons));
+  const orderQuantity = sorted.map((b) => roundGal(b.orderQuantity));
+  const usageGallons = sorted.map((b) => roundGal(b.usageGallons));
+
+  const sum = (arr) => roundGal(arr.reduce((a, v) => a + v, 0));
+
+  return {
+    itemId: id,
+    name: inv?.name || id,
+    type: inv?.type || "",
+    external_code: inv?.external_code || "",
+    from: fromDate,
+    to: toDate,
+    groupBy: trunc,
+    buckets: sorted.map((b) => b.label),
+    checkoutGallons,
+    receivingGallons,
+    orderQuantity,
+    usageGallons,
+    totals: {
+      checkoutGallons: sum(checkoutGallons),
+      receivingGallons: sum(receivingGallons),
+      orderQuantity: sum(orderQuantity),
+      usageGallons: sum(usageGallons),
+    },
+    source: "client",
+  };
+}
+
 function alternateApiBases() {
   const bases = [API_URL];
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -566,10 +846,10 @@ function alternateApiBases() {
 
 class ReportService {
   async getCustomColorsOverview({ from, to, groupBy = "week" } = {}) {
-    const fromDate =
-      from || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
-    const toDate = to || new Date().toISOString().slice(0, 10);
-    const gb = normalizeGroupBy(groupBy);
+    const gb = normalizeCustomColorsGroupBy(groupBy);
+    const range = resolveCustomColorsRange(from, to, gb);
+    const fromDate = range.from;
+    const toDate = range.to;
 
     let lastErr;
     for (const base of alternateApiBases()) {
@@ -589,20 +869,42 @@ class ReportService {
     }
   }
 
-  async getSummary({ from, to, groupBy = "week" } = {}) {
+  async getItemActivity({ from, to } = {}) {
     const fromDate =
       from || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
     const toDate = to || new Date().toISOString().slice(0, 10);
-    const gb = normalizeGroupBy(groupBy);
+    return buildItemActivityReport(fromDate, toDate);
+  }
 
+  async getItemTimeline({ itemId, from, to, groupBy = "week" } = {}) {
+    return buildItemTimelineReport(itemId, from, to, groupBy);
+  }
+
+  async getSummary({ from, to, groupBy = "week" } = {}) {
+    const gb = normalizeGroupBy(groupBy);
+    const range =
+      gb === "year" || gb === "lifetime"
+        ? resolveCustomColorsRange(from, to, gb)
+        : {
+            from:
+              from ||
+              new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10),
+            to: to || new Date().toISOString().slice(0, 10),
+          };
+    const fromDate = range.from;
+    const toDate = range.to;
+
+    const useClientOnly = gb === "year" || gb === "lifetime";
     let lastErr;
-    for (const base of alternateApiBases()) {
-      try {
-        const data = await fetchSummaryFromApi(base, fromDate, toDate, gb);
-        return data;
-      } catch (e) {
-        lastErr = e;
-        console.warn(`Reports API failed (${base}):`, e?.message || e);
+    if (!useClientOnly) {
+      for (const base of alternateApiBases()) {
+        try {
+          const data = await fetchSummaryFromApi(base, fromDate, toDate, gb);
+          return data;
+        } catch (e) {
+          lastErr = e;
+          console.warn(`Reports API failed (${base}):`, e?.message || e);
+        }
       }
     }
 

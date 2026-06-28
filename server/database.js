@@ -23,6 +23,34 @@ function parseStoredGallons(val) {
   return Math.round(n * 2) / 2;
 }
 
+/** Calendar YYYY-MM-DD parts — avoids local TZ shifting year/month buckets. */
+function calendarDateParts(d) {
+  if (d == null || d === "") return null;
+  const s = String(d).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    return { year: +m[1], month: +m[2], day: +m[3] };
+  }
+  const dt = d instanceof Date ? d : new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+  return {
+    year: dt.getUTCFullYear(),
+    month: dt.getUTCMonth() + 1,
+    day: dt.getUTCDate(),
+  };
+}
+
+function bucketKeyFromCalendarDate(d, trunc) {
+  const parts = calendarDateParts(d);
+  if (!parts) return null;
+  if (trunc === "lifetime") return "lifetime";
+  if (trunc === "year") return String(parts.year);
+  if (trunc === "month") {
+    return `${parts.year}-${String(parts.month).padStart(2, "0")}`;
+  }
+  return null;
+}
+
 /** Normalize API row for AP vs mixing: single boolean is_mixing (default true). */
 function normalizeItemPoFields(row) {
   if (!row) return row;
@@ -1384,40 +1412,86 @@ class Database {
    * Custom paint/stain orders: totals, job breakdown, color breakdown, per week/month.
    */
   async getCustomColorsOrderReport(fromDate, toDate, groupBy = "week") {
-    const trunc = groupBy === "month" ? "month" : "week";
-    const from =
+    const trunc =
+      groupBy === "month"
+        ? "month"
+        : groupBy === "year"
+          ? "year"
+          : groupBy === "lifetime"
+            ? "lifetime"
+            : "week";
+    let from =
       fromDate || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
     const to = toDate || new Date().toISOString().slice(0, 10);
+    const CUSTOM_COLORS_EARLIEST = "2026-01-01";
+    if (trunc === "year" || trunc === "lifetime") {
+      from = CUSTOM_COLORS_EARLIEST;
+    } else if (from < CUSTOM_COLORS_EARLIEST) {
+      from = CUSTOM_COLORS_EARLIEST;
+    }
 
     const formatBucketLabel = (d) => {
+      if (trunc === "lifetime") return "Lifetime";
       if (!d) return "";
+      if (trunc === "year") {
+        const parts = calendarDateParts(d);
+        return parts ? String(parts.year) : "";
+      }
+      if (trunc === "month") {
+        const parts = calendarDateParts(d);
+        if (parts) {
+          const labelDate = new Date(
+            `${parts.year}-${String(parts.month).padStart(2, "0")}-01T12:00:00`,
+          );
+          return labelDate.toLocaleDateString("en-US", {
+            month: "short",
+            year: "numeric",
+          });
+        }
+      }
       const dt = d instanceof Date ? d : new Date(d);
       if (Number.isNaN(dt.getTime())) return String(d);
-      if (trunc === "month") {
-        return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-      }
       const end = new Date(dt);
       end.setDate(end.getDate() + 6);
       return `${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
     };
 
-    const result = await this.pool.query(
-      `SELECT
-         date_trunc($1, (o.placed_at::timestamptz)) AS bucket,
-         ol.item_id,
-         ol.quantity,
-         ol.job_name,
-         i.name AS item_name,
-         i.type AS item_type
-       FROM orders o
-       JOIN order_lines ol ON ol.order_id = o.id
-       JOIN items i ON i.id = ol.item_id
-       WHERE lower(i.type) IN ('custom_paint', 'custom_stain')
-         AND (o.placed_at::timestamptz) >= $2::date
-         AND (o.placed_at::timestamptz) < ($3::date + interval '1 day')
-       ORDER BY o.placed_at ASC`,
-      [trunc, from, to],
-    );
+    const result =
+      trunc === "lifetime"
+        ? await this.pool.query(
+            `SELECT
+               NULL::timestamptz AS bucket,
+               ol.item_id,
+               ol.quantity,
+               ol.job_name,
+               i.name AS item_name,
+               i.type AS item_type
+             FROM orders o
+             JOIN order_lines ol ON ol.order_id = o.id
+             JOIN items i ON i.id = ol.item_id
+             WHERE lower(i.type) IN ('custom_paint', 'custom_stain')
+               AND o.placed_at::date >= $1::date
+               AND o.placed_at::date <= $2::date
+             ORDER BY o.placed_at ASC`,
+            [from, to],
+          )
+        : await this.pool.query(
+            `SELECT
+               date_trunc($1, (o.placed_at::date)::timestamp) AS bucket,
+               ol.item_id,
+               ol.quantity,
+               ol.job_name,
+               i.name AS item_name,
+               i.type AS item_type
+             FROM orders o
+             JOIN order_lines ol ON ol.order_id = o.id
+             JOIN items i ON i.id = ol.item_id
+             WHERE lower(i.type) IN ('custom_paint', 'custom_stain')
+               AND o.placed_at::date >= $2::date
+               AND o.placed_at::date <= $3::date
+             ORDER BY o.placed_at ASC`,
+            [trunc, from, to],
+          );
 
     const byJobMap = new Map();
     const byColorMap = new Map();
@@ -1452,6 +1526,19 @@ class Database {
     };
 
     const ensureBucket = (bucketDate) => {
+      if (trunc === "lifetime") {
+        const key = "lifetime";
+        if (!bucketMap.has(key)) {
+          bucketMap.set(key, {
+            key,
+            label: "Lifetime",
+            totalQuantity: 0,
+            colors: new Map(),
+            jobs: new Map(),
+          });
+        }
+        return bucketMap.get(key);
+      }
       const key = bucketDate
         ? Database.bucketKeyFromDate(bucketDate, trunc)
         : "unknown";
@@ -1507,6 +1594,9 @@ class Database {
 
     for (const periodDate of Database.enumerateReportPeriods(from, to, trunc)) {
       ensureBucket(periodDate);
+    }
+    if (trunc === "lifetime") {
+      ensureBucket(null);
     }
 
     const byJob = [...byJobMap.values()]
@@ -1592,12 +1682,15 @@ class Database {
   }
 
   static bucketKeyFromDate(d, trunc) {
+    const calKey = bucketKeyFromCalendarDate(d, trunc);
+    if (calKey) return calKey;
     const dt = d instanceof Date ? d : new Date(d);
     if (Number.isNaN(dt.getTime())) return "unknown";
-    if (trunc === "month") {
-      return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
-    }
     if (trunc === "day") {
+      const parts = calendarDateParts(d);
+      if (parts) {
+        return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+      }
       const y = dt.getFullYear();
       const m = String(dt.getMonth() + 1).padStart(2, "0");
       const day = String(dt.getDate()).padStart(2, "0");
@@ -1616,6 +1709,20 @@ class Database {
     const start = new Date(`${from}T12:00:00`);
     const end = new Date(`${to}T12:00:00`);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return periods;
+    }
+
+    if (trunc === "lifetime") {
+      return periods;
+    }
+
+    if (trunc === "year") {
+      let y = start.getFullYear();
+      const endY = end.getFullYear();
+      while (y <= endY) {
+        periods.push(new Date(y, 0, 1, 12, 0, 0, 0));
+        y += 1;
+      }
       return periods;
     }
 

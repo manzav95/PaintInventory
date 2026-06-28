@@ -17,9 +17,16 @@ import {
   Divider,
 } from "react-native-paper";
 import DateField from "./DateField";
+import OutlinedSearchInput from "./OutlinedSearchInput";
 import SimpleLineChart from "./SimpleLineChart";
 import ReportService from "../services/reportService";
+import { itemMatchesSearch } from "../utils/reportSearch";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import {
+  CUSTOM_COLORS_EARLIEST,
+  clampCustomColorsFrom,
+  resolveCustomColorsRange,
+} from "../utils/reportBuckets";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -28,7 +35,22 @@ function todayIso() {
 function defaultFromDate() {
   const d = new Date();
   d.setDate(d.getDate() - 84);
-  return d.toISOString().slice(0, 10);
+  const rolling = d.toISOString().slice(0, 10);
+  return rolling < CUSTOM_COLORS_EARLIEST ? CUSTOM_COLORS_EARLIEST : rolling;
+}
+
+function initialFromForGroupBy(groupBy, initialFrom) {
+  if (groupBy === "year" || groupBy === "lifetime") {
+    return CUSTOM_COLORS_EARLIEST;
+  }
+  return initialFrom || defaultFromDate();
+}
+
+function groupByChartLabel(groupBy) {
+  if (groupBy === "month") return "month";
+  if (groupBy === "year") return "year";
+  if (groupBy === "lifetime") return "lifetime";
+  return "week";
 }
 
 function typeLabel(type) {
@@ -49,27 +71,57 @@ export default function CustomColorsReportModal({
   const isWide = width >= DESKTOP_BREAKPOINT;
 
   const [groupBy, setGroupBy] = useState(initialGroupBy);
-  const [fromDate, setFromDate] = useState(initialFrom || defaultFromDate());
+  const [fromDate, setFromDate] = useState(() =>
+    initialFromForGroupBy(initialGroupBy, initialFrom),
+  );
   const [toDate, setToDate] = useState(initialTo || todayIso());
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedBucketIndex, setSelectedBucketIndex] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedColorId, setSelectedColorId] = useState(null);
+  const [selectedColorBucketIndex, setSelectedColorBucketIndex] = useState(null);
+
+  const selectGroupBy = (next) => {
+    setGroupBy(next);
+    if (next === "lifetime" || next === "year") {
+      setFromDate(CUSTOM_COLORS_EARLIEST);
+      setToDate(todayIso());
+    } else {
+      setFromDate(initialFrom || defaultFromDate());
+      setToDate(initialTo || todayIso());
+    }
+  };
+
+  const handleFromDateChange = (value) => {
+    setFromDate(clampCustomColorsFrom(value, groupBy));
+  };
 
   useEffect(() => {
-    if (!visible) return;
-    setFromDate(initialFrom || defaultFromDate());
+    if (!visible) {
+      setSearchQuery("");
+      setSelectedColorId(null);
+      return;
+    }
+    const gb = initialGroupBy || "week";
+    setGroupBy(gb);
+    setFromDate(initialFromForGroupBy(gb, initialFrom));
     setToDate(initialTo || todayIso());
-    setGroupBy(initialGroupBy || "week");
   }, [visible, initialFrom, initialTo, initialGroupBy]);
+
+  useEffect(() => {
+    setSelectedColorId(null);
+  }, [searchQuery]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const range = resolveCustomColorsRange(fromDate, toDate, groupBy);
     try {
       const data = await ReportService.getCustomColorsOverview({
-        from: fromDate,
-        to: toDate,
+        from: range.from,
+        to: range.to,
         groupBy,
       });
       setReport(data);
@@ -135,6 +187,49 @@ export default function CustomColorsReportModal({
     [periodTotals, periodLabel, report?.totals],
   );
 
+  const colorSearchResults = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!q || !report?.byColor) return [];
+    return report.byColor.filter((c) => itemMatchesSearch(c, q));
+  }, [searchQuery, report]);
+
+  useEffect(() => {
+    if (colorSearchResults.length === 1) {
+      setSelectedColorId(colorSearchResults[0].itemId);
+    }
+  }, [colorSearchResults]);
+
+  const selectedColor = useMemo(() => {
+    if (!selectedColorId || !report?.byColor) return null;
+    return (
+      report.byColor.find((c) => String(c.itemId) === String(selectedColorId)) ||
+      null
+    );
+  }, [selectedColorId, report]);
+
+  const colorTimeline = useMemo(() => {
+    if (!selectedColorId || !report?.bucketDetails?.length) return null;
+    const buckets = report.bucketDetails.map((b) => b.label);
+    const data = report.bucketDetails.map((b) => {
+      const match = (b.colors || []).find(
+        (c) => String(c.itemId) === String(selectedColorId),
+      );
+      return match?.quantity || 0;
+    });
+    const total = data.reduce((sum, v) => sum + v, 0);
+    return { buckets, data, total };
+  }, [selectedColorId, report]);
+
+  useEffect(() => {
+    const len = colorTimeline?.buckets?.length || 0;
+    setSelectedColorBucketIndex(len > 0 ? len - 1 : null);
+  }, [colorTimeline, groupBy]);
+
+  const selectedColorBucketQty = useMemo(() => {
+    if (!colorTimeline || selectedColorBucketIndex == null) return null;
+    return colorTimeline.data[selectedColorBucketIndex] ?? 0;
+  }, [colorTimeline, selectedColorBucketIndex]);
+
   return (
     <Modal
       visible={visible}
@@ -163,16 +258,30 @@ export default function CustomColorsReportModal({
               <Button
                 mode={groupBy === "week" ? "contained" : "outlined"}
                 compact
-                onPress={() => setGroupBy("week")}
+                onPress={() => selectGroupBy("week")}
               >
                 Week
               </Button>
               <Button
                 mode={groupBy === "month" ? "contained" : "outlined"}
                 compact
-                onPress={() => setGroupBy("month")}
+                onPress={() => selectGroupBy("month")}
               >
                 Month
+              </Button>
+              <Button
+                mode={groupBy === "year" ? "contained" : "outlined"}
+                compact
+                onPress={() => selectGroupBy("year")}
+              >
+                Year
+              </Button>
+              <Button
+                mode={groupBy === "lifetime" ? "contained" : "outlined"}
+                compact
+                onPress={() => selectGroupBy("lifetime")}
+              >
+                Lifetime
               </Button>
             </View>
             <View style={styles.dateRow}>
@@ -180,7 +289,16 @@ export default function CustomColorsReportModal({
                 <Text style={[styles.dateLabel, { color: theme.colors.onSurfaceVariant }]}>
                   From
                 </Text>
-                <DateField value={fromDate} onChange={setFromDate} />
+                <DateField
+                  value={fromDate}
+                  onChange={handleFromDateChange}
+                  min={
+                    groupBy === "year" || groupBy === "lifetime"
+                      ? CUSTOM_COLORS_EARLIEST
+                      : undefined
+                  }
+                  disabled={groupBy === "year" || groupBy === "lifetime"}
+                />
               </View>
               <View style={styles.dateField}>
                 <Text style={[styles.dateLabel, { color: theme.colors.onSurfaceVariant }]}>
@@ -192,6 +310,13 @@ export default function CustomColorsReportModal({
                 Apply
               </Button>
             </View>
+            <OutlinedSearchInput
+              placeholder="Search by color name or ID…"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCorrect={false}
+              autoCapitalize="none"
+            />
           </View>
 
           <ScrollView
@@ -209,6 +334,151 @@ export default function CustomColorsReportModal({
               </Text>
             ) : (
               <>
+                {searchQuery.trim() ? (
+                  <Card
+                    style={[
+                      styles.card,
+                      {
+                        backgroundColor: theme.colors.surfaceContainerHighest,
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                    mode="outlined"
+                  >
+                    <Card.Content>
+                      <Text
+                        style={[
+                          styles.sectionTitle,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        Color search · per {groupByChartLabel(groupBy)}
+                      </Text>
+                      {colorSearchResults.length === 0 ? (
+                        <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                          No custom colors match "{searchQuery.trim()}".
+                        </Text>
+                      ) : (
+                        colorSearchResults.map((color, idx) => {
+                          const selected =
+                            String(selectedColorId) === String(color.itemId);
+                          return (
+                            <Pressable
+                              key={color.itemId}
+                              onPress={() => setSelectedColorId(color.itemId)}
+                              style={({ pressed }) => [
+                                styles.colorSearchRow,
+                                idx > 0 && {
+                                  borderTopWidth: 1,
+                                  borderTopColor: theme.colors.outlineVariant,
+                                },
+                                selected && {
+                                  backgroundColor: theme.colors.primaryContainer,
+                                },
+                                pressed && { opacity: 0.85 },
+                              ]}
+                            >
+                              <View style={styles.colorTitleWrap}>
+                                <Text
+                                  style={[
+                                    styles.jobName,
+                                    { color: theme.colors.onSurface },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {color.itemName}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.subMeta,
+                                    { color: theme.colors.onSurfaceVariant },
+                                  ]}
+                                >
+                                  {color.itemId} · {typeLabel(color.type)}
+                                </Text>
+                              </View>
+                              <Text
+                                style={[
+                                  styles.jobTotal,
+                                  { color: theme.colors.primary },
+                                ]}
+                              >
+                                {color.totalQuantity} gal
+                              </Text>
+                            </Pressable>
+                          );
+                        })
+                      )}
+                      {selectedColor && colorTimeline ? (
+                        <View style={styles.colorTimelineWrap}>
+                          <Text
+                            style={[
+                              styles.colorTimelineHint,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {selectedColor.itemName}:{" "}
+                            {colorTimeline.buckets[selectedColorBucketIndex] ||
+                              "All periods"}
+                            {selectedColorBucketQty != null
+                              ? ` · ${selectedColorBucketQty} gal`
+                              : ` · ${colorTimeline.total} gal total`}
+                          </Text>
+                          <SimpleLineChart
+                            title={`Ordered per ${groupByChartLabel(groupBy)}`}
+                            data={colorTimeline.data}
+                            labels={colorTimeline.buckets}
+                            color="#7e57c2"
+                            height={220}
+                            interactive
+                            selectedIndex={selectedColorBucketIndex}
+                            onPointSelect={setSelectedColorBucketIndex}
+                          />
+                          {(selectedColor.jobs || []).length > 0 ? (
+                            <>
+                              <Divider style={styles.divider} />
+                              <Text
+                                style={[
+                                  styles.sectionTitle,
+                                  {
+                                    color: theme.colors.onSurface,
+                                    marginTop: 4,
+                                  },
+                                ]}
+                              >
+                                Jobs for this color
+                              </Text>
+                              {selectedColor.jobs.map((j) => (
+                                <View
+                                  key={`${selectedColor.itemId}-${j.jobName}`}
+                                  style={styles.subRow}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.subName,
+                                      { color: theme.colors.onSurface },
+                                    ]}
+                                  >
+                                    {j.jobName}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.subMeta,
+                                      { color: theme.colors.onSurfaceVariant },
+                                    ]}
+                                  >
+                                    {j.quantity} gal
+                                  </Text>
+                                </View>
+                              ))}
+                            </>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </Card.Content>
+                  </Card>
+                ) : null}
+
                 <View style={[styles.metrics, isWide && styles.metricsWide]}>
                   {metricRow.map((m) => (
                     <View
@@ -263,7 +533,7 @@ export default function CustomColorsReportModal({
                           {periodLabel}
                         </Text>
                         <SimpleLineChart
-                          title={`Custom colors ordered per ${groupBy}`}
+                          title={`Custom colors ordered per ${groupByChartLabel(groupBy)}`}
                           data={report.bucketTotals || []}
                           labels={report.buckets || []}
                           color="#7e57c2"
@@ -513,7 +783,7 @@ export default function CustomColorsReportModal({
                 >
                   <Card.Content>
                     <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
-                      Per {groupBy}
+                      Per {groupByChartLabel(groupBy)}
                     </Text>
                     {(report.bucketDetails || []).length === 0 ? (
                       <Text style={{ color: theme.colors.onSurfaceVariant }}>
@@ -610,6 +880,7 @@ const styles = StyleSheet.create({
   },
   toggleRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   dateRow: {
@@ -660,7 +931,25 @@ const styles = StyleSheet.create({
   },
   jobName: { fontSize: 15, fontWeight: "600", flex: 1 },
   jobTotal: { fontSize: 15, fontWeight: "700" },
-  colorTitleWrap: { flex: 1 },
+  colorTitleWrap: { flex: 1, minWidth: 0, marginRight: 8 },
+  colorSearchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+  },
+  colorTimelineWrap: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(128,128,128,0.25)",
+  },
+  colorTimelineHint: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
   subRow: {
     flexDirection: "row",
     justifyContent: "space-between",

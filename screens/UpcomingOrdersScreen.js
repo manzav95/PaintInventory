@@ -510,11 +510,14 @@ export default function UpcomingOrdersScreen({
       const parsed = parseGallonQuantity(
         receivedLineQtys[itemId],
         invItem?.type,
+        { allowZero: true },
       );
-      const received = Math.max(
-        0,
-        Math.min(ordered, parsed.ok ? parsed.value : 0),
-      );
+      if (!parsed.ok) {
+        throw new Error(
+          `${getItemName(line.itemId)}: ${parsed.error || "Invalid quantity"}`,
+        );
+      }
+      const received = Math.max(0, Math.min(ordered, parsed.value));
       return { itemId: l.itemId, received_quantity: received };
     });
     setSaving(true);

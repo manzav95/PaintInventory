@@ -755,6 +755,8 @@ export default function App() {
 
   const handleRecyclePaint = async (quantity) => {
     if (!scannedItem || !isAdmin) return;
+    const t = String(scannedItem.type || '').toLowerCase();
+    if (t !== 'custom_paint' && t !== 'custom_stain') return;
     await runWithLoading('Recording recycle...', async () => {
       try {
         const result = await InventoryService.updateQuantity(

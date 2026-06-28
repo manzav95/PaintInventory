@@ -252,7 +252,7 @@ export default function AddItemScreen({
         return;
       }
     }
-    const qtyParsed = parseGallonQuantity(quantity, typeVal);
+    const qtyParsed = parseGallonQuantity(quantity, typeVal, { allowZero: true });
     if (!qtyParsed.ok) {
       Alert.alert("Invalid quantity", qtyParsed.error);
       return;

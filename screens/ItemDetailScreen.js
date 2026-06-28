@@ -347,14 +347,12 @@ export default function ItemDetailScreen({
       : null;
     const rexVal = rexInput.trim() ? rexInput.trim() : null;
     let qtyVal = 0;
-    if (quantity.trim() !== "") {
-      const qtyParsed = parseGallonQuantity(quantity, typeVal);
-      if (!qtyParsed.ok) {
-        Alert.alert("Invalid quantity", qtyParsed.error);
-        return;
-      }
-      qtyVal = qtyParsed.value;
+    const qtyParsed = parseGallonQuantity(quantity, typeVal, { allowZero: true });
+    if (!qtyParsed.ok) {
+      Alert.alert("Invalid quantity", qtyParsed.error);
+      return;
     }
+    qtyVal = qtyParsed.value;
 
     const updatedItem = {
       ...item,

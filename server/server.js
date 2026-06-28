@@ -438,7 +438,14 @@ app.get('/api/reports/custom-colors', async (req, res) => {
   try {
     const fromDate = (req.query.from && String(req.query.from).trim()) || null;
     const toDate = (req.query.to && String(req.query.to).trim()) || null;
-    const groupBy = req.query.groupBy === 'month' ? 'month' : 'week';
+    const groupBy =
+      req.query.groupBy === 'month'
+        ? 'month'
+        : req.query.groupBy === 'year'
+          ? 'year'
+          : req.query.groupBy === 'lifetime'
+            ? 'lifetime'
+            : 'week';
     const report = await db.getCustomColorsOrderReport(fromDate, toDate, groupBy);
     res.json(report);
   } catch (error) {

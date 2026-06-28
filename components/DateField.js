@@ -38,6 +38,8 @@ export default function DateField({
   style,
   disabled = false,
   mode = "outlined",
+  min,
+  max,
 }) {
   const isWeb = Platform.OS === "web";
   const [show, setShow] = useState(false);
@@ -64,6 +66,8 @@ export default function DateField({
             type="date"
             value={String(value ?? "")}
             disabled={disabled}
+            min={min}
+            max={max}
             onChange={(e) => onChange?.(e.target.value)}
             style={{
               display: "block",
