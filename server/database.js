@@ -249,6 +249,16 @@ class Database {
     `);
     console.log("Items table ready");
 
+    // Backfill missing unit prices (blank / null → default)
+    const priceBackfill = await client.query(
+      `UPDATE items SET price = 55.56 WHERE price IS NULL`,
+    );
+    if (priceBackfill.rowCount > 0) {
+      console.log(
+        `Backfilled unit price 55.56 on ${priceBackfill.rowCount} item(s)`,
+      );
+    }
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -403,6 +413,36 @@ class Database {
       END $$
     `);
     console.log("Material usage table ready");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS waste_tracking (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        entry_date TEXT NOT NULL,
+        user_name TEXT NOT NULL DEFAULT '',
+        paint_inches REAL NOT NULL DEFAULT 0,
+        clear_toner_inches REAL NOT NULL DEFAULT 0,
+        primer_inches REAL NOT NULL DEFAULT 0,
+        acetone_inches REAL NOT NULL DEFAULT 0,
+        paint_gallons REAL NOT NULL DEFAULT 0,
+        clear_toner_gallons REAL NOT NULL DEFAULT 0,
+        primer_gallons REAL NOT NULL DEFAULT 0,
+        acetone_gallons REAL NOT NULL DEFAULT 0
+      )
+    `);
+    console.log("Waste tracking table ready");
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'waste_tracking' AND column_name = 'admin_seen_at'
+        ) THEN
+          ALTER TABLE waste_tracking ADD COLUMN admin_seen_at TIMESTAMPTZ DEFAULT NULL;
+          -- Existing rows are not new alerts
+          UPDATE waste_tracking SET admin_seen_at = NOW() WHERE admin_seen_at IS NULL;
+        END IF;
+      END $$
+    `);
   }
 
   async getAllItems() {
@@ -446,7 +486,12 @@ class Database {
 
   async addItem(item) {
     const now = new Date().toISOString();
-    const price = item.price != null && !isNaN(Number(item.price)) ? Number(item.price) : null;
+    const DEFAULT_UNIT_PRICE = 55.56;
+    let price = DEFAULT_UNIT_PRICE;
+    if (item.price != null && item.price !== "") {
+      const n = Number(item.price);
+      if (!Number.isNaN(n) && n >= 0) price = n;
+    }
     const allowedTypes = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain", "precat"];
     const type = item.type && allowedTypes.includes(String(item.type).toLowerCase())
       ? String(item.type).toLowerCase()
@@ -590,8 +635,14 @@ class Database {
             : key;
         fields.push(`${col} = $${paramIndex}`);
         if (key === "price") {
+          const DEFAULT_UNIT_PRICE = 55.56;
           const v = updates[key];
-          values.push(v == null || v === "" ? null : (isNaN(Number(v)) ? null : Number(v)));
+          if (v == null || v === "") {
+            values.push(DEFAULT_UNIT_PRICE);
+          } else {
+            const n = Number(v);
+            values.push(Number.isNaN(n) || n < 0 ? DEFAULT_UNIT_PRICE : n);
+          }
         } else if (key === "type") {
           const v = updates[key];
           const allowed = ["paint", "primer", "clear", "stain", "dye", "catalyst", "custom_paint", "custom_stain", "precat"];
@@ -926,23 +977,88 @@ class Database {
           [String(poNumber).trim(), Math.max(0, parseInt(leadTimeDays, 10) || 5), id],
         );
     if (updateResult.rowCount === 0) return { success: false, error: "Order not found" };
-    await this.pool.query("DELETE FROM order_lines WHERE order_id = $1", [id]);
-    for (const line of lines || []) {
-      const itemId = line.itemId || line.item_id;
-      const qty = Math.max(0, parseStoredGallons(line.quantity) || 0);
-      if (!itemId || qty <= 0) continue;
-      const jobName =
-        line.job_name != null
-          ? String(line.job_name).trim()
-          : line.jobName != null
-            ? String(line.jobName).trim()
-            : "";
-      await this.pool.query(
-        "INSERT INTO order_lines (order_id, item_id, quantity, job_name) VALUES ($1, $2, $3, $4)",
-        [id, String(itemId).trim(), qty, jobName],
+
+    const normalizeIncoming = (rawLines) => {
+      const out = [];
+      for (const line of rawLines || []) {
+        const itemId = String(line.itemId || line.item_id || "").trim();
+        const qty = Math.max(0, parseStoredGallons(line.quantity) || 0);
+        if (!itemId || qty <= 0) continue;
+        const jobName =
+          line.job_name != null
+            ? String(line.job_name).trim()
+            : line.jobName != null
+              ? String(line.jobName).trim()
+              : "";
+        out.push({ itemId, quantity: qty, jobName });
+      }
+      return out.sort((a, b) =>
+        a.itemId === b.itemId
+          ? a.jobName.localeCompare(b.jobName)
+          : a.itemId.localeCompare(b.itemId),
       );
-      if (jobName) {
-        await this.upsertItemJobHistory(String(itemId).trim(), jobName);
+    };
+
+    const incoming = normalizeIncoming(lines);
+    const existingNorm = (order.lines || [])
+      .map((l) => ({
+        itemId: String(l.itemId || l.item_id || "").trim(),
+        quantity: Math.max(0, parseStoredGallons(l.quantity) || 0),
+        jobName:
+          l.job_name != null
+            ? String(l.job_name).trim()
+            : l.jobName != null
+              ? String(l.jobName).trim()
+              : "",
+      }))
+      .filter((l) => l.itemId && l.quantity > 0)
+      .sort((a, b) =>
+        a.itemId === b.itemId
+          ? a.jobName.localeCompare(b.jobName)
+          : a.itemId.localeCompare(b.itemId),
+      );
+
+    const linesUnchanged =
+      incoming.length === existingNorm.length &&
+      incoming.every(
+        (l, i) =>
+          l.itemId === existingNorm[i].itemId &&
+          l.quantity === existingNorm[i].quantity &&
+          l.jobName === existingNorm[i].jobName,
+      );
+
+    // Header-only edits (e.g. adding a PO number) must not touch lines —
+    // rewriting lines was clearing received_quantity / received_at.
+    if (linesUnchanged) {
+      return { success: true, order: await this.getOrderById(id) };
+    }
+
+    // Preserve receive progress for items that stay on the order.
+    const receivedMap = {};
+    for (const l of order.lines || []) {
+      const itemId = String(l.itemId || l.item_id || "").trim();
+      if (!itemId) continue;
+      receivedMap[itemId] = {
+        received_quantity: parseStoredGallons(l.received_quantity ?? l.receivedQuantity) || 0,
+        received_at: l.received_at || l.receivedAt || null,
+      };
+    }
+
+    await this.pool.query("DELETE FROM order_lines WHERE order_id = $1", [id]);
+    for (const line of incoming) {
+      const prev = receivedMap[line.itemId] || {};
+      const prevReceived = Math.max(0, parseStoredGallons(prev.received_quantity) || 0);
+      // Cap received at the new ordered qty if quantity was reduced.
+      const receivedQty = Math.min(prevReceived, line.quantity);
+      const receivedAt = receivedQty > 0 ? prev.received_at || null : null;
+      await this.pool.query(
+        `INSERT INTO order_lines
+           (order_id, item_id, quantity, job_name, received_quantity, received_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, line.itemId, line.quantity, line.jobName, receivedQty, receivedAt],
+      );
+      if (line.jobName) {
+        await this.upsertItemJobHistory(line.itemId, line.jobName);
       }
     }
     return { success: true, order: await this.getOrderById(id) };
@@ -1183,6 +1299,103 @@ class Database {
       updated.status = "open";
     }
     return { success: true, order: await this.getOrderById(id) };
+  }
+
+  async addWasteTracking(entry) {
+    const toNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    };
+    const paintIn = toNum(entry.paint_inches);
+    const clearIn = toNum(entry.clear_toner_inches);
+    const primerIn = toNum(entry.primer_inches);
+    const acetoneIn = toNum(entry.acetone_inches);
+    const GALLONS_PER_INCH = 0.37;
+    const toGal = (inches) => Math.round(inches * GALLONS_PER_INCH * 100) / 100;
+    const paintGal = entry.paint_gallons != null ? toNum(entry.paint_gallons) : toGal(paintIn);
+    const clearGal =
+      entry.clear_toner_gallons != null
+        ? toNum(entry.clear_toner_gallons)
+        : toGal(clearIn);
+    const primerGal =
+      entry.primer_gallons != null ? toNum(entry.primer_gallons) : toGal(primerIn);
+    const acetoneGal =
+      entry.acetone_gallons != null
+        ? toNum(entry.acetone_gallons)
+        : toGal(acetoneIn);
+
+    const result = await this.pool.query(
+      `INSERT INTO waste_tracking (
+         entry_date, user_name,
+         paint_inches, clear_toner_inches, primer_inches, acetone_inches,
+         paint_gallons, clear_toner_gallons, primer_gallons, acetone_gallons
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        entry.entry_date ||
+          new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Los_Angeles",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date()),
+        entry.user_name != null ? String(entry.user_name).trim() : "",
+        paintIn,
+        clearIn,
+        primerIn,
+        acetoneIn,
+        paintGal,
+        clearGal,
+        primerGal,
+        acetoneGal,
+      ],
+    );
+    return { success: true, entry: result.rows[0] };
+  }
+
+  async getWasteTracking(limit = 100) {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 2000);
+    const result = await this.pool.query(
+      `SELECT * FROM waste_tracking
+       ORDER BY entry_date DESC, created_at DESC
+       LIMIT $1`,
+      [lim],
+    );
+    return result.rows;
+  }
+
+  async deleteWasteTracking(id) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const result = await this.pool.query(
+      "DELETE FROM waste_tracking WHERE id = $1 RETURNING id",
+      [entryId],
+    );
+    if (result.rowCount === 0) {
+      return { success: false, error: "Entry not found" };
+    }
+    return { success: true, id: entryId };
+  }
+
+  async getWasteTrackingUnreadCount() {
+    const result = await this.pool.query(
+      `SELECT COUNT(*)::int AS c
+       FROM waste_tracking
+       WHERE admin_seen_at IS NULL`,
+    );
+    return result.rows[0]?.c || 0;
+  }
+
+  async markWasteTrackingSeen() {
+    const result = await this.pool.query(
+      `UPDATE waste_tracking
+       SET admin_seen_at = NOW()
+       WHERE admin_seen_at IS NULL
+       RETURNING id`,
+    );
+    return { success: true, updated: result.rowCount || 0 };
   }
 
   async addMaterialUsage(entry) {

@@ -85,6 +85,7 @@ export default function AppSidebar({
             onOpenBackOrders={onOpenBackOrders}
             onOpenLateOrders={onOpenLateOrders}
             onOpenLowStock={onOpenLowStock}
+            onOpenWasteTracking={() => onNavigate("wasteTracking")}
           />
           <IconButton
             icon="cog"
@@ -172,6 +173,12 @@ export default function AppSidebar({
         icon="chart-box"
         active={currentScreen === "materialUsage"}
         onPress={() => onNavigate("materialUsage")}
+      />
+      <NavButton
+        label="Waste Tracking"
+        icon="delete-variant"
+        active={currentScreen === "wasteTracking"}
+        onPress={() => onNavigate("wasteTracking")}
       />
       {isAdmin && (
         <NavButton

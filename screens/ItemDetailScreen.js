@@ -37,6 +37,7 @@ import {
   sanitizeGallonInput,
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
+import { resolveUnitPrice } from "../utils/pricing";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -327,7 +328,7 @@ export default function ItemDetailScreen({
       return;
     }
 
-    const priceVal = priceInput.trim() === "" ? 55.56 : parseFloat(priceInput);
+    const priceVal = resolveUnitPrice(priceInput);
     const hexVal = normalizeHex(hexColorInput);
     let lotDateVal = null;
     if (isCustomType) {
@@ -363,9 +364,7 @@ export default function ItemDetailScreen({
       ...(type !== "custom_paint" &&
         type !== "custom_stain" &&
         minQ !== undefined && { minQuantity: minQ }),
-      ...(priceVal != null && !isNaN(priceVal) && priceVal >= 0
-        ? { price: priceVal }
-        : { price: null }),
+      price: priceVal,
       type: typeVal,
       display_order: displayOrderVal,
       hex_color: hexVal || null,

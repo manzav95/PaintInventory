@@ -52,6 +52,7 @@ export default function DashboardScreen({
   userName,
   embeddedInShell = false,
   onOpenRecycleDue,
+  onItemSelect,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -63,6 +64,7 @@ export default function DashboardScreen({
   const auditLogs = auditLogsFromApp;
   const auditLogsLoaded = auditLogsLoadedFromApp;
   const [searchQuery, setSearchQuery] = useState("");
+  const [userFilter, setUserFilter] = useState(null);
   const [reducedHistory, setReducedHistory] = useState(false);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true);
@@ -72,6 +74,8 @@ export default function DashboardScreen({
   const [checkedOutListIsWeek, setCheckedOutListIsWeek] = useState(true);
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
   const [shiftFilter, setShiftFilter] = useState(null);
+  /** Admin transaction history: start with ~2 weeks; "Show more" adds another 2. */
+  const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
 
   // Current week (Sun–Sat) and current month date ranges + labels
   const periodRange = useMemo(() => {
@@ -418,11 +422,17 @@ export default function DashboardScreen({
     return adminOnly ? "Admin" : log.userName || "Unknown";
   };
 
-  // Filter audit logs by shift (admin) and search
+  // Filter audit logs by shift (admin), selected user (admin), and search
   const filteredLogs = useMemo(() => {
     let rows = logsByRole;
     if (isAdmin && shiftFilter) {
       rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
+    }
+    if (isAdmin && userFilter) {
+      const target = String(userFilter).trim().toLowerCase();
+      rows = rows.filter(
+        (log) => getDisplayUserName(log).trim().toLowerCase() === target,
+      );
     }
     if (!searchQuery.trim()) return rows;
     const query = searchQuery.toLowerCase();
@@ -440,7 +450,48 @@ export default function DashboardScreen({
         itemId.includes(query)
       );
     });
-  }, [logsByRole, searchQuery, inventory, isAdmin, shiftFilter]);
+  }, [logsByRole, searchQuery, inventory, isAdmin, shiftFilter, userFilter]);
+
+  const historyCutoffMs = useMemo(() => {
+    if (!isAdmin) return 0;
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - historyWeeksShown * 7);
+    return d.getTime();
+  }, [isAdmin, historyWeeksShown]);
+
+  const visibleHistoryLogs = useMemo(() => {
+    if (!isAdmin) return filteredLogs;
+    return filteredLogs.filter((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t >= historyCutoffMs;
+    });
+  }, [filteredLogs, isAdmin, historyCutoffMs]);
+
+  const hasMoreHistory = useMemo(() => {
+    if (!isAdmin) return false;
+    return filteredLogs.some((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t > 0 && t < historyCutoffMs;
+    });
+  }, [filteredLogs, isAdmin, historyCutoffMs]);
+
+  const handleUserPress = (log) => {
+    if (!isAdmin) return;
+    const display = getDisplayUserName(log);
+    if (!display || display === "Unknown") return;
+    setUserFilter((prev) =>
+      prev && prev.toLowerCase() === display.toLowerCase() ? null : display,
+    );
+  };
+
+  const handleItemPress = (log) => {
+    if (!isAdmin || !onItemSelect) return;
+    const id = log.itemId != null ? String(log.itemId).trim() : "";
+    if (!id) return;
+    const item = inventory.find((i) => String(i.id) === id);
+    if (item) onItemSelect(item);
+  };
 
   const getActionColor = (action, details) => {
     // Handle old records with _actionType in details (for backward compatibility)
@@ -1295,6 +1346,25 @@ export default function DashboardScreen({
                   value={searchQuery}
                   style={styles.searchbar}
                 />
+                {isAdmin && userFilter ? (
+                  <View style={styles.userFilterRow}>
+                    <Chip
+                      icon="account"
+                      onClose={() => setUserFilter(null)}
+                      style={styles.userFilterChip}
+                    >
+                      {userFilter}
+                    </Chip>
+                    <Text
+                      style={{
+                        color: theme.colors.onSurfaceVariant,
+                        fontSize: 12,
+                      }}
+                    >
+                      Showing this user's transactions
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               {!auditLogsLoaded ? (
@@ -1307,9 +1377,25 @@ export default function DashboardScreen({
                     Loading transactions…
                   </Text>
                 </View>
-              ) : filteredLogs.length === 0 ? (
+              ) : visibleHistoryLogs.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyText}>No transactions found</Text>
+                  {isAdmin && hasMoreHistory ? (
+                    <Pressable
+                      onPress={() => setHistoryWeeksShown((w) => w + 2)}
+                      hitSlop={8}
+                      style={styles.showMoreHistoryLink}
+                    >
+                      <Text
+                        style={[
+                          styles.showMoreHistoryLinkText,
+                          { color: theme.colors.primary },
+                        ]}
+                      >
+                        Show more
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : (
                 <ScrollView
@@ -1349,14 +1435,14 @@ export default function DashboardScreen({
                         </DataTable.Title>
                       </DataTable.Header>
 
-                      {filteredLogs.slice(0, 500).map((log, index) => {
+                      {visibleHistoryLogs.map((log, index) => {
                         const showDayDividers = isWeb;
                         const dayKey = showDayDividers
                           ? getDayKey(log.timestamp)
                           : null;
                         const prevKey =
                           showDayDividers && index > 0
-                            ? getDayKey(filteredLogs[index - 1]?.timestamp)
+                            ? getDayKey(visibleHistoryLogs[index - 1]?.timestamp)
                             : null;
                         const startsNewDay =
                           showDayDividers && dayKey && dayKey !== prevKey;
@@ -1411,14 +1497,33 @@ export default function DashboardScreen({
                                 </Text>
                               </DataTable.Cell>
                               <DataTable.Cell style={styles.userCell}>
-                                <Text
-                                  style={[
-                                    styles.userText,
-                                    { color: theme.dark ? "#fff" : "#666" },
-                                  ]}
-                                >
-                                  {getDisplayUserName(log)}
-                                </Text>
+                                {isAdmin ? (
+                                  <Pressable
+                                    onPress={() => handleUserPress(log)}
+                                    hitSlop={6}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.userText,
+                                        styles.clickableText,
+                                        {
+                                          color: theme.dark ? "#fff" : "#666",
+                                        },
+                                      ]}
+                                    >
+                                      {getDisplayUserName(log)}
+                                    </Text>
+                                  </Pressable>
+                                ) : (
+                                  <Text
+                                    style={[
+                                      styles.userText,
+                                      { color: theme.dark ? "#fff" : "#666" },
+                                    ]}
+                                  >
+                                    {getDisplayUserName(log)}
+                                  </Text>
+                                )}
                               </DataTable.Cell>
                               <DataTable.Cell style={styles.qtyCell} numeric>
                                 <Text
@@ -1449,14 +1554,36 @@ export default function DashboardScreen({
                                 </Chip>
                               </DataTable.Cell>
                               <DataTable.Cell style={styles.colorCell}>
-                                <Text
-                                  style={[
-                                    styles.itemNameText,
-                                    { color: theme.dark ? "#fff" : undefined },
-                                  ]}
-                                >
-                                  {colorName}
-                                </Text>
+                                {isAdmin && onItemSelect ? (
+                                  <Pressable
+                                    onPress={() => handleItemPress(log)}
+                                    hitSlop={6}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.itemNameText,
+                                        styles.clickableText,
+                                        {
+                                          color: theme.dark ? "#fff" : undefined,
+                                        },
+                                      ]}
+                                      numberOfLines={2}
+                                    >
+                                      {colorName}
+                                    </Text>
+                                  </Pressable>
+                                ) : (
+                                  <Text
+                                    style={[
+                                      styles.itemNameText,
+                                      {
+                                        color: theme.dark ? "#fff" : undefined,
+                                      },
+                                    ]}
+                                  >
+                                    {colorName}
+                                  </Text>
+                                )}
                               </DataTable.Cell>
                               <DataTable.Cell style={styles.totalCell} numeric>
                                 <Text
@@ -1476,6 +1603,22 @@ export default function DashboardScreen({
                       })}
                     </DataTable>
                   </ScrollView>
+                  {isAdmin && hasMoreHistory ? (
+                    <Pressable
+                      onPress={() => setHistoryWeeksShown((w) => w + 2)}
+                      hitSlop={8}
+                      style={styles.showMoreHistoryLink}
+                    >
+                      <Text
+                        style={[
+                          styles.showMoreHistoryLinkText,
+                          { color: theme.colors.primary },
+                        ]}
+                      >
+                        Show more
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </ScrollView>
               )}
             </Card.Content>
@@ -1695,6 +1838,16 @@ const styles = StyleSheet.create({
   historyCard: {
     borderRadius: 12,
   },
+  showMoreHistoryLink: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: "center",
+  },
+  showMoreHistoryLinkText: {
+    fontSize: 14,
+    fontWeight: "500",
+    textDecorationLine: "underline",
+  },
   historyCardContent: {
     paddingVertical: 12,
     paddingHorizontal: 12,
@@ -1855,6 +2008,20 @@ const styles = StyleSheet.create({
   userText: {
     fontSize: 12,
     // Color is set inline based on theme
+  },
+  clickableText: {
+    fontWeight: "700",
+  },
+  userFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  userFilterChip: {
+    alignSelf: "flex-start",
   },
   quantityText: {
     fontSize: 13,

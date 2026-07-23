@@ -6,6 +6,7 @@ import {
   RefreshControl,
   Platform,
   useWindowDimensions,
+  Pressable,
 } from "react-native";
 import {
   Card,
@@ -15,6 +16,7 @@ import {
   useTheme,
   IconButton,
   ActivityIndicator,
+  Chip,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
 import NotificationsBell from "../components/NotificationsBell";
@@ -108,7 +110,9 @@ export default function HomeScreen({
   onOpenLateOrders,
   onOpenLowStock,
   onOpenMaterialUsage,
+  onOpenWasteTracking,
   onOpenReports,
+  onItemSelect,
   auditLogs: auditLogsFromApp,
   auditLogsLoaded: auditLogsLoadedFromApp = false,
   onRefreshAuditLogs,
@@ -126,11 +130,19 @@ export default function HomeScreen({
   const auditLogsLoaded = useCachedAudit || auditLogsLocal.length > 0;
   // Admin only: 'all' = full transaction history, 'reduced' = what standard users see
   const [transactionHistoryView, setTransactionHistoryView] = useState("all");
+  const [userFilter, setUserFilter] = useState(null);
   const [shiftFilter, setShiftFilter] = useState(null);
+  /** Admin: start with ~2 weeks; "Show more" adds another 2. */
+  const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
 
   const loadAuditLogs = async () => {
     if (onRefreshAuditLogs) {
-      await onRefreshAuditLogs();
+      setAuditLogsLoading(true);
+      try {
+        await onRefreshAuditLogs();
+      } finally {
+        setAuditLogsLoading(false);
+      }
       return;
     }
     setAuditLogsLoading(true);
@@ -145,16 +157,21 @@ export default function HomeScreen({
   };
 
   useEffect(() => {
-    if (useCachedAudit) return;
+    // Parent cache may arrive while local loading is still true — clear it so
+    // we don't stay on placeholders until remount (common on mobile first open).
+    if (useCachedAudit) {
+      setAuditLogsLoading(false);
+      return;
+    }
     loadAuditLogs();
   }, [useCachedAudit]);
 
-  const weekAgoStart = useMemo(() => {
+  const historyCutoffMs = useMemo(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 7);
     d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - historyWeeksShown * 7);
     return d.getTime();
-  }, []);
+  }, [historyWeeksShown]);
 
   const todayStart = useMemo(() => {
     const d = new Date();
@@ -187,7 +204,7 @@ export default function HomeScreen({
     });
 
   const recentTransactionLogs = useMemo(() => {
-    const timeCutoff = isAdmin ? weekAgoStart : todayStart;
+    const timeCutoff = isAdmin ? historyCutoffMs : todayStart;
     const timeFiltered = auditLogs.filter((log) => {
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       return t >= timeCutoff;
@@ -196,14 +213,59 @@ export default function HomeScreen({
     if (transactionHistoryView === "reduced")
       return filterToStandardUserVisible(timeFiltered);
     return timeFiltered;
-  }, [auditLogs, weekAgoStart, todayStart, isAdmin, transactionHistoryView]);
+  }, [
+    auditLogs,
+    historyCutoffMs,
+    todayStart,
+    isAdmin,
+    transactionHistoryView,
+  ]);
+
+  const hasMoreHistory = useMemo(() => {
+    if (!isAdmin) return false;
+    const pool =
+      transactionHistoryView === "reduced"
+        ? filterToStandardUserVisible(auditLogs)
+        : auditLogs;
+    return pool.some((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t > 0 && t < historyCutoffMs;
+    });
+  }, [auditLogs, isAdmin, historyCutoffMs, transactionHistoryView]);
 
   const logsForDisplay = useMemo(() => {
-    if (!isAdmin || !shiftFilter) return recentTransactionLogs;
-    return recentTransactionLogs.filter((log) =>
-      logMatchesShift(log.timestamp, shiftFilter),
-    );
-  }, [recentTransactionLogs, isAdmin, shiftFilter]);
+    let rows = recentTransactionLogs;
+    if (isAdmin && shiftFilter) {
+      rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
+    }
+    if (isAdmin && userFilter) {
+      const target = String(userFilter).trim().toLowerCase();
+      rows = rows.filter((log) => {
+        const u = (log.userName || "").trim().toLowerCase();
+        const display = (() => {
+          if (u && u !== "unknown") return log.userName;
+          const adminOnly =
+            [
+              "add",
+              "change_id",
+              "set_next_id",
+              "set_min_quantity",
+              "delete",
+            ].includes(log.action) ||
+            (log.action === "update" &&
+              !(
+                log.details?._actionType === "check_in" ||
+                log.details?._actionType === "check_out" ||
+                log.details?._actionType === "receiving" ||
+                log.details?._actionType === "recycled"
+              ));
+          return adminOnly ? "Admin" : log.userName || "Unknown";
+        })();
+        return String(display).trim().toLowerCase() === target;
+      });
+    }
+    return rows;
+  }, [recentTransactionLogs, isAdmin, shiftFilter, userFilter]);
 
   const transactionLogsByDay = useMemo(() => {
     const byDay = {};
@@ -248,6 +310,23 @@ export default function HomeScreen({
     return adminOnly ? "Admin" : log.userName || "Unknown";
   };
 
+  const handleUserPress = (log) => {
+    if (!isAdmin) return;
+    const display = getDisplayUserName(log);
+    if (!display || display === "Unknown") return;
+    setUserFilter((prev) =>
+      prev && prev.toLowerCase() === display.toLowerCase() ? null : display,
+    );
+  };
+
+  const handleItemPress = (log) => {
+    if (!isAdmin || !onItemSelect) return;
+    const id = log.itemId != null ? String(log.itemId).trim() : "";
+    if (!id) return;
+    const item = inventory.find((i) => String(i.id) === id);
+    if (item) onItemSelect(item);
+  };
+
   const handleRefresh = async () => {
     await onRefresh?.();
     if (onRefreshAuditLogs) {
@@ -277,8 +356,19 @@ export default function HomeScreen({
     <Card style={styles.card}>
       <Card.Content>
         <Text style={styles.sectionTitle}>
-          {isAdmin ? "Past week's transactions" : "Today's transactions"}
+          {isAdmin ? "Transaction history" : "Today's transactions"}
         </Text>
+        {isAdmin && userFilter ? (
+          <View style={styles.userFilterRow}>
+            <Chip
+              icon="account"
+              onClose={() => setUserFilter(null)}
+              style={styles.userFilterChip}
+            >
+              {userFilter}
+            </Chip>
+          </View>
+        ) : null}
         {isAdmin && (
           <View style={styles.transactionToggleRow}>
             <Button
@@ -315,7 +405,7 @@ export default function HomeScreen({
             </Button>
           </View>
         )}
-        {!auditLogsLoaded || auditLogsLoading ? (
+        {(!useCachedAudit && (!auditLogsLoaded || auditLogsLoading)) ? (
           [0, 1, 2, 3].map((i) => (
             <View
               key={`placeholder-${i}`}
@@ -357,13 +447,32 @@ export default function HomeScreen({
             </View>
           ))
         ) : transactionLogsByDay.length === 0 ? (
-          <Text style={styles.emptyLogs}>
-            {isAdmin
-              ? "No transactions in the past week"
-              : "No transactions today"}
-          </Text>
+          <>
+            <Text style={styles.emptyLogs}>
+              {isAdmin
+                ? "No transactions in this period"
+                : "No transactions today"}
+            </Text>
+            {isAdmin && hasMoreHistory ? (
+              <Pressable
+                onPress={() => setHistoryWeeksShown((w) => w + 2)}
+                hitSlop={8}
+                style={styles.showMoreHistoryLink}
+              >
+                <Text
+                  style={[
+                    styles.showMoreHistoryLinkText,
+                    { color: theme.colors.primary },
+                  ]}
+                >
+                  Show more
+                </Text>
+              </Pressable>
+            ) : null}
+          </>
         ) : (
-          transactionLogsByDay.map((dayGroup) => (
+          <>
+            {transactionLogsByDay.map((dayGroup) => (
             <View key={dayGroup.key} style={styles.transactionDayBlock}>
               <View style={styles.dayDividerWrap}>
                 <Text
@@ -415,15 +524,30 @@ export default function HomeScreen({
                       >
                         {dateTimeStr}
                       </Text>
-                      <Text
-                        style={[
-                          styles.transactionUser,
-                          { color: theme.dark ? "#999" : "#888" },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {getDisplayUserName(log)}
-                      </Text>
+                      {isAdmin ? (
+                        <Pressable onPress={() => handleUserPress(log)} hitSlop={6}>
+                          <Text
+                            style={[
+                              styles.transactionUser,
+                              styles.clickableText,
+                              { color: theme.dark ? "#999" : "#888" },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {getDisplayUserName(log)}
+                          </Text>
+                        </Pressable>
+                      ) : (
+                        <Text
+                          style={[
+                            styles.transactionUser,
+                            { color: theme.dark ? "#999" : "#888" },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {getDisplayUserName(log)}
+                        </Text>
+                      )}
                     </View>
                     <View
                       style={[
@@ -449,20 +573,55 @@ export default function HomeScreen({
                         {qtyStr !== "-" ? `${qtyStr} gal` : "-"}
                       </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.transactionColor,
-                        { color: theme.colors.onSurface },
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {itemName}
-                    </Text>
+                    {isAdmin && onItemSelect ? (
+                      <Pressable
+                        onPress={() => handleItemPress(log)}
+                        hitSlop={6}
+                        style={styles.transactionColor}
+                      >
+                        <Text
+                          style={[
+                            styles.clickableText,
+                            { color: theme.colors.onSurface },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {itemName}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Text
+                        style={[
+                          styles.transactionColor,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {itemName}
+                      </Text>
+                    )}
                   </View>
                 );
               })}
             </View>
-          ))
+          ))}
+            {isAdmin && hasMoreHistory ? (
+              <Pressable
+                onPress={() => setHistoryWeeksShown((w) => w + 2)}
+                hitSlop={8}
+                style={styles.showMoreHistoryLink}
+              >
+                <Text
+                  style={[
+                    styles.showMoreHistoryLinkText,
+                    { color: theme.colors.primary },
+                  ]}
+                >
+                  Show more
+                </Text>
+              </Pressable>
+            ) : null}
+          </>
         )}
       </Card.Content>
     </Card>
@@ -528,6 +687,16 @@ export default function HomeScreen({
           Material Usage
         </Button>
       )}
+      {onOpenWasteTracking && (
+        <Button
+          mode="outlined"
+          onPress={onOpenWasteTracking}
+          style={styles.button}
+          icon="delete-variant"
+        >
+          Waste Tracking
+        </Button>
+      )}
       {onOpenReports && (
         <Button
           mode="outlined"
@@ -563,6 +732,7 @@ export default function HomeScreen({
               onOpenBackOrders={onOpenBackOrders}
               onOpenLateOrders={onOpenLateOrders}
               onOpenLowStock={onOpenLowStock}
+              onOpenWasteTracking={onOpenWasteTracking}
               iconSize={24}
             />
             {onOpenMaterialUsage && (
@@ -611,6 +781,7 @@ export default function HomeScreen({
               onOpenBackOrders={onOpenBackOrders}
               onOpenLateOrders={onOpenLateOrders}
               onOpenLowStock={onOpenLowStock}
+              onOpenWasteTracking={onOpenWasteTracking}
             />
             {onOpenMaterialUsage && (
               <IconButton
@@ -861,6 +1032,15 @@ const styles = StyleSheet.create({
   transactionDayBlock: {
     marginTop: 16,
   },
+  showMoreHistoryLink: {
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  showMoreHistoryLinkText: {
+    fontSize: 14,
+    fontWeight: "500",
+    textDecorationLine: "underline",
+  },
   dayDividerWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -915,6 +1095,19 @@ const styles = StyleSheet.create({
   transactionUser: {
     fontSize: 10,
     marginTop: 1,
+  },
+  clickableText: {
+    fontWeight: "700",
+  },
+  userFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  userFilterChip: {
+    alignSelf: "flex-start",
   },
   transactionActionCol: {
     width: 78,

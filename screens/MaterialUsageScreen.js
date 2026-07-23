@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -32,6 +32,10 @@ import MaterialUsageService, {
   BOOTH_OPTIONS,
   CATALYST_PERCENT,
 } from "../services/materialUsageService";
+import {
+  formatMonthDayYear,
+  todayPacificIso,
+} from "../utils/wasteDrumConversion";
 
 const STORAGE_KEYS = {
   booth: "@material_usage_booth",
@@ -342,7 +346,7 @@ export default function MaterialUsageScreen({
           setBoothState(savedBooth);
         if (
           savedBoothFilter &&
-          ["all", "Booth 1 & 3", "Booth 2", "Booth 4"].includes(
+          ["all", ...BOOTH_OPTIONS.map((o) => o.value)].includes(
             savedBoothFilter,
           )
         )
@@ -469,12 +473,12 @@ export default function MaterialUsageScreen({
         const d = row.entry_date ? new Date(row.entry_date) : null;
         return d && !Number.isNaN(d.getTime()) && d.getTime() >= cutoff;
       });
-    }
-    if (shiftFilter && shiftFilter !== "all") {
-      list = list.filter(
-        (row) =>
-          getShift(row.entry_time, materialUsageOvertime) === shiftFilter,
-      );
+      if (shiftFilter && shiftFilter !== "all") {
+        list = list.filter(
+          (row) =>
+            getShift(row.entry_time, materialUsageOvertime) === shiftFilter,
+        );
+      }
     }
     return list;
   }, [logs, boothFilter, isAdmin, shiftFilter, materialUsageOvertime]);
@@ -524,6 +528,7 @@ export default function MaterialUsageScreen({
   const totalsFilterLabel = (() => {
     const boothPart =
       !boothFilter || boothFilter === "all" ? "All" : boothFilter;
+    if (!isAdmin) return `${boothPart} · Today`;
     const shiftPart =
       !shiftFilter || shiftFilter === "all"
         ? null
@@ -548,27 +553,44 @@ export default function MaterialUsageScreen({
     return t;
   }, [filteredLogs, inventory]);
 
-  const loadLogs = async () => {
-    try {
-      const boothParam = boothFilter === "all" ? null : boothFilter;
-      const limit = isAdmin ? 2000 : 500;
-      const list = await MaterialUsageService.list(
-        boothParam,
-        limit,
-        isAdmin ? {} : { restrictToToday: true, excludeAdmin: true },
-      );
-      setLogs(list);
-    } catch (e) {
-      console.error("Material usage list:", e);
-    } finally {
-      setLogsLoaded(true);
-      setRefreshing(false);
-    }
-  };
+  const loadLogs = useCallback(
+    async (boothOverride) => {
+      try {
+        const boothValue =
+          boothOverride !== undefined ? boothOverride : boothFilter;
+        const boothParam = boothValue === "all" ? null : boothValue;
+        const limit = isAdmin ? 2000 : 500;
+        const list = await MaterialUsageService.list(
+          boothParam,
+          limit,
+          isAdmin ? {} : { restrictToToday: true, excludeAdmin: true },
+        );
+        const next = Array.isArray(list) ? list : [];
+        setLogs(next);
+        // Auto-expand day groups so entries are visible without an extra tap
+        const keys = [
+          ...new Set(
+            next.map((row) => {
+              const date = getLogDate(row, materialUsageOvertime) || "";
+              return date ? `day-${date}` : null;
+            }),
+          ),
+        ].filter(Boolean);
+        setExpandedLogDayKeys(keys);
+      } catch (e) {
+        console.error("Material usage list:", e);
+      } finally {
+        setLogsLoaded(true);
+        setRefreshing(false);
+      }
+    },
+    [boothFilter, isAdmin, materialUsageOvertime],
+  );
 
   useEffect(() => {
+    setLogsLoaded(false);
     loadLogs();
-  }, [boothFilter, isAdmin]);
+  }, [loadLogs]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -591,7 +613,12 @@ export default function MaterialUsageScreen({
       const parsed = parseEntryTime(freshTime);
       setTimePart(parsed.timePart);
       setAmpm(parsed.ampm);
-      await loadLogs();
+      // Show the booth that was just logged so the new row is visible
+      const nextBooth = entry.booth || boothFilter;
+      if (entry.booth) {
+        setBoothFilter(entry.booth);
+      }
+      await loadLogs(nextBooth);
     } catch (e) {
       console.error("Submit material usage:", e);
     } finally {
@@ -1010,35 +1037,53 @@ export default function MaterialUsageScreen({
 
           <Card style={styles.card}>
             <Card.Content>
-              <Title style={styles.cardTitle}>Transaction log</Title>
+              <Title style={styles.cardTitle}>
+                {isAdmin ? "Transaction log" : "Today's usage"} ·{" "}
+                {formatMonthDayYear(todayPacificIso())}
+              </Title>
               <Text style={styles.statLabel}>Filter by booth</Text>
               <View style={styles.buttonRow}>
-                {["all", "Booth 1 & 3", "Booth 2", "Booth 4"].map((bf) => (
+                <Button
+                  mode={boothFilter === "all" ? "contained" : "outlined"}
+                  onPress={() => setBoothFilter("all")}
+                  style={styles.filterButton}
+                >
+                  All
+                </Button>
+                {BOOTH_OPTIONS.map((opt) => (
                   <Button
-                    key={bf}
-                    mode={boothFilter === bf ? "contained" : "outlined"}
-                    onPress={() => setBoothFilter(bf)}
+                    key={opt.value}
+                    mode={boothFilter === opt.value ? "contained" : "outlined"}
+                    onPress={() => setBoothFilter(opt.value)}
                     style={styles.filterButton}
                   >
-                    {bf === "all" ? "All" : bf}
+                    {opt.label}
                   </Button>
                 ))}
               </View>
-              <Text style={[styles.statLabel, { marginTop: 12 }]}>
-                Filter by shift
-              </Text>
-              <View style={styles.buttonRow}>
-                {["all", "day", "swing"].map((sf) => (
-                  <Button
-                    key={sf}
-                    mode={shiftFilter === sf ? "contained" : "outlined"}
-                    onPress={() => setShiftFilter(sf)}
-                    style={styles.filterButton}
-                  >
-                    {sf === "all" ? "All" : sf === "day" ? "Day" : "Swing"}
-                  </Button>
-                ))}
-              </View>
+              {isAdmin ? (
+                <>
+                  <Text style={[styles.statLabel, { marginTop: 12 }]}>
+                    Filter by shift
+                  </Text>
+                  <View style={styles.buttonRow}>
+                    {["all", "day", "swing"].map((sf) => (
+                      <Button
+                        key={sf}
+                        mode={shiftFilter === sf ? "contained" : "outlined"}
+                        onPress={() => setShiftFilter(sf)}
+                        style={styles.filterButton}
+                      >
+                        {sf === "all"
+                          ? "All"
+                          : sf === "day"
+                            ? "Day"
+                            : "Swing"}
+                      </Button>
+                    ))}
+                  </View>
+                </>
+              ) : null}
               {logsLoaded && filteredLogs.length > 0 && (
                 <View style={styles.totalsSection}>
                   <Text

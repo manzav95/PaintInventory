@@ -33,6 +33,10 @@ import {
   parseGallonQuantity,
   sanitizeGallonInput,
 } from "../utils/gallonQuantity";
+import {
+  DEFAULT_UNIT_PRICE,
+  resolveUnitPrice,
+} from "../utils/pricing";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const CUSTOM_CONTAINER_LOCATION = "Custom Container";
@@ -228,7 +232,11 @@ export default function AddItemScreen({
       return;
     }
 
-    const priceNum = price.trim() === "" ? undefined : parseFloat(price);
+    const priceNum = resolveUnitPrice(price);
+    if (price.trim() !== "" && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
+      Alert.alert("Invalid", "Unit price must be 0 or greater.");
+      return;
+    }
     let typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
     if (idImpliesPrecat(tid)) {
       typeVal = "precat";
@@ -268,9 +276,7 @@ export default function AddItemScreen({
       po_label_ap: poCategory === "ap",
       po_label_mixing: poCategory !== "ap",
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
-      ...(priceNum != null &&
-        !isNaN(priceNum) &&
-        priceNum >= 0 && { price: priceNum }),
+      price: priceNum,
       ...(typeVal && { type: typeVal }),
       ...(hexVal && { hex_color: hexVal }),
       ...(extRaw && { external_code: extRaw }),
@@ -760,7 +766,7 @@ export default function AddItemScreen({
                 {renderPoCategoryField()}
                 {renderContainerField()}
                 <TextInput
-                  label="Unit price (optional)"
+                  label={`Unit price (blank → $${DEFAULT_UNIT_PRICE})`}
                   value={price}
                   onChangeText={setPrice}
                   mode="outlined"

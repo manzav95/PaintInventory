@@ -25,6 +25,7 @@ import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
+import WasteTrackingScreen from './screens/WasteTrackingScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import AppShell from './components/AppShell';
 import AppSidebar from './components/AppSidebar';
@@ -164,6 +165,8 @@ export default function App() {
     }
     if (screen === 'materialUsage' && isWeb && typeof window !== 'undefined') {
       window.location.hash = '#/material-usage';
+    } else if (screen === 'wasteTracking' && isWeb && typeof window !== 'undefined') {
+      window.location.hash = '#/waste-tracking';
     } else if (screen === 'reports' && isWeb && typeof window !== 'undefined') {
       window.location.hash = '#/reports';
     } else if (
@@ -213,6 +216,7 @@ export default function App() {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const titles = {
         materialUsage: 'Material Usage',
+        wasteTracking: 'Waste Tracking',
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         list: 'Inventory',
@@ -232,6 +236,8 @@ export default function App() {
       const path = hash.startsWith('/') ? hash : `/${hash}`;
       if (path === '/material-usage' && userName != null) {
         setCurrentScreen('materialUsage');
+      } else if (path === '/waste-tracking' && userName != null) {
+        setCurrentScreen('wasteTracking');
       } else if (path === '/reports' && userName != null && userName === 'admin123') {
         setCurrentScreen('reports');
       }
@@ -242,6 +248,8 @@ export default function App() {
       const p = h.startsWith('/') ? h : `/${h}`;
       if (p === '/material-usage' && userName != null) {
         setCurrentScreen('materialUsage');
+      } else if (p === '/waste-tracking' && userName != null) {
+        setCurrentScreen('wasteTracking');
       } else if (p === '/reports' && userName != null && userName === 'admin123') {
         setCurrentScreen('reports');
       }
@@ -641,6 +649,7 @@ export default function App() {
             quantity: quantity,
             newQuantity: result.item.quantity,
           });
+          await refreshAuditLogs(true);
         } else {
           Alert.alert('Error', result.error || 'Failed to check in quantity.');
           return;
@@ -686,6 +695,7 @@ export default function App() {
           newQuantity: result.item.quantity,
           orderId,
         });
+        await refreshAuditLogs(true);
       } catch (err) {
         // Likely offline – enqueue for later sync instead of failing the user flow
         await enqueueQuantityAction({
@@ -725,6 +735,7 @@ export default function App() {
             quantity: quantity,
             newQuantity: result.item.quantity,
           });
+          await refreshAuditLogs(true);
         } else {
           const msg = result.error || 'Failed to check out quantity.';
           if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -778,6 +789,7 @@ export default function App() {
             quantity,
             newQuantity: result.item.quantity,
           });
+          await refreshAuditLogs(true);
         } else {
           const msg = result.error || 'Failed to record recycle.';
           if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
@@ -830,6 +842,7 @@ export default function App() {
           name: result.item?.name,
           quantity: result.item?.quantity,
         });
+        await refreshAuditLogs(true);
       } else {
         Alert.alert('Error', result.error || 'Failed to add item.');
       }
@@ -940,6 +953,7 @@ export default function App() {
         name: result.item?.name,
         quantity: result.item?.quantity,
       });
+      await refreshAuditLogs(true);
     } else {
       Alert.alert('Error', result.error || 'Failed to save item.');
     }
@@ -958,6 +972,7 @@ export default function App() {
           user: actorName,
           itemId,
         });
+        await refreshAuditLogs(true);
       } else {
         Alert.alert('Error', result?.error || 'Failed to delete item.');
       }
@@ -1058,6 +1073,7 @@ export default function App() {
           itemId,
           delta: change,
         });
+        await refreshAuditLogs(true);
       }
     });
   };
@@ -1083,6 +1099,7 @@ export default function App() {
           from: (oldId ?? '').toString(),
           to: result.itemId || newId,
         });
+        await refreshAuditLogs(true);
         return result;
       } else {
         return result;
@@ -1117,6 +1134,15 @@ export default function App() {
                 setRecycleDueFilter(true);
                 navigateTo('list');
               }}
+              onItemSelect={
+                isAdmin
+                  ? (item) => {
+                      setPreviousScreen('home');
+                      setSelectedItem(item);
+                      setShowAdminItemDialog(true);
+                    }
+                  : undefined
+              }
             />
           );
         }
@@ -1164,7 +1190,17 @@ export default function App() {
               setCurrentScreen('orders');
             } : undefined}
             onOpenMaterialUsage={() => navigateTo('materialUsage')}
+            onOpenWasteTracking={() => navigateTo('wasteTracking')}
             onOpenReports={isAdmin ? () => navigateTo('reports') : undefined}
+            onItemSelect={
+              isAdmin
+                ? (item) => {
+                    setPreviousScreen('home');
+                    setSelectedItem(item);
+                    setShowAdminItemDialog(true);
+                  }
+                : undefined
+            }
             onOpenLowStock={() => {
               setLowStockFilter(true);
               setCurrentScreen('list');
@@ -1294,7 +1330,9 @@ export default function App() {
         return (
           <ItemTransactionHistoryScreen
             item={selectedItem}
-            onBack={() => setCurrentScreen('list')}
+            onBack={() =>
+              setCurrentScreen(previousScreen === 'home' ? 'home' : 'list')
+            }
             isAdmin={isAdmin}
           />
         );
@@ -1345,6 +1383,15 @@ export default function App() {
             userName={actorName}
             isAdmin={isAdmin}
             materialUsageOvertime={materialUsageOvertime}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+          />
+        );
+      case 'wasteTracking':
+        return (
+          <WasteTrackingScreen
+            userName={actorName}
+            isAdmin={isAdmin}
             embeddedInShell={embeddedInShell}
             onBack={() => navigateTo('home')}
           />
@@ -1472,7 +1519,7 @@ export default function App() {
               ]}
             >
               <Text style={[styles.adminDialogTitle, { color: paperTheme.colors.onSurface }]}>
-                Item
+                {selectedItem?.name || selectedItem?.id || "Item"}
               </Text>
               <Text style={[styles.adminDialogMessage, { color: paperTheme.colors.onSurfaceVariant }]}>
                 View transaction history or edit item details?

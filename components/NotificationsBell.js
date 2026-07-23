@@ -12,6 +12,7 @@ import {
 } from "react-native-paper";
 import OrderService from "../services/orderService";
 import NotificationService from "../services/notificationService";
+import WasteTrackingService from "../services/wasteTrackingService";
 import { NOTIFICATION_BADGE_RED } from "../utils/themeColors";
 import {
   isRecycleDue,
@@ -32,6 +33,7 @@ export default function NotificationsBell({
   onOpenBackOrders,
   onOpenLateOrders,
   onOpenLowStock,
+  onOpenWasteTracking,
   iconSize = 20,
 }) {
   const theme = useTheme();
@@ -39,6 +41,7 @@ export default function NotificationsBell({
   const [dismissedIds, setDismissedIds] = useState([]);
   const [backOrderCount, setBackOrderCount] = useState(0);
   const [lateOrderCount, setLateOrderCount] = useState(0);
+  const [wasteUnreadCount, setWasteUnreadCount] = useState(0);
   const [orderCountsLoading, setOrderCountsLoading] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
 
@@ -55,6 +58,7 @@ export default function NotificationsBell({
     if (!isAdmin) {
       setBackOrderCount(0);
       setLateOrderCount(0);
+      setWasteUnreadCount(0);
       return;
     }
     let cancelled = false;
@@ -62,11 +66,13 @@ export default function NotificationsBell({
     Promise.all([
       OrderService.getBackOrderCount().catch(() => 0),
       OrderService.getLateOrderCount().catch(() => 0),
+      WasteTrackingService.getUnreadCount().catch(() => 0),
     ])
-      .then(([back, late]) => {
+      .then(([back, late, waste]) => {
         if (!cancelled) {
           setBackOrderCount(back);
           setLateOrderCount(late);
+          setWasteUnreadCount(waste);
         }
       })
       .finally(() => {
@@ -89,6 +95,25 @@ export default function NotificationsBell({
 
   const allNotifications = useMemo(() => {
     const items = [];
+    if (isAdmin && wasteUnreadCount > 0 && onOpenWasteTracking) {
+      items.push({
+        id: "waste",
+        title: "Waste Tracking",
+        count: wasteUnreadCount,
+        color: "#6a1b9a",
+        detail:
+          wasteUnreadCount === 1
+            ? "1 new waste entry submitted"
+            : `${wasteUnreadCount} new waste entries submitted`,
+        onPress: () => {
+          setVisible(false);
+          WasteTrackingService.markSeen()
+            .then(() => setWasteUnreadCount(0))
+            .catch(() => {});
+          onOpenWasteTracking();
+        },
+      });
+    }
     if (isAdmin && recycleDueCount > 0 && onOpenRecycleDue) {
       items.push({
         id: "recycle",
@@ -149,12 +174,14 @@ export default function NotificationsBell({
     }
     return items;
   }, [
+    wasteUnreadCount,
     recycleDueCount,
     backOrderCount,
     lateOrderCount,
     lowStockItems.length,
     isAdmin,
     minQuantity,
+    onOpenWasteTracking,
     onOpenRecycleDue,
     onOpenBackOrders,
     onOpenLateOrders,
@@ -174,6 +201,14 @@ export default function NotificationsBell({
 
   const handleDismissToday = async () => {
     const ids = allNotifications.map((n) => n.id);
+    if (ids.includes("waste")) {
+      try {
+        await WasteTrackingService.markSeen();
+        setWasteUnreadCount(0);
+      } catch {
+        /* ignore */
+      }
+    }
     await dismissAlertsForToday(userName, ids);
     setDismissedIds(ids);
   };

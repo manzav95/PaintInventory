@@ -8,14 +8,13 @@ const db = require('./database');
 const { Database } = require('./database');
 const { sendLowStockAlertEmail } = require('./lowStockAlertEmail');
 
-// Try to load optional dependencies (for Excel export)
-let XLSX, cron;
+// Try to load optional dependency (for Excel export)
+let XLSX;
 try {
   XLSX = require('xlsx');
-  cron = require('node-cron');
 } catch (error) {
-  console.warn('Excel export dependencies not installed. Run: cd server && npm install');
-  console.warn('Excel export features will be disabled until dependencies are installed.');
+  console.warn('Excel export library not installed. Run: cd server && npm install');
+  console.warn('Excel export features will be disabled until xlsx is installed.');
 }
 
 const app = express();
@@ -493,6 +492,85 @@ app.get('/api/audit', async (req, res) => {
   }
 });
 
+// --- Waste tracking (VOC) ---
+app.get('/api/waste-tracking', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10) || 100, 2000);
+    const rows = await db.getWasteTracking(limit);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching waste tracking:', error);
+    res.status(500).json({ error: 'Failed to fetch waste tracking' });
+  }
+});
+
+app.post('/api/waste-tracking', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await db.addWasteTracking({
+      entry_date: body.entry_date,
+      user_name: body.user_name,
+      paint_inches: body.paint_inches,
+      clear_toner_inches: body.clear_toner_inches,
+      primer_inches: body.primer_inches,
+      acetone_inches: body.acetone_inches,
+      paint_gallons: body.paint_gallons,
+      clear_toner_gallons: body.clear_toner_gallons,
+      primer_gallons: body.primer_gallons,
+      acetone_gallons: body.acetone_gallons,
+    });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // Email not configured yet — save only; admin gets an in-app alert.
+    res.json({
+      ...result,
+      email: { success: false, skipped: true },
+    });
+  } catch (error) {
+    console.error('Error creating waste tracking:', error);
+    res.status(500).json({ error: 'Failed to create waste tracking entry' });
+  }
+});
+
+app.get('/api/waste-tracking/unread-count', async (req, res) => {
+  try {
+    const count = await db.getWasteTrackingUnreadCount();
+    res.json({ count });
+  } catch (error) {
+    console.error('Error fetching waste unread count:', error);
+    res.status(500).json({ error: 'Failed to fetch unread count' });
+  }
+});
+
+app.post('/api/waste-tracking/mark-seen', async (req, res) => {
+  try {
+    const result = await db.markWasteTrackingSeen();
+    res.json(result);
+  } catch (error) {
+    console.error('Error marking waste seen:', error);
+    res.status(500).json({ error: 'Failed to mark waste entries seen' });
+  }
+});
+
+app.delete('/api/waste-tracking/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const result = await db.deleteWasteTracking(id);
+    if (!result.success) {
+      return res.status(result.error === 'Entry not found' ? 404 : 400).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting waste tracking:', error);
+    res.status(500).json({ error: 'Failed to delete waste tracking entry' });
+  }
+});
+
 // --- Material usage (admin, air quality reporting) ---
 app.get('/api/material-usage', async (req, res) => {
   try {
@@ -898,49 +976,6 @@ app.post('/api/notifications/low-stock-alert', async (req, res) => {
     res.status(500).json({ error: error.message || 'Failed to send alert' });
   }
 });
-
-// Schedule daily Excel export at 7am (only if dependencies are installed)
-if (XLSX && cron) {
-  const EXPORT_DIR = path.join(__dirname, 'exports');
-  if (!fs.existsSync(EXPORT_DIR)) {
-    fs.mkdirSync(EXPORT_DIR, { recursive: true });
-  }
-
-  // Function to save Excel file to disk
-  async function saveExcelToDisk() {
-    try {
-      const buffer = await generateExcelExport();
-      const filename = `paint-inventory-${new Date().toISOString().split('T')[0]}.xlsx`;
-      const filepath = path.join(EXPORT_DIR, filename);
-      
-      fs.writeFileSync(filepath, buffer);
-      console.log(`Excel export saved to: ${filepath}`);
-      return filepath;
-    } catch (error) {
-      console.error('Error saving Excel export:', error);
-      throw error;
-    }
-  }
-
-  // Save Excel file immediately on server start (for testing)
-  saveExcelToDisk().catch(err => {
-    console.error('Failed to create initial Excel export:', err);
-  });
-
-  // Schedule daily Excel export at 7am
-  cron.schedule('0 7 * * *', async () => {
-    try {
-      console.log('Generating daily Excel export at 7am...');
-      await saveExcelToDisk();
-    } catch (error) {
-      console.error('Error in scheduled Excel export:', error);
-    }
-  });
-  
-  console.log('Excel export scheduled for 7am daily');
-} else {
-  console.log('Excel export features disabled - dependencies not installed');
-}
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
