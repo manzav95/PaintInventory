@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Alert,
   Platform,
   useWindowDimensions,
   Pressable,
@@ -22,6 +21,7 @@ import {
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
 import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
+import showAlert from "../utils/showAlert";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import {
   normalizeDateInput,
@@ -236,7 +236,7 @@ export default function ItemDetailScreen({
 
   const handleSave = async () => {
     if (!isAdmin) {
-      Alert.alert(
+      showAlert(
         "Not Allowed",
         "Only admin can make changes to inventory items.",
       );
@@ -250,7 +250,7 @@ export default function ItemDetailScreen({
     if (!trimmedId) nextErr.id = true;
     if (Object.keys(nextErr).length > 0) {
       setFieldErrors(nextErr);
-      Alert.alert(
+      showAlert(
         "Required",
         "Please fill in all fields marked with *.",
       );
@@ -291,7 +291,7 @@ export default function ItemDetailScreen({
       if (otherHasExt) {
         lines.push("Another item already uses this external code.");
       }
-      Alert.alert("Cannot save", lines.join("\n\n"));
+      showAlert("Cannot save", lines.join("\n\n"));
       return;
     }
 
@@ -303,14 +303,14 @@ export default function ItemDetailScreen({
       minQuantityInput.trim() !== "" &&
       (isNaN(minQ) || minQ < 0)
     ) {
-      Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
+      showAlert("Invalid", "Minimum quantity must be 0 or greater.");
       return;
     }
     if (
       priceInput.trim() !== "" &&
       (isNaN(parseFloat(priceInput)) || parseFloat(priceInput) < 0)
     ) {
-      Alert.alert("Invalid", "Unit price must be 0 or greater.");
+      showAlert("Invalid", "Unit price must be 0 or greater.");
       return;
     }
     const typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : null;
@@ -324,7 +324,7 @@ export default function ItemDetailScreen({
       typeVal === "paint" &&
       (isNaN(displayOrderVal) || displayOrderVal < 0)
     ) {
-      Alert.alert("Invalid", "Display order must be 0 or greater.");
+      showAlert("Invalid", "Display order must be 0 or greater.");
       return;
     }
 
@@ -335,7 +335,7 @@ export default function ItemDetailScreen({
       if (lotDateInput.trim()) {
         lotDateVal = normalizeDateInput(lotDateInput);
         if (!lotDateVal) {
-          Alert.alert(
+          showAlert(
             "Invalid",
             "Lot date must be YYYY-MM-DD (example: 2024-06-15).",
           );
@@ -350,7 +350,7 @@ export default function ItemDetailScreen({
     let qtyVal = 0;
     const qtyParsed = parseGallonQuantity(quantity, typeVal, { allowZero: true });
     if (!qtyParsed.ok) {
-      Alert.alert("Invalid quantity", qtyParsed.error);
+      showAlert("Invalid quantity", qtyParsed.error);
       return;
     }
     qtyVal = qtyParsed.value;
@@ -386,12 +386,17 @@ export default function ItemDetailScreen({
         const newId = idInput.trim();
         const idResult = await onChangeId?.(item?.id, newId);
         if (!idResult || !idResult.success) {
-          Alert.alert("Error", idResult?.error || "Failed to change item ID.");
+          showAlert(
+            "Cannot change paint ID",
+            idResult?.error || "Failed to change item ID.",
+          );
           return;
         }
       }
-      await Promise.resolve(onSave(updatedItem));
-      onBack?.();
+      const saved = await Promise.resolve(onSave(updatedItem));
+      if (saved !== false) {
+        onBack?.();
+      }
     } finally {
       setSaving(false);
     }

@@ -532,6 +532,20 @@ class Database {
         ? String(item.rex).trim()
         : null;
     try {
+      // Pre-check duplicate name (case-insensitive)
+      const nameTrim = item.name != null ? String(item.name).trim() : "";
+      if (nameTrim) {
+        const dupName = await this.pool.query(
+          `SELECT id FROM items WHERE LOWER(TRIM(name)) = LOWER($1) LIMIT 1`,
+          [nameTrim],
+        );
+        if (dupName.rows.length > 0) {
+          return {
+            success: false,
+            error: "An item with this name already exists.",
+          };
+        }
+      }
       await this.pool.query(
         `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
@@ -690,13 +704,57 @@ class Database {
     const idForWhere = String(itemId).trim();
     values.push(idForWhere);
 
-    const result = await this.pool.query(
-      `UPDATE items SET ${fields.join(", ")} WHERE id = $${paramIndex}`,
-      values,
-    );
+    try {
+      if (
+        Object.prototype.hasOwnProperty.call(updates, "name") &&
+        updates.name != null &&
+        String(updates.name).trim() !== ""
+      ) {
+        const nameTrim = String(updates.name).trim();
+        const dupName = await this.pool.query(
+          `SELECT id FROM items
+           WHERE LOWER(TRIM(name)) = LOWER($1) AND id <> $2
+           LIMIT 1`,
+          [nameTrim, idForWhere],
+        );
+        if (dupName.rows.length > 0) {
+          return {
+            success: false,
+            error: "Another item already uses this name.",
+          };
+        }
+      }
 
-    if (result.rowCount === 0) {
-      return { success: false, error: "Item not found" };
+      const result = await this.pool.query(
+        `UPDATE items SET ${fields.join(", ")} WHERE id = $${paramIndex}`,
+        values,
+      );
+
+      if (result.rowCount === 0) {
+        return { success: false, error: "Item not found" };
+      }
+    } catch (e) {
+      if (e && e.code === "23505") {
+        const msg = e.detail || e.message || "";
+        if (msg.includes("(external_code)")) {
+          return {
+            success: false,
+            error: "Another item already uses this external code.",
+          };
+        }
+        if (msg.includes("(id)")) {
+          return {
+            success: false,
+            error: "Another item already uses this Paint ID.",
+          };
+        }
+        return {
+          success: false,
+          error: "Update conflicts with an existing item.",
+        };
+      }
+      console.error("DB updateItem error:", e);
+      return { success: false, error: "Failed to update item." };
     }
 
     const item = await this.getItem(idForWhere);
@@ -713,14 +771,25 @@ class Database {
   }
 
   async updateItemId(oldId, newId) {
-    const result = await this.pool.query(
-      'UPDATE items SET id = $1, "updatedAt" = $2 WHERE id = $3',
-      [newId, new Date().toISOString(), oldId],
-    );
-    if (result.rowCount === 0) {
-      return { success: false, error: "Item not found" };
+    try {
+      const result = await this.pool.query(
+        'UPDATE items SET id = $1, "updatedAt" = $2 WHERE id = $3',
+        [newId, new Date().toISOString(), oldId],
+      );
+      if (result.rowCount === 0) {
+        return { success: false, error: "Item not found" };
+      }
+      return { success: true, itemId: newId };
+    } catch (e) {
+      if (e && e.code === "23505") {
+        return {
+          success: false,
+          error: `ID ${newId} is already in use by another paint.`,
+        };
+      }
+      console.error("DB updateItemId error:", e);
+      return { success: false, error: "Failed to change paint ID." };
     }
-    return { success: true, itemId: newId };
   }
 
   async getNextIdNumber() {

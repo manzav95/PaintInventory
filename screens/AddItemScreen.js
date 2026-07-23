@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   ScrollView,
-  Alert,
   Platform,
   useWindowDimensions,
   Pressable,
@@ -28,6 +27,7 @@ import {
   RECYCLE_DUE_RESET_HINT,
 } from "../utils/recycleDates";
 import { MATERIAL_TYPE_OPTIONS as TYPE_OPTIONS } from "../utils/materialTypes";
+import showAlert from "../utils/showAlert";
 import {
   allowsHalfGallon,
   parseGallonQuantity,
@@ -198,7 +198,7 @@ export default function AddItemScreen({
     const nextErr = { itemId: !tid, name: !nname };
     if (nextErr.itemId || nextErr.name) {
       setFieldErrors(nextErr);
-      Alert.alert("Required", "Please fill in all fields marked with *.");
+      showAlert("Required", "Please fill in all fields marked with *.");
       return;
     }
     setFieldErrors({ itemId: false, name: false });
@@ -222,19 +222,19 @@ export default function AddItemScreen({
       if (idDup) lines.push("An item with this Paint ID already exists.");
       if (nameDup) lines.push("An item with this name already exists.");
       if (extDup) lines.push("Another item already uses this external code.");
-      Alert.alert("Cannot add item", lines.join("\n\n"));
+      showAlert("Cannot add item", lines.join("\n\n"));
       return;
     }
 
     const minQ = minQuantity.trim() === "" ? 0 : parseInt(minQuantity, 10);
     if (minQuantity.trim() !== "" && (isNaN(minQ) || minQ < 0)) {
-      Alert.alert("Invalid", "Minimum quantity must be 0 or greater.");
+      showAlert("Invalid", "Minimum quantity must be 0 or greater.");
       return;
     }
 
     const priceNum = resolveUnitPrice(price);
     if (price.trim() !== "" && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
-      Alert.alert("Invalid", "Unit price must be 0 or greater.");
+      showAlert("Invalid", "Unit price must be 0 or greater.");
       return;
     }
     let typeVal = TYPE_OPTIONS.some((o) => o.value === type) ? type : undefined;
@@ -253,7 +253,7 @@ export default function AddItemScreen({
     if (CUSTOM_TYPES.includes(typeVal)) {
       lotDateVal = normalizeDateInput(lotDate);
       if (!lotDateVal) {
-        Alert.alert(
+        showAlert(
           "Invalid",
           "Lot date must be YYYY-MM-DD (example: 2024-06-15).",
         );
@@ -262,7 +262,7 @@ export default function AddItemScreen({
     }
     const qtyParsed = parseGallonQuantity(quantity, typeVal, { allowZero: true });
     if (!qtyParsed.ok) {
-      Alert.alert("Invalid quantity", qtyParsed.error);
+      showAlert("Invalid quantity", qtyParsed.error);
       return;
     }
 

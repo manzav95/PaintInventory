@@ -3,6 +3,7 @@ import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'reac
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
+import showAlert from './utils/showAlert';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -615,7 +616,7 @@ export default function App() {
           window.alert(`${title}\n\n${msg}`);
           setCurrentScreen('list');
         } else {
-          Alert.alert(title, msg, [
+          showAlert(title, msg, [
             { text: 'OK', onPress: () => setCurrentScreen('list') },
           ]);
         }
@@ -638,7 +639,7 @@ export default function App() {
         const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
         if (result.success) {
           await loadInventory();
-          Alert.alert(
+          showAlert(
             'Success',
             `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
           );
@@ -651,7 +652,7 @@ export default function App() {
           });
           await refreshAuditLogs(true);
         } else {
-          Alert.alert('Error', result.error || 'Failed to check in quantity.');
+          showAlert('Cannot check in', result.error || 'Failed to check in quantity.');
           return;
         }
       } catch (err) {
@@ -662,7 +663,7 @@ export default function App() {
           userName: actorName,
           actionType: 'check_in',
         });
-        Alert.alert(
+        showAlert(
           'Saved offline',
           `Check-in for "${scannedItem.name}" will sync when you are back online.`
         );
@@ -678,12 +679,24 @@ export default function App() {
     await runWithLoading('Recording delivery...', async () => {
       try {
         const receiveResult = await OrderService.receiveOrderLine(orderId, scannedItem.id, quantity);
-        if (!receiveResult.success) throw new Error(receiveResult.error || 'Failed to record PO receive');
+        if (!receiveResult.success) {
+          showAlert(
+            'Cannot receive',
+            receiveResult.error || 'Failed to record PO receive.',
+          );
+          return;
+        }
         const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
-        if (!result.success) throw new Error(result.error || 'Failed to update inventory');
+        if (!result.success) {
+          showAlert(
+            'Cannot receive',
+            result.error || 'Failed to update inventory.',
+          );
+          return;
+        }
         await loadInventory();
         await refreshReceiveOrders(true);
-        Alert.alert(
+        showAlert(
           'Success',
           `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
         );
@@ -705,7 +718,7 @@ export default function App() {
           actionType: 'receiving',
           orderId,
         });
-        Alert.alert(
+        showAlert(
           'Saved offline',
           `Receiving for "${scannedItem.name}" will sync when you are back online.`
         );
@@ -724,7 +737,7 @@ export default function App() {
         const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
         if (result.success) {
           await loadInventory();
-          Alert.alert(
+          showAlert(
             'Success',
             `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
           );
@@ -737,12 +750,10 @@ export default function App() {
           });
           await refreshAuditLogs(true);
         } else {
-          const msg = result.error || 'Failed to check out quantity.';
-          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-            window.alert(`Cannot check out\n\n${msg}`);
-          } else {
-            Alert.alert('Cannot check out', msg);
-          }
+          showAlert(
+            'Cannot check out',
+            result.error || 'Failed to check out quantity.',
+          );
           return;
         }
       } catch (err) {
@@ -753,7 +764,7 @@ export default function App() {
           userName: actorName,
           actionType: 'check_out',
         });
-        Alert.alert(
+        showAlert(
           'Saved offline',
           `Check-out for "${scannedItem.name}" will sync when you are back online.`
         );
@@ -778,7 +789,7 @@ export default function App() {
         );
         if (result.success) {
           await loadInventory();
-          Alert.alert(
+          showAlert(
             'Recycled',
             `Recycled ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`,
           );
@@ -791,12 +802,10 @@ export default function App() {
           });
           await refreshAuditLogs(true);
         } else {
-          const msg = result.error || 'Failed to record recycle.';
-          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-            window.alert(`Cannot recycle\n\n${msg}`);
-          } else {
-            Alert.alert('Cannot recycle', msg);
-          }
+          showAlert(
+            'Cannot recycle',
+            result.error || 'Failed to record recycle.',
+          );
           return;
         }
       } catch (err) {
@@ -806,7 +815,7 @@ export default function App() {
           userName: actorName,
           actionType: 'recycled',
         });
-        Alert.alert(
+        showAlert(
           'Saved offline',
           `Recycle for "${scannedItem.name}" will sync when you are back online.`,
         );
@@ -819,32 +828,39 @@ export default function App() {
 
   const handleAddItem = async (item) => {
     if (!isAdmin) {
-      Alert.alert('Not Allowed', 'Only admin can add new inventory items.');
+      showAlert('Not Allowed', 'Only admin can add new inventory items.');
       return;
     }
     await runWithLoading('Saving new item...', async () => {
-      const result = await InventoryService.addItem({
-        ...item,
-        // Treat manual creation as an initial "last scanned" event so the UI isn't blank
-        lastScanned: new Date().toISOString(),
-        lastScannedBy: actorName,
-        userName: actorName,
-      });
-      if (result.success) {
-        await loadInventory();
-        setCurrentScreen('home');
-        setPreviousScreen('home');
-        Alert.alert('Success', 'Item added successfully.');
-        await AuditService.log({
-          type: 'add_item',
-          user: actorName,
-          itemId: result.item?.id,
-          name: result.item?.name,
-          quantity: result.item?.quantity,
+      try {
+        const result = await InventoryService.addItem({
+          ...item,
+          // Treat manual creation as an initial "last scanned" event so the UI isn't blank
+          lastScanned: new Date().toISOString(),
+          lastScannedBy: actorName,
+          userName: actorName,
         });
-        await refreshAuditLogs(true);
-      } else {
-        Alert.alert('Error', result.error || 'Failed to add item.');
+        if (result.success) {
+          await loadInventory();
+          setCurrentScreen('home');
+          setPreviousScreen('home');
+          showAlert('Success', 'Item added successfully.');
+          await AuditService.log({
+            type: 'add_item',
+            user: actorName,
+            itemId: result.item?.id,
+            name: result.item?.name,
+            quantity: result.item?.quantity,
+          });
+          await refreshAuditLogs(true);
+        } else {
+          showAlert('Cannot add item', result.error || 'Failed to add item.');
+        }
+      } catch (err) {
+        showAlert(
+          'Cannot add item',
+          err?.message || 'Failed to add item.',
+        );
       }
     });
   };
@@ -877,14 +893,15 @@ export default function App() {
 
   const handleSaveItem = async (item) => {
     if (!isAdmin) {
-      Alert.alert('Not Allowed', 'Only admin can make changes to inventory items.');
-      return;
+      showAlert('Not Allowed', 'Only admin can make changes to inventory items.');
+      return false;
     }
 
     const isExistingItem = !!selectedItem;
     const idForApi = String(item.id ?? selectedItem?.id ?? '').trim();
 
     let result;
+    try {
     if (isExistingItem) {
       const updates = {
         name: item.name,
@@ -927,6 +944,13 @@ export default function App() {
         userName: actorName,
       });
     }
+    } catch (err) {
+      showAlert(
+        'Cannot save item',
+        err?.message || 'Failed to save item.',
+      );
+      return false;
+    }
     
     if (result.success) {
       await loadInventory();
@@ -945,7 +969,7 @@ export default function App() {
       } else if (result.item) {
         setSelectedItem(result.item);
       }
-      Alert.alert('Success', 'Item saved successfully.');
+      showAlert('Success', 'Item saved successfully.');
       await AuditService.log({
         type: isExistingItem ? 'edit_item' : 'add_item',
         user: actorName,
@@ -954,8 +978,10 @@ export default function App() {
         quantity: result.item?.quantity,
       });
       await refreshAuditLogs(true);
+      return true;
     } else {
-      Alert.alert('Error', result.error || 'Failed to save item.');
+      showAlert('Cannot save item', result.error || 'Failed to save item.');
+      return false;
     }
   };
 
@@ -1057,7 +1083,7 @@ export default function App() {
 
   const handleQuantityChange = async (itemId, change) => {
     if (!isAdmin) {
-      Alert.alert('Not Allowed', 'Only admin can change inventory quantities.');
+      showAlert('Not Allowed', 'Only admin can change inventory quantities.');
       return;
     }
     await runWithLoading('Updating quantity...', async () => {
@@ -1074,13 +1100,18 @@ export default function App() {
           delta: change,
         });
         await refreshAuditLogs(true);
+      } else {
+        showAlert(
+          'Cannot update quantity',
+          result.error || 'Failed to update quantity.',
+        );
       }
     });
   };
 
   const handleChangeItemId = async (oldId, newId) => {
     if (!isAdmin) {
-      Alert.alert('Not Allowed', 'Only admin can change paint IDs.');
+      showAlert('Not Allowed', 'Only admin can change paint IDs.');
       return { success: false, error: 'Not allowed' };
     }
     return await runWithLoading('Updating paint ID...', async () => {

@@ -105,7 +105,7 @@ app.post('/api/items', async (req, res) => {
     }
   } catch (error) {
     console.error('Error adding item:', error);
-    res.status(500).json({ error: 'Failed to add item' });
+    res.status(500).json({ success: false, error: 'Failed to add item' });
   }
 });
 
@@ -232,12 +232,20 @@ app.put('/api/items/:id', async (req, res) => {
       }
       res.json(result);
     } else {
-      console.log('Update failed - item not found:', id);
-      res.status(404).json(result);
+      const errMsg = result?.error || 'Failed to update item';
+      const status = errMsg === 'Item not found' ? 404 : 400;
+      console.log('Update failed:', id, errMsg);
+      res.status(status).json(result);
     }
   } catch (error) {
     console.error('Error updating item:', error);
-    res.status(500).json({ error: 'Failed to update item' });
+    if (error && error.code === '23505') {
+      return res.status(400).json({
+        success: false,
+        error: 'Update conflicts with an existing item.',
+      });
+    }
+    res.status(500).json({ success: false, error: 'Failed to update item' });
   }
 });
 
