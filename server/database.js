@@ -23,21 +23,58 @@ function parseStoredGallons(val) {
   return Math.round(n * 2) / 2;
 }
 
-/** Calendar YYYY-MM-DD parts — avoids local TZ shifting year/month buckets. */
+const REPORT_TZ = "America/Los_Angeles";
+
+/** Today YYYY-MM-DD in Pacific (matches shop calendar). */
+function todayReportIso(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: REPORT_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/** Calendar YYYY-MM-DD parts — plain dates as written; timestamps via Pacific. */
 function calendarDateParts(d) {
   if (d == null || d === "") return null;
   const s = String(d).trim();
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) {
+  if (m && (s.length === 10 || s[10] === "T" || s[10] === " ")) {
+    if (s.length > 10 && /[T\s]\d{2}:/.test(s)) {
+      const iso = todayReportIso(new Date(s));
+      const [y, mo, day] = iso.split("-").map(Number);
+      return { year: y, month: mo, day };
+    }
     return { year: +m[1], month: +m[2], day: +m[3] };
   }
   const dt = d instanceof Date ? d : new Date(s);
   if (Number.isNaN(dt.getTime())) return null;
-  return {
-    year: dt.getUTCFullYear(),
-    month: dt.getUTCMonth() + 1,
-    day: dt.getUTCDate(),
-  };
+  // Postgres DATE values often arrive as UTC midnight — keep that calendar day.
+  if (
+    dt.getUTCHours() === 0 &&
+    dt.getUTCMinutes() === 0 &&
+    dt.getUTCSeconds() === 0 &&
+    dt.getUTCMilliseconds() === 0
+  ) {
+    return {
+      year: dt.getUTCFullYear(),
+      month: dt.getUTCMonth() + 1,
+      day: dt.getUTCDate(),
+    };
+  }
+  const iso = todayReportIso(dt);
+  const [y, mo, day] = iso.split("-").map(Number);
+  return { year: y, month: mo, day };
+}
+
+function weekMondayKey(d) {
+  const parts = calendarDateParts(d);
+  if (!parts) return "unknown";
+  const utc = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12));
+  const dow = utc.getUTCDay();
+  utc.setUTCDate(utc.getUTCDate() - ((dow + 6) % 7));
+  return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`;
 }
 
 function bucketKeyFromCalendarDate(d, trunc) {
@@ -48,7 +85,46 @@ function bucketKeyFromCalendarDate(d, trunc) {
   if (trunc === "month") {
     return `${parts.year}-${String(parts.month).padStart(2, "0")}`;
   }
+  if (trunc === "day") {
+    return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  }
+  if (trunc === "week") {
+    return weekMondayKey(d);
+  }
   return null;
+}
+
+function auditQtyGallons(details) {
+  const q = parseFloat(details?.quantityChange);
+  if (Number.isFinite(q)) return Math.abs(q);
+  const q2 = parseFloat(details?._quantityChange);
+  if (Number.isFinite(q2)) return Math.abs(q2);
+  const oldQ = parseFloat(details?.oldQuantity);
+  const newQ = parseFloat(details?.newQuantity);
+  if (Number.isFinite(oldQ) && Number.isFinite(newQ)) {
+    return Math.abs(oldQ - newQ);
+  }
+  return 0;
+}
+
+/** SQL expression: period start (date) in Pacific for a timestamptz/text column. */
+function sqlPacificBucket(expr, trunc) {
+  const localTs = `(timezone('${REPORT_TZ}', (${expr})::timestamptz))`;
+  if (trunc === "lifetime") return `'2026-01-01'::date`;
+  if (trunc === "year") return `date_trunc('year', ${localTs})::date`;
+  if (trunc === "day") return `(${localTs})::date`;
+  if (trunc === "month") return `date_trunc('month', ${localTs})::date`;
+  // week = Monday of ISO week in Pacific
+  return `date_trunc('week', ${localTs})::date`;
+}
+
+function sqlDateBucket(expr, trunc) {
+  // Calendar DATE columns (no timezone) — truncate in place.
+  if (trunc === "lifetime") return `'2026-01-01'::date`;
+  if (trunc === "year") return `date_trunc('year', (${expr})::timestamp)::date`;
+  if (trunc === "day") return `(${expr})::date`;
+  if (trunc === "month") return `date_trunc('month', (${expr})::timestamp)::date`;
+  return `date_trunc('week', (${expr})::timestamp)::date`;
 }
 
 /** Normalize API row for AP vs mixing: single boolean is_mixing (default true). */
@@ -285,6 +361,12 @@ class Database {
         timestamp TEXT NOT NULL
       )
     `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log (timestamp)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action)
+    `);
     console.log("Audit log table ready");
 
     await client.query(`
@@ -305,6 +387,9 @@ class Database {
         status TEXT NOT NULL DEFAULT 'open',
         created_by TEXT DEFAULT NULL
       )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_orders_placed_at ON orders (placed_at)
     `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS order_lines (
@@ -390,6 +475,9 @@ class Database {
         booth TEXT NOT NULL,
         user_name TEXT NOT NULL DEFAULT ''
       )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_material_usage_entry_date ON material_usage (entry_date)
     `);
     await client.query(`
       DO $$ BEGIN
@@ -1966,23 +2054,8 @@ class Database {
   static bucketKeyFromDate(d, trunc) {
     const calKey = bucketKeyFromCalendarDate(d, trunc);
     if (calKey) return calKey;
-    const dt = d instanceof Date ? d : new Date(d);
-    if (Number.isNaN(dt.getTime())) return "unknown";
-    if (trunc === "day") {
-      const parts = calendarDateParts(d);
-      if (parts) {
-        return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
-      }
-      const y = dt.getFullYear();
-      const m = String(dt.getMonth() + 1).padStart(2, "0");
-      const day = String(dt.getDate()).padStart(2, "0");
-      return `${y}-${m}-${day}`;
-    }
-    const cur = new Date(dt);
-    cur.setHours(12, 0, 0, 0);
-    const day = cur.getDay();
-    cur.setDate(cur.getDate() - ((day + 6) % 7));
-    return cur.toISOString();
+    if (Number.isNaN(new Date(d).getTime())) return "unknown";
+    return weekMondayKey(d);
   }
 
   /** All period starts from from→to (includes current incomplete month/week/day). */
@@ -2054,62 +2127,105 @@ class Database {
    */
   async getReportsSummary(fromDate, toDate, groupBy = "week") {
     const trunc =
-      groupBy === "month" ? "month" : groupBy === "day" ? "day" : "week";
-    const from = fromDate || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
-    const to = toDate || new Date().toISOString().slice(0, 10);
+      groupBy === "month"
+        ? "month"
+        : groupBy === "day"
+          ? "day"
+          : groupBy === "year"
+            ? "year"
+            : groupBy === "lifetime"
+              ? "lifetime"
+              : "week";
+    const from =
+      fromDate ||
+      todayReportIso(new Date(Date.now() - 84 * 86400000));
+    const to = toDate || todayReportIso();
 
-    const auditRows = await this.pool.query(
-      `SELECT
-         date_trunc($1, (timestamp::timestamptz)) AS bucket,
-         action,
-         details
-       FROM audit_log
-       WHERE (timestamp::timestamptz) >= $2::date
-         AND (timestamp::timestamptz) < ($3::date + interval '1 day')
-       ORDER BY bucket ASC`,
-      [trunc, from, to],
-    );
+    const auditBucket = sqlPacificBucket("timestamp", trunc);
+    const orderBucket = sqlPacificBucket("o.placed_at", trunc);
+    const usageBucket = sqlDateBucket("entry_date", trunc);
+    const usageTypeBucket = sqlDateBucket("mu.entry_date", trunc);
 
-    const orderRows = await this.pool.query(
-      `SELECT
-         date_trunc($1, (o.placed_at::timestamptz)) AS bucket,
-         COALESCE(SUM(ol.quantity), 0)::float AS order_quantity,
-         COALESCE(SUM(ol.quantity * COALESCE(i.price, 0)), 0)::float AS order_value
-       FROM orders o
-       JOIN order_lines ol ON ol.order_id = o.id
-       LEFT JOIN items i ON i.id = ol.item_id
-       WHERE (o.placed_at::timestamptz) >= $2::date
-         AND (o.placed_at::timestamptz) < ($3::date + interval '1 day')
-       GROUP BY bucket
-       ORDER BY bucket ASC`,
-      [trunc, from, to],
-    );
+    // Aggregate in SQL (much faster than shipping every audit row to Node)
+    const qtyExpr = `ABS(COALESCE(
+      NULLIF(TRIM(COALESCE(details::jsonb->>'quantityChange', '')), '')::double precision,
+      0
+    ))`;
+    const actionTypeExpr = `COALESCE(details::jsonb->>'_actionType', '')`;
 
-    const usageRows = await this.pool.query(
-      `SELECT
-         date_trunc($1, (entry_date::date)) AS bucket,
-         COALESCE(SUM(qty_gallons), 0)::float AS usage_gallons,
-         COUNT(*)::int AS usage_count
-       FROM material_usage
-       WHERE (entry_date::date) >= $2::date
-         AND (entry_date::date) < ($3::date + interval '1 day')
-       GROUP BY bucket
-       ORDER BY bucket ASC`,
-      [trunc, from, to],
-    );
-
-    const usageTypeRows = await this.pool.query(
-      `SELECT
-         date_trunc($1, (mu.entry_date::date)) AS bucket,
-         COALESCE(NULLIF(LOWER(TRIM(mu.material_type)), ''), LOWER(i.type), '') AS mat_type,
-         COALESCE(SUM(mu.qty_gallons), 0)::float AS usage_gallons
-       FROM material_usage mu
-       LEFT JOIN items i ON i.id = mu.item_id
-       WHERE (mu.entry_date::date) >= $2::date
-         AND (mu.entry_date::date) < ($3::date + interval '1 day')
-       GROUP BY bucket, mat_type`,
-      [trunc, from, to],
-    );
+    const [auditRows, orderRows, usageRows, usageTypeRows] = await Promise.all([
+      this.pool.query(
+        `SELECT
+           ${auditBucket} AS bucket,
+           SUM(
+             CASE
+               WHEN action = 'check_out'
+                 OR (action = 'update' AND ${actionTypeExpr} = 'check_out')
+               THEN ${qtyExpr}
+               ELSE 0
+             END
+           )::float AS checkout_gallons,
+           SUM(
+             CASE
+               WHEN action = 'receiving'
+                 OR (action = 'update' AND ${actionTypeExpr} = 'receiving')
+               THEN ${qtyExpr}
+               ELSE 0
+             END
+           )::float AS receiving_gallons
+         FROM audit_log
+         WHERE (timezone('${REPORT_TZ}', timestamp::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', timestamp::timestamptz))::date <= $2::date
+           AND (
+             action IN ('check_out', 'receiving')
+             OR (
+               action = 'update'
+               AND ${actionTypeExpr} IN ('check_out', 'receiving')
+             )
+           )
+         GROUP BY bucket
+         ORDER BY bucket ASC`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           ${orderBucket} AS bucket,
+           COALESCE(SUM(ol.quantity), 0)::float AS order_quantity,
+           COALESCE(SUM(ol.quantity * COALESCE(i.price, 0)), 0)::float AS order_value
+         FROM orders o
+         JOIN order_lines ol ON ol.order_id = o.id
+         LEFT JOIN items i ON i.id = ol.item_id
+         WHERE (timezone('${REPORT_TZ}', o.placed_at::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', o.placed_at::timestamptz))::date <= $2::date
+         GROUP BY bucket
+         ORDER BY bucket ASC`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           ${usageBucket} AS bucket,
+           COALESCE(SUM(qty_gallons), 0)::float AS usage_gallons,
+           COUNT(*)::int AS usage_count
+         FROM material_usage
+         WHERE (entry_date::date) >= $1::date
+           AND (entry_date::date) <= $2::date
+         GROUP BY bucket
+         ORDER BY bucket ASC`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           ${usageTypeBucket} AS bucket,
+           COALESCE(NULLIF(LOWER(TRIM(mu.material_type)), ''), LOWER(i.type), '') AS mat_type,
+           COALESCE(SUM(mu.qty_gallons), 0)::float AS usage_gallons
+         FROM material_usage mu
+         LEFT JOIN items i ON i.id = mu.item_id
+         WHERE (mu.entry_date::date) >= $1::date
+           AND (mu.entry_date::date) <= $2::date
+         GROUP BY bucket, mat_type`,
+        [from, to],
+      ),
+    ]);
 
     const bucketMap = new Map();
 
@@ -2132,8 +2248,34 @@ class Database {
 
     const formatBucketLabel = (d) => {
       if (!d) return "";
+      const key = Database.bucketKeyFromDate(d, trunc);
+      if (trunc === "lifetime" || key === "lifetime") return "Lifetime";
+      if (trunc === "year" && /^\d{4}$/.test(String(key))) return String(key);
+      if (trunc === "month" && /^\d{4}-\d{2}$/.test(key)) {
+        const [y, mo] = key.split("-");
+        const dt = new Date(`${y}-${mo}-01T12:00:00`);
+        return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      }
+      if (trunc === "day" && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+        const dt = new Date(`${key}T12:00:00`);
+        return dt.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
+      if (trunc === "week" && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+        const start = new Date(`${key}T12:00:00`);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        return `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+      }
       const dt = d instanceof Date ? d : new Date(d);
       if (Number.isNaN(dt.getTime())) return String(d);
+      if (trunc === "year") {
+        return String(dt.getFullYear());
+      }
       if (trunc === "month") {
         return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
       }
@@ -2159,25 +2301,8 @@ class Database {
 
     for (const row of auditRows.rows) {
       const b = rowBucket(row.bucket);
-      let details = row.details;
-      if (typeof details === "string") {
-        try {
-          details = JSON.parse(details || "{}");
-        } catch {
-          details = {};
-        }
-      }
-      const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
-      const action = row.action;
-      const actionType = details?._actionType;
-      const isCheckout =
-        action === "check_out" ||
-        (action === "update" && actionType === "check_out");
-      const isReceiving =
-        action === "receiving" ||
-        (action === "update" && actionType === "receiving");
-      if (isCheckout) b.checkoutGallons += qty;
-      if (isReceiving) b.receivingGallons += qty;
+      b.checkoutGallons += parseFloat(row.checkout_gallons) || 0;
+      b.receivingGallons += parseFloat(row.receiving_gallons) || 0;
     }
 
     for (const row of orderRows.rows) {
@@ -2261,6 +2386,144 @@ class Database {
       bucketDetails,
       totals,
     };
+  }
+
+  /**
+   * Per-item activity for Reports color search (aggregated in SQL).
+   */
+  async getReportsItemActivity(fromDate, toDate) {
+    const from =
+      fromDate || todayReportIso(new Date(Date.now() - 84 * 86400000));
+    const to = toDate || todayReportIso();
+
+    const qtyExpr = `ABS(COALESCE(
+      NULLIF(TRIM(COALESCE(details::jsonb->>'quantityChange', '')), '')::double precision,
+      0
+    ))`;
+    const actionTypeExpr = `COALESCE(details::jsonb->>'_actionType', '')`;
+
+    const [auditRows, orderRows, usageRows, items] = await Promise.all([
+      this.pool.query(
+        `SELECT
+           TRIM("itemId") AS item_id,
+           SUM(
+             CASE
+               WHEN action = 'check_out'
+                 OR (action = 'update' AND ${actionTypeExpr} = 'check_out')
+               THEN ${qtyExpr}
+               ELSE 0
+             END
+           )::float AS checkout_gallons,
+           SUM(
+             CASE
+               WHEN action = 'receiving'
+                 OR (action = 'update' AND ${actionTypeExpr} = 'receiving')
+               THEN ${qtyExpr}
+               ELSE 0
+             END
+           )::float AS receiving_gallons
+         FROM audit_log
+         WHERE (timezone('${REPORT_TZ}', timestamp::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', timestamp::timestamptz))::date <= $2::date
+           AND TRIM(COALESCE("itemId", '')) <> ''
+           AND (
+             action IN ('check_out', 'receiving')
+             OR (
+               action = 'update'
+               AND ${actionTypeExpr} IN ('check_out', 'receiving')
+             )
+           )
+         GROUP BY TRIM("itemId")`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           TRIM(ol.item_id) AS item_id,
+           COALESCE(SUM(ol.quantity), 0)::float AS order_quantity,
+           COALESCE(SUM(ol.quantity * COALESCE(i.price, 0)), 0)::float AS order_value
+         FROM orders o
+         JOIN order_lines ol ON ol.order_id = o.id
+         LEFT JOIN items i ON i.id = ol.item_id
+         WHERE (timezone('${REPORT_TZ}', o.placed_at::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', o.placed_at::timestamptz))::date <= $2::date
+           AND TRIM(COALESCE(ol.item_id, '')) <> ''
+         GROUP BY TRIM(ol.item_id)`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           TRIM(item_id) AS item_id,
+           COALESCE(SUM(qty_gallons), 0)::float AS usage_gallons
+         FROM material_usage
+         WHERE (entry_date::date) >= $1::date
+           AND (entry_date::date) <= $2::date
+           AND TRIM(COALESCE(item_id, '')) <> ''
+         GROUP BY TRIM(item_id)`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT id, name, type, external_code, price FROM items ORDER BY name ASC NULLS LAST`,
+      ),
+    ]);
+
+    const stats = new Map();
+    const ensure = (itemId) => {
+      const id = String(itemId || "").trim();
+      if (!id) return null;
+      if (!stats.has(id)) {
+        stats.set(id, {
+          itemId: id,
+          name: id,
+          type: "",
+          external_code: "",
+          checkoutGallons: 0,
+          receivingGallons: 0,
+          orderQuantity: 0,
+          orderValue: 0,
+          usageGallons: 0,
+        });
+      }
+      return stats.get(id);
+    };
+
+    for (const item of items.rows) {
+      const entry = ensure(item.id);
+      if (!entry) continue;
+      entry.name = item.name || item.id;
+      entry.type = item.type || "";
+      entry.external_code = item.external_code || "";
+    }
+
+    for (const row of auditRows.rows) {
+      const entry = ensure(row.item_id);
+      if (!entry) continue;
+      entry.checkoutGallons += parseFloat(row.checkout_gallons) || 0;
+      entry.receivingGallons += parseFloat(row.receiving_gallons) || 0;
+    }
+    for (const row of orderRows.rows) {
+      const entry = ensure(row.item_id);
+      if (!entry) continue;
+      entry.orderQuantity += parseFloat(row.order_quantity) || 0;
+      entry.orderValue += parseFloat(row.order_value) || 0;
+    }
+    for (const row of usageRows.rows) {
+      const entry = ensure(row.item_id);
+      if (!entry) continue;
+      entry.usageGallons += parseFloat(row.usage_gallons) || 0;
+    }
+
+    return [...stats.values()]
+      .map((row) => ({
+        ...row,
+        checkoutGallons: Math.round(row.checkoutGallons * 10) / 10,
+        receivingGallons: Math.round(row.receivingGallons * 10) / 10,
+        orderQuantity: Math.round(row.orderQuantity * 10) / 10,
+        orderValue: Math.round(row.orderValue * 100) / 100,
+        usageGallons: Math.round(row.usageGallons * 10) / 10,
+      }))
+      .sort((a, b) =>
+        String(a.name || a.itemId).localeCompare(String(b.name || b.itemId)),
+      );
   }
 
   close() {

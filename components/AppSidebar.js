@@ -1,5 +1,5 @@
-import React from "react";
-import { View, StyleSheet, ScrollView } from "react-native";
+import React, { useRef } from "react";
+import { View, StyleSheet, ScrollView, Animated, Platform } from "react-native";
 import {
   Button,
   Text,
@@ -9,27 +9,53 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import NotificationsBell from "./NotificationsBell";
+import FadeIn from "./FadeIn";
 import version from "../version";
+
+const useNative = Platform.OS !== "web";
 
 function NavButton({ label, icon, onPress, active }) {
   const theme = useTheme();
+  const press = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = () => {
+    Animated.spring(press, {
+      toValue: 0.97,
+      useNativeDriver: useNative,
+      speed: 40,
+      bounciness: 0,
+    }).start();
+  };
+  const onPressOut = () => {
+    Animated.spring(press, {
+      toValue: 1,
+      useNativeDriver: useNative,
+      speed: 40,
+      bounciness: 4,
+    }).start();
+  };
+
   return (
-    <Button
-      mode="outlined"
-      onPress={onPress}
-      icon={icon}
-      style={[
-        styles.navButton,
-        active && {
-          backgroundColor: theme.colors.surfaceContainerHighest,
-          borderColor: theme.colors.primary,
-        },
-      ]}
-      textColor={active ? theme.colors.primary : theme.colors.onSurface}
-      contentStyle={styles.navButtonContent}
-    >
-      {label}
-    </Button>
+    <Animated.View style={{ transform: [{ scale: press }] }}>
+      <Button
+        mode="outlined"
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        icon={icon}
+        style={[
+          styles.navButton,
+          active && {
+            backgroundColor: theme.colors.surfaceContainerHighest,
+            borderColor: theme.colors.primary,
+          },
+        ]}
+        textColor={active ? theme.colors.primary : theme.colors.onSurface}
+        contentStyle={styles.navButtonContent}
+      >
+        {label}
+      </Button>
+    </Animated.View>
   );
 }
 
@@ -63,6 +89,7 @@ export default function AppSidebar({
     currentScreen === "orders" && ordersInitialFilter === filter;
 
   return (
+    <FadeIn fromY={8} duration={320} style={styles.fadeRoot}>
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.scrollContent}
@@ -201,10 +228,12 @@ export default function AppSidebar({
         </Text>
       </View>
     </ScrollView>
+    </FadeIn>
   );
 }
 
 const styles = StyleSheet.create({
+  fadeRoot: { flex: 1 },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24, gap: 6 },
   headerRow: {

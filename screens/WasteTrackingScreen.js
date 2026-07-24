@@ -459,10 +459,10 @@ export default function WasteTrackingScreen({
                         {formatMonthDayYear(r.entry_date)} · {r.user_name || "—"}
                       </Text>
                       <Text
-                        style={{
-                          color: theme.colors.onSurfaceVariant,
-                          fontSize: 12,
-                        }}
+                        style={[
+                          styles.recordMeta,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
                       >
                         Paint {paint} · Clear {clear} · Primer {primer} ·
                         Acetone {acetone} · Total {total} gal
@@ -571,4 +571,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   recordTitle: { fontSize: 14, fontWeight: "600" },
+  recordMeta: { fontSize: 12 },
 });

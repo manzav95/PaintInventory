@@ -4,6 +4,10 @@ import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
 import showAlert from './utils/showAlert';
+import { injectWebMotionStyles } from './utils/injectWebMotionStyles';
+import ScreenTransition from './components/ScreenTransition';
+import FadeOverlay from './components/FadeOverlay';
+import FadeIn from './components/FadeIn';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -55,6 +59,8 @@ const NEUTRAL_LIGHT = {
 
 const lightTheme = {
   ...MD3LightTheme,
+  // MD3 Button radius = roundness * 5 (default 4 → 20 pill). Soft rectangular corners.
+  roundness: 2,
   colors: {
     ...MD3LightTheme.colors,
     primary: '#6f95ab',
@@ -80,6 +86,7 @@ const lightTheme = {
 
 const darkTheme = {
   ...MD3DarkTheme,
+  roundness: 2,
   colors: {
     ...MD3DarkTheme.colors,
     primary: '#6f95ab',
@@ -205,6 +212,9 @@ export default function App() {
     loadInventory();
     loadUser();
     loadThemePreference();
+    if (Platform.OS === 'web') {
+      injectWebMotionStyles();
+    }
   }, []);
 
   useEffect(() => {
@@ -1448,7 +1458,11 @@ export default function App() {
     }
   };
 
-  const mainContent = renderScreen();
+  const mainContent = (
+    <ScreenTransition screenKey={`${userName ? 'in' : 'out'}:${currentScreen}`}>
+      {renderScreen()}
+    </ScreenTransition>
+  );
   const shellWrapped =
     embeddedInShell && userName ? (
       <AppShell
@@ -1512,24 +1526,20 @@ export default function App() {
       >
         <StatusBar style="auto" />
         {shellWrapped}
-        {isActionLoading && (
-          <View style={[styles.loadingOverlay, { pointerEvents: "auto" }]}>
-            <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color={paperTheme.colors.primary} />
-              {!!actionLoadingMessage && (
-                <Text style={styles.loadingText}>{actionLoadingMessage}</Text>
-              )}
-            </View>
+        <FadeOverlay visible={isActionLoading} style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color={paperTheme.colors.primary} />
+            {!!actionLoadingMessage && (
+              <Text style={styles.loadingText}>{actionLoadingMessage}</Text>
+            )}
           </View>
-        )}
-        {scanLookupLoading && (
-          <View style={[styles.loadingOverlay, { pointerEvents: "auto" }]}>
-            <View style={styles.loadingCard}>
-              <ActivityIndicator size="large" color={paperTheme.colors.primary} />
-              <Text style={styles.loadingText}>Looking up material…</Text>
-            </View>
+        </FadeOverlay>
+        <FadeOverlay visible={scanLookupLoading} style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color={paperTheme.colors.primary} />
+            <Text style={styles.loadingText}>Looking up material…</Text>
           </View>
-        )}
+        </FadeOverlay>
         <Modal
           visible={showAdminItemDialog}
           transparent
@@ -1541,14 +1551,15 @@ export default function App() {
             activeOpacity={1}
             onPress={() => setShowAdminItemDialog(false)}
           >
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={(e) => e.stopPropagation()}
-              style={[
-                styles.adminDialogCard,
-                { backgroundColor: paperTheme.colors.surfaceContainerHighest },
-              ]}
-            >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={(e) => e.stopPropagation()}
+            style={[
+              styles.adminDialogCard,
+              { backgroundColor: paperTheme.colors.surfaceContainerHighest },
+            ]}
+          >
+            <FadeIn fromY={8} duration={220}>
               <Text style={[styles.adminDialogTitle, { color: paperTheme.colors.onSurface }]}>
                 {selectedItem?.name || selectedItem?.id || "Item"}
               </Text>
@@ -1584,7 +1595,8 @@ export default function App() {
                   Cancel
                 </Button>
               </View>
-            </TouchableOpacity>
+            </FadeIn>
+          </TouchableOpacity>
           </TouchableOpacity>
         </Modal>
       </View>
@@ -1638,15 +1650,9 @@ const styles = StyleSheet.create({
     flex: 0.4,
   },
   loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 1000,
   },
   loadingCard: {
     paddingVertical: 24,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -29,6 +29,7 @@ import {
   CUSTOM_COLORS_EARLIEST,
   clampCustomColorsFrom,
   resolveCustomColorsRange,
+  todayReportIso,
 } from "../utils/reportBuckets";
 import { itemMatchesSearch } from "../utils/reportSearch";
 import {
@@ -39,7 +40,7 @@ import {
 function defaultFromDate() {
   const d = new Date();
   d.setDate(d.getDate() - 84);
-  const rolling = d.toISOString().slice(0, 10);
+  const rolling = todayReportIso(d);
   return rolling < CUSTOM_COLORS_EARLIEST ? CUSTOM_COLORS_EARLIEST : rolling;
 }
 
@@ -51,7 +52,7 @@ function groupByChartLabel(groupBy) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return todayReportIso();
 }
 
 function bucketAt(summary, index) {
@@ -101,12 +102,17 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
   const [selectedBucketIndex, setSelectedBucketIndex] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [itemActivity, setItemActivity] = useState([]);
+  const [itemActivityLoading, setItemActivityLoading] = useState(false);
   const [selectedSearchItemId, setSelectedSearchItemId] = useState(null);
   const [itemTimeline, setItemTimeline] = useState(null);
   const [itemTimelineLoading, setItemTimelineLoading] = useState(false);
   const [selectedItemBucketIndex, setSelectedItemBucketIndex] = useState(null);
+  const loadGenRef = useRef(0);
 
   const selectGroupBy = (next) => {
+    if (next === groupBy) return;
+    setLoading(true);
+    setError(null);
     setGroupBy(next);
     if (next === "lifetime" || next === "year") {
       setFromDate(CUSTOM_COLORS_EARLIEST);
@@ -127,34 +133,64 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
   );
 
   const load = useCallback(async (showRefresh = false) => {
+    const gen = ++loadGenRef.current;
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
     try {
       const range = resolveCustomColorsRange(fromDate, toDate, groupBy);
-      const [data, items] = await Promise.all([
-        ReportService.getSummary({
-          from: range.from,
-          to: range.to,
-          groupBy,
-        }),
-        ReportService.getItemActivity({ from: range.from, to: range.to }),
-      ]);
+      // Charts only — color search loads on demand (much faster filter switches)
+      const data = await ReportService.getSummary({
+        from: range.from,
+        to: range.to,
+        groupBy,
+      });
+      if (gen !== loadGenRef.current) return;
       setSummary(data);
-      setItemActivity(Array.isArray(items) ? items : []);
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(e?.message || "Failed to load reports");
-      setSummary(null);
-      setItemActivity([]);
+      // Keep prior summary mounted so layout does not collapse
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (gen === loadGenRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [fromDate, toDate, groupBy]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Lazy-load per-item stats only when searching
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setItemActivity([]);
+      setItemActivityLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setItemActivityLoading(true);
+    const range = resolveCustomColorsRange(fromDate, toDate, groupBy);
+    const timer = setTimeout(() => {
+      ReportService.getItemActivity({ from: range.from, to: range.to })
+        .then((items) => {
+          if (!cancelled) setItemActivity(Array.isArray(items) ? items : []);
+        })
+        .catch(() => {
+          if (!cancelled) setItemActivity([]);
+        })
+        .finally(() => {
+          if (!cancelled) setItemActivityLoading(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, fromDate, toDate, groupBy]);
 
   useEffect(() => {
     const len = summary?.buckets?.length || 0;
@@ -179,33 +215,44 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
       : "All periods";
 
   const metricItems = useMemo(
-    () => [
-      {
-        id: "checkout",
-        label: "Checked out (gal)",
-        value: Math.round(periodStats.checkoutGallons || 0).toLocaleString(),
-        color: theme.colors.primary,
-      },
-      {
-        id: "receiving",
-        label: "Received (gal)",
-        value: Math.round(periodStats.receivingGallons || 0).toLocaleString(),
-        color: "#64b5f6",
-      },
-      {
-        id: "orderQty",
-        label: "Ordered (qty)",
-        value: Math.round(periodStats.orderQuantity || 0).toLocaleString(),
-        color: "#81c784",
-      },
-      {
-        id: "orderVal",
-        label: "Est. order value",
-        value: `$${Math.round(periodStats.orderValue || 0).toLocaleString()}`,
-        color: "#ffb74d",
-      },
-    ],
-    [periodStats, theme.colors.primary],
+    () => {
+      const dash = loading && !summary;
+      return [
+        {
+          id: "checkout",
+          label: "Checked out (gal)",
+          value: dash
+            ? "—"
+            : Math.round(periodStats.checkoutGallons || 0).toLocaleString(),
+          color: theme.colors.primary,
+        },
+        {
+          id: "receiving",
+          label: "Received (gal)",
+          value: dash
+            ? "—"
+            : Math.round(periodStats.receivingGallons || 0).toLocaleString(),
+          color: "#64b5f6",
+        },
+        {
+          id: "orderQty",
+          label: "Ordered (qty)",
+          value: dash
+            ? "—"
+            : Math.round(periodStats.orderQuantity || 0).toLocaleString(),
+          color: "#81c784",
+        },
+        {
+          id: "orderVal",
+          label: "Est. order value",
+          value: dash
+            ? "—"
+            : `$${Math.round(periodStats.orderValue || 0).toLocaleString()}`,
+          color: "#ffb74d",
+        },
+      ];
+    },
+    [periodStats, theme.colors.primary, loading, summary],
   );
 
   const searchResults = useMemo(() => {
@@ -327,34 +374,21 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
 
         <ToolbarCard>
           <View style={styles.toolbarRow}>
-            <Button
-              mode={groupBy === "week" ? "contained" : "outlined"}
-              compact
-              onPress={() => selectGroupBy("week")}
-            >
-              Week
-            </Button>
-            <Button
-              mode={groupBy === "month" ? "contained" : "outlined"}
-              compact
-              onPress={() => selectGroupBy("month")}
-            >
-              Month
-            </Button>
-            <Button
-              mode={groupBy === "year" ? "contained" : "outlined"}
-              compact
-              onPress={() => selectGroupBy("year")}
-            >
-              Year
-            </Button>
-            <Button
-              mode={groupBy === "lifetime" ? "contained" : "outlined"}
-              compact
-              onPress={() => selectGroupBy("lifetime")}
-            >
-              Lifetime
-            </Button>
+            {[
+              ["week", "Week"],
+              ["month", "Month"],
+              ["year", "Year"],
+              ["lifetime", "Lifetime"],
+            ].map(([value, label]) => (
+              <Button
+                key={value}
+                mode={groupBy === value ? "contained" : "outlined"}
+                compact
+                onPress={() => selectGroupBy(value)}
+              >
+                {label}
+              </Button>
+            ))}
           </View>
           <View style={styles.dateRow}>
             <View style={styles.dateField}>
@@ -367,14 +401,26 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                     ? CUSTOM_COLORS_EARLIEST
                     : undefined
                 }
-                disabled={groupBy === "year" || groupBy === "lifetime"}
+                disabled={
+                  loading || groupBy === "year" || groupBy === "lifetime"
+                }
               />
             </View>
             <View style={styles.dateField}>
               <Text style={styles.dateLabel}>To</Text>
-              <DateField value={toDate} onChange={setToDate} />
+              <DateField
+                value={toDate}
+                onChange={setToDate}
+                disabled={loading}
+              />
             </View>
-            <Button mode="outlined" onPress={() => load()} compact>
+            <Button
+              mode="outlined"
+              onPress={() => load()}
+              compact
+              loading={loading}
+              disabled={loading}
+            >
               Apply
             </Button>
           </View>
@@ -421,132 +467,152 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
           initialGroupBy={groupBy}
         />
 
-        {loading && !summary ? (
-          <ActivityIndicator style={styles.loader} />
-        ) : error ? (
-          <Text style={{ color: theme.colors.error }}>{error}</Text>
-        ) : (
-          <>
-            {searchQuery.trim() ? (
-              <Card
+        <View style={styles.statusRow}>
+          {loading ? (
+            <>
+              <ActivityIndicator size="small" />
+              <Text
                 style={[
-                  styles.searchCard,
-                  {
-                    backgroundColor: theme.colors.surfaceContainerHighest,
-                    borderColor: theme.colors.outlineVariant,
-                  },
+                  styles.statusText,
+                  { color: theme.colors.onSurfaceVariant },
                 ]}
-                mode="outlined"
               >
-                <Card.Content>
-                  <Text
-                    style={[
-                      styles.searchTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    Color search · {reportRange.from} to {reportRange.to}
+                Updating {groupByChartLabel(groupBy)}…
+              </Text>
+            </>
+          ) : error ? (
+            <Text style={[styles.statusText, { color: theme.colors.error }]}>
+              {error}
+            </Text>
+          ) : null}
+        </View>
+
+        {searchQuery.trim() ? (
+          <Card
+            style={[
+              styles.searchCard,
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+            mode="outlined"
+          >
+            <Card.Content style={styles.searchCardContent}>
+              <Text
+                style={[
+                  styles.searchTitle,
+                  { color: theme.colors.onSurface },
+                ]}
+              >
+                Color search · {reportRange.from} to {reportRange.to}
+              </Text>
+              {itemActivityLoading ? (
+                <View style={styles.searchPlaceholder}>
+                  <ActivityIndicator />
+                </View>
+              ) : searchResults.length === 0 ? (
+                <View style={styles.searchPlaceholder}>
+                  <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                    No items match "{searchQuery.trim()}".
                   </Text>
-                  {searchResults.length === 0 ? (
-                    <Text
-                      style={{ color: theme.colors.onSurfaceVariant }}
+                </View>
+              ) : (
+                searchResults.map((item, idx) => {
+                  const typeLabel = getMaterialTypeLabel(item.type);
+                  const typeColor = getMaterialTypeColor(item.type, theme);
+                  const selected = selectedSearchItemId === item.itemId;
+                  return (
+                    <Pressable
+                      key={item.itemId}
+                      onPress={() => setSelectedSearchItemId(item.itemId)}
+                      style={({ pressed }) => [
+                        styles.searchRow,
+                        idx > 0 && {
+                          borderTopWidth: 1,
+                          borderTopColor: theme.colors.outlineVariant,
+                        },
+                        selected && {
+                          backgroundColor: theme.colors.primaryContainer,
+                        },
+                        pressed && { opacity: 0.85 },
+                      ]}
                     >
-                      No items match "{searchQuery.trim()}".
-                    </Text>
-                  ) : (
-                    searchResults.map((item, idx) => {
-                      const typeLabel = getMaterialTypeLabel(item.type);
-                      const typeColor = getMaterialTypeColor(item.type, theme);
-                      const selected =
-                        selectedSearchItemId === item.itemId;
-                      return (
-                        <Pressable
-                          key={item.itemId}
-                          onPress={() => setSelectedSearchItemId(item.itemId)}
-                          style={({ pressed }) => [
-                            styles.searchRow,
-                            idx > 0 && {
-                              borderTopWidth: 1,
-                              borderTopColor: theme.colors.outlineVariant,
-                            },
-                            selected && {
-                              backgroundColor: theme.colors.primaryContainer,
-                            },
-                            pressed && { opacity: 0.85 },
+                      <View style={styles.searchRowMain}>
+                        <Text
+                          style={[
+                            styles.searchItemName,
+                            { color: theme.colors.onSurface },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.name || item.itemId}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.searchItemMeta,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.itemId}
+                          {item.external_code
+                            ? ` · ${item.external_code}`
+                            : ""}
+                          {typeLabel ? (
+                            <Text style={{ color: typeColor }}>
+                              {" "}
+                              · {typeLabel}
+                            </Text>
+                          ) : null}
+                        </Text>
+                      </View>
+                      <View style={styles.searchStats}>
+                        <Text
+                          style={[
+                            styles.searchStat,
+                            { color: theme.colors.onSurfaceVariant },
                           ]}
                         >
-                          <View style={styles.searchRowMain}>
-                            <Text
-                              style={[
-                                styles.searchItemName,
-                                { color: theme.colors.onSurface },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {item.name || item.itemId}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.searchItemMeta,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {item.itemId}
-                              {item.external_code
-                                ? ` · ${item.external_code}`
-                                : ""}
-                              {typeLabel ? (
-                                <Text style={{ color: typeColor }}>
-                                  {" "}
-                                  · {typeLabel}
-                                </Text>
-                              ) : null}
-                            </Text>
-                          </View>
-                          <View style={styles.searchStats}>
-                            <Text
-                              style={[
-                                styles.searchStat,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              Out {formatGal(item.checkoutGallons)} gal
-                            </Text>
-                            <Text
-                              style={[
-                                styles.searchStat,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              In {formatGal(item.receivingGallons)} gal
-                            </Text>
-                            <Text
-                              style={[
-                                styles.searchStat,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              Ord {formatGal(item.orderQuantity)} gal
-                            </Text>
-                            <Text
-                              style={[
-                                styles.searchStat,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              Use {formatGal(item.usageGallons)} gal
-                            </Text>
-                          </View>
-                        </Pressable>
-                      );
-                    })
-                  )}
-                  {selectedSearchItemId && itemTimelineLoading ? (
-                    <ActivityIndicator style={styles.itemTimelineLoader} />
-                  ) : null}
-                  {selectedSearchItemId && itemTimeline && !itemTimelineLoading ? (
-                    <View style={styles.itemTimelineSection}>
+                          Out {formatGal(item.checkoutGallons)} gal
+                        </Text>
+                        <Text
+                          style={[
+                            styles.searchStat,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          In {formatGal(item.receivingGallons)} gal
+                        </Text>
+                        <Text
+                          style={[
+                            styles.searchStat,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Ord {formatGal(item.orderQuantity)} gal
+                        </Text>
+                        <Text
+                          style={[
+                            styles.searchStat,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Use {formatGal(item.usageGallons)} gal
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              )}
+              {selectedSearchItemId ? (
+                <View style={styles.itemTimelineSection}>
+                  {itemTimelineLoading || !itemTimeline ? (
+                    <View style={styles.itemTimelinePlaceholder}>
+                      <ActivityIndicator />
+                    </View>
+                  ) : (
+                    <>
                       <Text
                         style={[
                           styles.itemTimelineTitle,
@@ -600,83 +666,88 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                           {...itemChartProps}
                         />
                       </View>
-                    </View>
-                  ) : null}
-                </Card.Content>
-              </Card>
-            ) : null}
+                    </>
+                  )}
+                </View>
+              ) : null}
+            </Card.Content>
+          </Card>
+        ) : null}
 
-            <Text
-              style={[
-                styles.periodBanner,
-                { color: theme.colors.onSurface },
-              ]}
-            >
-              Stats for: {periodLabel}
-            </Text>
-            <Text
-              style={[
-                styles.periodHint,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Tap any chart point to view that period's totals. Week, month,
-              year, and lifetime groupings show different period values.
-            </Text>
-            <MetricStrip items={metricItems} />
-            <Text
-              style={[
-                styles.estimateNote,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Order value is estimated from current item prices × line quantities.
-            </Text>
-            <View style={[styles.chartGrid, isWide && styles.chartGridWide]}>
-              <Card style={chartCardStyle} mode="outlined">
-                <Card.Content style={styles.chartCardContent}>
-                  <SimpleLineChart
-                    title="Gallons checked out"
-                    data={summary?.checkoutGallons || []}
-                    color={theme.colors.primary}
-                    {...chartProps}
-                  />
-                </Card.Content>
-              </Card>
-              <Card style={chartCardStyle} mode="outlined">
-                <Card.Content style={styles.chartCardContent}>
-                  <SimpleLineChart
-                    title="Gallons received"
-                    data={summary?.receivingGallons || []}
-                    color="#64b5f6"
-                    {...chartProps}
-                  />
-                </Card.Content>
-              </Card>
-              <Card style={chartCardStyle} mode="outlined">
-                <Card.Content style={styles.chartCardContent}>
-                  <SimpleLineChart
-                    title="Order quantity"
-                    data={summary?.orderQuantity || []}
-                    color="#81c784"
-                    {...chartProps}
-                  />
-                </Card.Content>
-              </Card>
-              <Card style={chartCardStyle} mode="outlined">
-                <Card.Content style={styles.chartCardContent}>
-                  <SimpleLineChart
-                    title="Est. order value ($)"
-                    data={summary?.orderValue || []}
-                    color="#ffb74d"
-                    currency
-                    {...chartProps}
-                  />
-                </Card.Content>
-              </Card>
-            </View>
-          </>
-        )}
+        <View
+          style={styles.reportBody}
+          pointerEvents={loading ? "none" : "auto"}
+        >
+          <Text
+            style={[
+              styles.periodBanner,
+              { color: theme.colors.onSurface },
+            ]}
+          >
+            Stats for: {loading && !summary ? "—" : periodLabel}
+          </Text>
+          <Text
+            style={[
+              styles.periodHint,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Tap any chart point to view that period's totals. Week, month,
+            year, and lifetime groupings show different period values.
+          </Text>
+          <MetricStrip items={metricItems} />
+          <Text
+            style={[
+              styles.estimateNote,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Order value is estimated from current item prices × line quantities.
+          </Text>
+          <View style={[styles.chartGrid, isWide && styles.chartGridWide]}>
+            <Card style={chartCardStyle} mode="outlined">
+              <Card.Content style={styles.chartCardContent}>
+                <SimpleLineChart
+                  title="Gallons checked out"
+                  data={summary?.checkoutGallons || []}
+                  color={theme.colors.primary}
+                  {...chartProps}
+                />
+              </Card.Content>
+            </Card>
+            <Card style={chartCardStyle} mode="outlined">
+              <Card.Content style={styles.chartCardContent}>
+                <SimpleLineChart
+                  title="Gallons received"
+                  data={summary?.receivingGallons || []}
+                  color="#64b5f6"
+                  {...chartProps}
+                />
+              </Card.Content>
+            </Card>
+            <Card style={chartCardStyle} mode="outlined">
+              <Card.Content style={styles.chartCardContent}>
+                <SimpleLineChart
+                  title="Order quantity"
+                  data={summary?.orderQuantity || []}
+                  color="#81c784"
+                  {...chartProps}
+                />
+              </Card.Content>
+            </Card>
+            <Card style={chartCardStyle} mode="outlined">
+              <Card.Content style={styles.chartCardContent}>
+                <SimpleLineChart
+                  title="Est. order value ($)"
+                  data={summary?.orderValue || []}
+                  color="#ffb74d"
+                  currency
+                  {...chartProps}
+                />
+              </Card.Content>
+            </Card>
+          </View>
+        </View>
       </ScrollView>
     </View>
   );
@@ -704,10 +775,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 16,
   },
+  searchCardContent: {
+    minHeight: 72,
+  },
+  searchPlaceholder: {
+    minHeight: 56,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    paddingVertical: 12,
+  },
   searchTitle: {
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 12,
+  },
+  statusRow: {
+    minHeight: 28,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusText: {
+    fontSize: 13,
+  },
+  reportBody: {
+    minHeight: 520,
+  },
+  itemTimelinePlaceholder: {
+    minHeight: 220,
+    justifyContent: "center",
+    alignItems: "center",
   },
   searchRow: {
     flexDirection: "row",
@@ -756,6 +854,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   loader: { marginTop: 24 },
+  loadingBlock: {
+    marginTop: 32,
+    marginBottom: 24,
+    alignItems: "center",
+    gap: 12,
+    minHeight: 120,
+    justifyContent: "center",
+  },
+  loadingText: {
+    fontSize: 14,
+  },
   periodBanner: {
     fontSize: 16,
     fontWeight: "700",
@@ -776,6 +885,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flex: 1,
     minWidth: 280,
+    minHeight: 280,
   },
   chartCardWide: {
     minWidth: "48%",
@@ -785,5 +895,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     flex: 1,
+    minHeight: 260,
   },
 });

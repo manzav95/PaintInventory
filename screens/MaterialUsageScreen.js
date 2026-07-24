@@ -16,12 +16,10 @@ import {
   Text,
   TextInput,
   Button,
-  Title,
   useTheme,
   Dialog,
   Portal,
   ActivityIndicator,
-  IconButton,
   Checkbox,
 } from "react-native-paper";
 import DateField from "../components/DateField";
@@ -287,6 +285,13 @@ export default function MaterialUsageScreen({
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
+  const surfaceCardStyle = [
+    styles.card,
+    {
+      backgroundColor: theme.colors.surfaceContainerHighest,
+      borderColor: theme.colors.outlineVariant,
+    },
+  ];
 
   const now = useMemo(() => new Date(), []);
   const [entryDate, setEntryDate] = useState(() => formatDateForInput(now));
@@ -755,14 +760,10 @@ export default function MaterialUsageScreen({
         </View>
       </Modal>
       <View
-        style={[styles.container, { backgroundColor: theme.colors.background }]}
+        style={[styles.root, { backgroundColor: theme.colors.background }]}
       >
         <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[
-            styles.scrollContent,
-            isDesktop && styles.scrollContentDesktop,
-          ]}
+          contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
@@ -776,21 +777,14 @@ export default function MaterialUsageScreen({
             title="Material Usage"
             onBack={onBack}
             embeddedInShell={embeddedInShell}
-            actions={
-              <IconButton
-                icon="refresh"
-                size={24}
-                onPress={() => {
-                  setRefreshing(true);
-                  loadLogs();
-                }}
-                iconColor={theme.colors.primary}
-              />
-            }
           />
-          <Card style={styles.card}>
-            <Card.Content>
-              <Title style={styles.cardTitle}>Log mix</Title>
+          <Card style={surfaceCardStyle} mode="outlined">
+            <Card.Content style={styles.form}>
+              <Text
+                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+              >
+                Log mix
+              </Text>
               <View style={styles.row}>
                 <DateField
                   label="Date"
@@ -991,8 +985,22 @@ export default function MaterialUsageScreen({
                 />
                 {needsCatalyst && (
                   <View style={[styles.halfInput, styles.catalystDisplay]}>
-                    <Text style={styles.catalystLabel}>Catalyst (4%)</Text>
-                    <Text style={styles.catalystValue}>{catalystOz} oz</Text>
+                    <Text
+                      style={[
+                        styles.catalystLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Catalyst (4%)
+                    </Text>
+                    <Text
+                      style={[
+                        styles.catalystValue,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      {catalystOz} oz
+                    </Text>
                   </View>
                 )}
               </View>
@@ -1003,13 +1011,23 @@ export default function MaterialUsageScreen({
                   color={theme.colors.primary}
                 />
                 <Text
-                  style={styles.cupGunLabel}
+                  style={[
+                    styles.cupGunLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
                   onPress={() => setCupGun((prev) => !prev)}
                 >
                   Cup gun?
                 </Text>
               </View>
-              <Text style={styles.statLabel}>Booth</Text>
+              <Text
+                style={[
+                  styles.fieldLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Booth
+              </Text>
               <View style={styles.buttonRow}>
                 {BOOTH_OPTIONS.map((opt) => (
                   <Button
@@ -1017,36 +1035,49 @@ export default function MaterialUsageScreen({
                     mode={booth === opt.value ? "contained" : "outlined"}
                     onPress={() => setBooth(opt.value)}
                     style={styles.filterButton}
+                    compact
                   >
                     {opt.label}
                   </Button>
                 ))}
               </View>
-              <Button
-                mode="contained"
-                onPress={handleSubmit}
-                disabled={!canSubmit || submitting}
-                loading={submitting}
-                style={styles.submitBtn}
-                icon="send"
-              >
-                Submit
-              </Button>
+              <View style={styles.actions}>
+                <Button
+                  mode="contained"
+                  onPress={handleSubmit}
+                  disabled={!canSubmit || submitting}
+                  loading={submitting}
+                  compact
+                  icon="send"
+                >
+                  Submit
+                </Button>
+              </View>
             </Card.Content>
           </Card>
 
-          <Card style={styles.card}>
-            <Card.Content>
-              <Title style={styles.cardTitle}>
+          <Card style={surfaceCardStyle} mode="outlined">
+            <Card.Content style={styles.form}>
+              <Text
+                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+              >
                 {isAdmin ? "Transaction log" : "Today's usage"} ·{" "}
                 {formatMonthDayYear(todayPacificIso())}
-              </Title>
-              <Text style={styles.statLabel}>Filter by booth</Text>
+              </Text>
+              <Text
+                style={[
+                  styles.fieldLabel,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Filter by booth
+              </Text>
               <View style={styles.buttonRow}>
                 <Button
                   mode={boothFilter === "all" ? "contained" : "outlined"}
                   onPress={() => setBoothFilter("all")}
                   style={styles.filterButton}
+                  compact
                 >
                   All
                 </Button>
@@ -1056,6 +1087,7 @@ export default function MaterialUsageScreen({
                     mode={boothFilter === opt.value ? "contained" : "outlined"}
                     onPress={() => setBoothFilter(opt.value)}
                     style={styles.filterButton}
+                    compact
                   >
                     {opt.label}
                   </Button>
@@ -1063,7 +1095,12 @@ export default function MaterialUsageScreen({
               </View>
               {isAdmin ? (
                 <>
-                  <Text style={[styles.statLabel, { marginTop: 12 }]}>
+                  <Text
+                    style={[
+                      styles.fieldLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
                     Filter by shift
                   </Text>
                   <View style={styles.buttonRow}>
@@ -1073,6 +1110,7 @@ export default function MaterialUsageScreen({
                         mode={shiftFilter === sf ? "contained" : "outlined"}
                         onPress={() => setShiftFilter(sf)}
                         style={styles.filterButton}
+                        compact
                       >
                         {sf === "all"
                           ? "All"
@@ -1563,7 +1601,7 @@ export default function MaterialUsageScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
   },
   savingOverlay: {
@@ -1582,64 +1620,36 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "transparent",
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    flex: 1,
-    textAlign: "center",
-  },
-  headerRight: {
-    marginLeft: "auto",
-  },
-  subtitle: {
-    fontSize: 13,
-    color: "#666",
-    marginTop: 2,
-  },
   scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingTop: 8,
-    paddingBottom: 40,
-  },
-  scrollContentDesktop: {
-    maxWidth: 900,
-    alignSelf: "center",
+    padding: 16,
+    paddingBottom: 48,
+    maxWidth: 720,
     width: "100%",
+    alignSelf: "center",
   },
   card: {
-    marginBottom: 24,
-    elevation: 2,
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
+    borderWidth: 1,
     marginBottom: 12,
   },
-  statLabel: {
+  form: {
+    gap: 10,
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  fieldLabel: {
     fontSize: 12,
-    color: "#666",
-    marginBottom: 8,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    marginBottom: 0,
   },
   row: {
     flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
+    gap: 10,
   },
   halfInput: {
     flex: 1,
+    backgroundColor: "transparent",
   },
   timeInputRow: {
     flex: 1,
@@ -1651,16 +1661,15 @@ const styles = StyleSheet.create({
   timePartInput: {
     flex: 1,
     minWidth: 0,
+    backgroundColor: "transparent",
   },
   ampmButton: {
     minWidth: 56,
   },
   input: {
-    marginBottom: 12,
+    backgroundColor: "transparent",
   },
-  colorSection: {
-    marginBottom: 12,
-  },
+  colorSection: {},
   colorModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -1685,16 +1694,17 @@ const styles = StyleSheet.create({
         }),
   },
   colorModalTitle: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "700",
     marginBottom: 4,
   },
   colorModalHint: {
-    fontSize: 13,
+    fontSize: 12,
     marginBottom: 12,
   },
   colorModalSearch: {
     marginBottom: 12,
+    backgroundColor: "transparent",
   },
   colorModalClose: {
     marginTop: 12,
@@ -1727,26 +1737,25 @@ const styles = StyleSheet.create({
   },
   catalystLabel: {
     fontSize: 12,
-    color: "#666",
   },
   catalystValue: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "700",
   },
   buttonRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 16,
+    gap: 8,
   },
   filterButton: {
     marginRight: 0,
     marginBottom: 0,
   },
-  submitBtn: {
-    marginTop: 8,
-    marginBottom: 15,
-    paddingVertical: 8,
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 4,
   },
   catalystDialog: {
     alignSelf: "center",
@@ -1938,12 +1947,10 @@ const styles = StyleSheet.create({
   cupGunRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
-    marginBottom: 8,
+    marginTop: 0,
   },
   cupGunLabel: {
     fontSize: 14,
-    color: "#666",
   },
   logCardValueMain: {
     fontSize: 16,
@@ -2047,16 +2054,16 @@ const styles = StyleSheet.create({
   thCat: { width: 58, paddingRight: 10 },
   thBooth: { width: 75, paddingRight: 10 },
   totalsSection: {
-    marginTop: 16,
-    marginBottom: 16,
+    marginTop: 8,
+    marginBottom: 8,
     paddingTop: 12,
     paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: "rgba(0,0,0,0.08)",
   },
   totalsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "700",
     marginBottom: 10,
   },
   totalsGrid: {

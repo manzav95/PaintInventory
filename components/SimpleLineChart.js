@@ -3,6 +3,9 @@ import { View, StyleSheet, Pressable, ScrollView } from "react-native";
 import Svg, { Polyline, Line, Text as SvgText, Circle } from "react-native-svg";
 import { Text, useTheme } from "react-native-paper";
 
+const AXIS_WIDTH = 48;
+const PAD = { top: 20, right: 16, bottom: 40 };
+
 function formatPointValue(v, valueSuffix, currency = false) {
   const n = Number(v);
   if (!Number.isFinite(n)) return currency ? "$0" : `0${valueSuffix}`;
@@ -55,17 +58,16 @@ export default function SimpleLineChart({
   const scrollRef = useRef(null);
 
   const viewportWidth = layoutWidth || 320;
+  const plotViewportWidth = Math.max(80, viewportWidth - AXIS_WIDTH);
   const slotWidth = useMemo(() => computeSlotWidth(labels), [labels]);
-  const naturalWidth = useMemo(() => {
-    const pad = { left: 48, right: 16 };
-    const slots = Math.max(1, data.length);
-    return pad.left + pad.right + slots * slotWidth;
-  }, [data.length, slotWidth]);
-  const chartWidth = Math.max(viewportWidth, naturalWidth, 280);
-  const scrollable = naturalWidth > viewportWidth;
-  const padding = { top: 20, right: 16, bottom: 40, left: 48 };
-  const innerW = chartWidth - padding.left - padding.right;
-  const innerH = height - padding.top - padding.bottom;
+  const slots = Math.max(1, data.length);
+  const naturalPlotWidth = slots * slotWidth + PAD.right;
+  const scrollable = naturalPlotWidth > plotViewportWidth;
+  const plotWidth = scrollable
+    ? naturalPlotWidth
+    : Math.max(plotViewportWidth, 120);
+  const innerW = Math.max(1, plotWidth - PAD.right);
+  const innerH = height - PAD.top - PAD.bottom;
   const xFontSize = labelFontSize(labels.length);
 
   const { pointCoords, maxVal, nums } = useMemo(() => {
@@ -74,25 +76,17 @@ export default function SimpleLineChart({
     const coords = values.map((v, i) => {
       let x;
       if (values.length <= 1) {
-        x = padding.left + (scrollable ? slotWidth / 2 : innerW / 2);
+        x = scrollable ? slotWidth / 2 : innerW / 2;
       } else if (scrollable) {
-        x = padding.left + slotWidth / 2 + i * slotWidth;
+        x = slotWidth / 2 + i * slotWidth;
       } else {
-        x = padding.left + (i / (values.length - 1)) * innerW;
+        x = (i / (values.length - 1)) * innerW;
       }
-      const y = padding.top + innerH - (v / max) * innerH;
+      const y = PAD.top + innerH - (v / max) * innerH;
       return { x, y, value: v, index: i };
     });
     return { pointCoords: coords, maxVal: max, nums: values };
-  }, [
-    data,
-    innerH,
-    innerW,
-    padding.left,
-    padding.top,
-    scrollable,
-    slotWidth,
-  ]);
+  }, [data, innerH, innerW, scrollable, slotWidth]);
 
   const labelStep = useMemo(() => {
     if (scrollable || labels.length <= 1) return 1;
@@ -121,7 +115,7 @@ export default function SimpleLineChart({
       scrollRef.current?.scrollToEnd?.({ animated: false });
     }, 50);
     return () => clearTimeout(timer);
-  }, [scrollable, data.length, chartWidth]);
+  }, [scrollable, data.length, plotWidth]);
 
   const activeIndex =
     selectedIndex != null &&
@@ -136,6 +130,52 @@ export default function SimpleLineChart({
       ? labels[activeIndex]
       : null;
 
+  const headerSlot = interactive ? (
+    activePoint && activeLabel != null ? (
+      <View
+        style={[
+          styles.headerSlot,
+          styles.tooltip,
+          {
+            backgroundColor: theme.colors.surfaceContainerHigh,
+            borderColor: theme.colors.outlineVariant,
+          },
+        ]}
+      >
+        <Text style={[styles.tooltipLabel, { color: theme.colors.onSurface }]}>
+          {activeLabel}
+        </Text>
+        <Text style={[styles.tooltipValue, { color: stroke }]}>
+          {formatPointValue(activePoint.value, valueSuffix, currency)}
+        </Text>
+      </View>
+    ) : (
+      <Text
+        style={[
+          styles.headerSlot,
+          styles.hint,
+          { color: theme.colors.onSurfaceVariant },
+        ]}
+      >
+        {scrollable
+          ? "Scroll chart for all dates · tap a point for totals"
+          : "Tap a point for date and quantity"}
+      </Text>
+    )
+  ) : scrollable ? (
+    <Text
+      style={[
+        styles.headerSlot,
+        styles.hint,
+        { color: theme.colors.onSurfaceVariant },
+      ]}
+    >
+      Scroll chart for all dates
+    </Text>
+  ) : (
+    <View style={styles.headerSlot} />
+  );
+
   if (!data.length) {
     return (
       <View style={styles.wrap} onLayout={onLayout}>
@@ -144,7 +184,10 @@ export default function SimpleLineChart({
             {title}
           </Text>
         ) : null}
-        <Text style={{ color: theme.colors.onSurfaceVariant }}>No data</Text>
+        <View style={styles.headerSlot} />
+        <View style={[styles.emptyChart, { height }]}>
+          <Text style={{ color: theme.colors.onSurfaceVariant }}>No data</Text>
+        </View>
       </View>
     );
   }
@@ -157,180 +200,158 @@ export default function SimpleLineChart({
         </Text>
       ) : null}
 
-      {interactive && activePoint && activeLabel != null ? (
-        <View
-          style={[
-            styles.tooltip,
-            {
-              backgroundColor: theme.colors.surfaceContainerHigh,
-              borderColor: theme.colors.outlineVariant,
-            },
+      {headerSlot}
+
+      <View style={[styles.chartRow, { height }]}>
+        <View style={[styles.axisPane, { width: AXIS_WIDTH, height }]}>
+          <Svg width={AXIS_WIDTH} height={height}>
+            <Line
+              x1={AXIS_WIDTH - 1}
+              y1={PAD.top}
+              x2={AXIS_WIDTH - 1}
+              y2={PAD.top + innerH}
+              stroke={theme.colors.outlineVariant}
+              strokeWidth={1}
+            />
+            <SvgText
+              x={AXIS_WIDTH - 8}
+              y={PAD.top + 10}
+              fontSize={13}
+              fontWeight="600"
+              fill={theme.colors.onSurfaceVariant}
+              textAnchor="end"
+            >
+              {formatPointValue(maxVal, valueSuffix, currency)}
+            </SvgText>
+            <SvgText
+              x={AXIS_WIDTH - 8}
+              y={PAD.top + innerH + 4}
+              fontSize={13}
+              fontWeight="600"
+              fill={theme.colors.onSurfaceVariant}
+              textAnchor="end"
+            >
+              0
+            </SvgText>
+          </Svg>
+        </View>
+
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={scrollable}
+          style={styles.chartScroll}
+          contentContainerStyle={[
+            styles.chartScrollContent,
+            { width: plotWidth, height },
           ]}
         >
-          <Text style={[styles.tooltipLabel, { color: theme.colors.onSurface }]}>
-            {activeLabel}
-          </Text>
-          <Text style={[styles.tooltipValue, { color: stroke }]}>
-            {formatPointValue(activePoint.value, valueSuffix, currency)}
-          </Text>
-        </View>
-      ) : interactive ? (
-        <Text
-          style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
-        >
-          {scrollable
-            ? "Scroll chart for all dates · tap a point for totals"
-            : "Tap a point for date and quantity"}
-        </Text>
-      ) : scrollable ? (
-        <Text
-          style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
-        >
-          Scroll chart for all dates
-        </Text>
-      ) : null}
-
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={scrollable}
-        style={styles.chartScroll}
-        contentContainerStyle={[
-          styles.chartScrollContent,
-          { width: chartWidth, height },
-        ]}
-      >
-        <View style={[styles.chartBox, { width: chartWidth, height }]}>
-        <Svg
-          width={chartWidth}
-          height={height}
-          viewBox={`0 0 ${chartWidth} ${height}`}
-        >
-          <Line
-            x1={padding.left}
-            y1={padding.top + innerH}
-            x2={padding.left + innerW}
-            y2={padding.top + innerH}
-            stroke={theme.colors.outlineVariant}
-            strokeWidth={1}
-          />
-          <Line
-            x1={padding.left}
-            y1={padding.top}
-            x2={padding.left}
-            y2={padding.top + innerH}
-            stroke={theme.colors.outlineVariant}
-            strokeWidth={1}
-          />
-          <SvgText
-            x={padding.left - 6}
-            y={padding.top + 10}
-            fontSize={13}
-            fontWeight="600"
-            fill={theme.colors.onSurfaceVariant}
-            textAnchor="end"
-          >
-            {formatPointValue(maxVal, valueSuffix, currency)}
-          </SvgText>
-          <SvgText
-            x={padding.left - 6}
-            y={padding.top + innerH + 4}
-            fontSize={13}
-            fontWeight="600"
-            fill={theme.colors.onSurfaceVariant}
-            textAnchor="end"
-          >
-            0
-          </SvgText>
-          <Polyline
-            points={points}
-            fill="none"
-            stroke={stroke}
-            strokeWidth={3}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {pointCoords.map((p) => {
-            const isActive = activeIndex === p.index;
-            return (
-              <Circle
-                key={`pt-${p.index}`}
-                cx={p.x}
-                cy={p.y}
-                r={isActive ? 7 : interactive ? 5 : 0}
-                fill={isActive ? stroke : theme.colors.surface}
-                stroke={stroke}
-                strokeWidth={isActive ? 3 : 2}
-                onPress={
-                  interactive && onPointSelect
-                    ? () => onPointSelect(p.index)
-                    : undefined
-                }
+          <View style={[styles.chartBox, { width: plotWidth, height }]}>
+            <Svg
+              width={plotWidth}
+              height={height}
+              viewBox={`0 0 ${plotWidth} ${height}`}
+            >
+              <Line
+                x1={0}
+                y1={PAD.top + innerH}
+                x2={innerW}
+                y2={PAD.top + innerH}
+                stroke={theme.colors.outlineVariant}
+                strokeWidth={1}
               />
-            );
-          })}
-          {pointCoords.map((p) => {
-            const isActive = activeIndex === p.index;
-            const showValue =
-              isActive || (activeIndex == null && nums.length <= 8);
-            if (!showValue) return null;
-            return (
-              <SvgText
-                key={`val-${p.index}`}
-                x={p.x}
-                y={p.y - 12}
-                fontSize={isActive ? 13 : 11}
-                fontWeight="700"
-                fill={theme.colors.onSurface}
-                textAnchor="middle"
-              >
-                {formatPointValue(p.value, valueSuffix, currency)}
-              </SvgText>
-            );
-          })}
-          {labels.length > 0
-            ? labels.map((lbl, i) => {
-                if (i % labelStep !== 0 && i !== labels.length - 1) return null;
-                const p = pointCoords[i];
-                if (!p) return null;
-                const isActive = activeIndex === i;
+              <Polyline
+                points={points}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={3}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+              {pointCoords.map((p) => {
+                const isActive = activeIndex === p.index;
+                return (
+                  <Circle
+                    key={`pt-${p.index}`}
+                    cx={p.x}
+                    cy={p.y}
+                    r={isActive ? 7 : interactive ? 5 : 0}
+                    fill={isActive ? stroke : theme.colors.surface}
+                    stroke={stroke}
+                    strokeWidth={isActive ? 3 : 2}
+                    onPress={
+                      interactive && onPointSelect
+                        ? () => onPointSelect(p.index)
+                        : undefined
+                    }
+                  />
+                );
+              })}
+              {pointCoords.map((p) => {
+                const isActive = activeIndex === p.index;
+                const showValue =
+                  isActive || (activeIndex == null && nums.length <= 8);
+                if (!showValue) return null;
                 return (
                   <SvgText
-                    key={`${lbl}-${i}`}
+                    key={`val-${p.index}`}
                     x={p.x}
-                    y={height - 8}
-                    fontSize={isActive ? xFontSize + 1 : xFontSize}
-                    fontWeight={isActive ? "700" : "500"}
-                    fill={
-                      isActive
-                        ? theme.colors.onSurface
-                        : theme.colors.onSurfaceVariant
-                    }
+                    y={p.y - 12}
+                    fontSize={isActive ? 13 : 11}
+                    fontWeight="700"
+                    fill={theme.colors.onSurface}
                     textAnchor="middle"
                   >
-                    {String(lbl)}
+                    {formatPointValue(p.value, valueSuffix, currency)}
                   </SvgText>
                 );
-              })
-            : null}
-        </Svg>
-        {interactive &&
-          pointCoords.map((p) => (
-            <Pressable
-              key={`hit-${p.index}`}
-              style={[
-                styles.hitTarget,
-                {
-                  left: p.x - 14,
-                  top: p.y - 14,
-                },
-              ]}
-              onPress={() => onPointSelect?.(p.index)}
-              hitSlop={12}
-            />
-          ))}
-        </View>
-      </ScrollView>
+              })}
+              {labels.length > 0
+                ? labels.map((lbl, i) => {
+                    if (i % labelStep !== 0 && i !== labels.length - 1) {
+                      return null;
+                    }
+                    const p = pointCoords[i];
+                    if (!p) return null;
+                    const isActive = activeIndex === i;
+                    return (
+                      <SvgText
+                        key={`${lbl}-${i}`}
+                        x={p.x}
+                        y={height - 8}
+                        fontSize={isActive ? xFontSize + 1 : xFontSize}
+                        fontWeight={isActive ? "700" : "500"}
+                        fill={
+                          isActive
+                            ? theme.colors.onSurface
+                            : theme.colors.onSurfaceVariant
+                        }
+                        textAnchor="middle"
+                      >
+                        {String(lbl)}
+                      </SvgText>
+                    );
+                  })
+                : null}
+            </Svg>
+            {interactive &&
+              pointCoords.map((p) => (
+                <Pressable
+                  key={`hit-${p.index}`}
+                  style={[
+                    styles.hitTarget,
+                    {
+                      left: p.x,
+                      top: p.y,
+                    },
+                  ]}
+                  onPress={() => onPointSelect?.(p.index)}
+                  hitSlop={12}
+                />
+              ))}
+          </View>
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -338,7 +359,17 @@ export default function SimpleLineChart({
 const styles = StyleSheet.create({
   wrap: { width: "100%", flex: 1, minHeight: 0 },
   title: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
-  hint: { fontSize: 12, marginBottom: 6 },
+  headerSlot: {
+    minHeight: 40,
+    marginBottom: 8,
+    justifyContent: "center",
+  },
+  emptyChart: {
+    width: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  hint: { fontSize: 12 },
   tooltip: {
     flexDirection: "row",
     alignItems: "center",
@@ -348,12 +379,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    marginBottom: 8,
   },
   tooltipLabel: { fontSize: 14, fontWeight: "600", flex: 1 },
   tooltipValue: { fontSize: 18, fontWeight: "800" },
-  chartScroll: {
+  chartRow: {
+    flexDirection: "row",
     width: "100%",
+    alignItems: "stretch",
+  },
+  axisPane: {
+    zIndex: 2,
+  },
+  chartScroll: {
+    flex: 1,
+    minWidth: 0,
   },
   chartScrollContent: {},
   chartBox: {

@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet } from "react-native";
 import { Button, Title, useTheme } from "react-native-paper";
+import FadeIn from "./FadeIn";
 
 export default function PageHeader({
   title,
@@ -12,7 +13,7 @@ export default function PageHeader({
   const theme = useTheme();
 
   return (
-    <View style={styles.row}>
+    <FadeIn fromY={6} duration={240} style={styles.row}>
       <View style={styles.left}>
         {showBack && !embeddedInShell && onBack && (
           <Button
@@ -29,7 +30,7 @@ export default function PageHeader({
         </Title>
       </View>
       {actions ? <View style={styles.actions}>{actions}</View> : null}
-    </View>
+    </FadeIn>
   );
 }
 

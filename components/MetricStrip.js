@@ -89,6 +89,7 @@ const styles = StyleSheet.create({
   cardContent: {
     paddingVertical: 10,
     paddingHorizontal: 12,
+    minHeight: 72,
   },
   label: {
     fontSize: 11,
@@ -99,5 +100,6 @@ const styles = StyleSheet.create({
   value: {
     fontSize: 22,
     lineHeight: 28,
+    minHeight: 28,
   },
 });

@@ -6,11 +6,11 @@ import {
   Paragraph,
   TextInput,
   Button,
-  Switch,
   useTheme,
 } from "react-native-paper";
+import FadeIn from "../components/FadeIn";
 
-export default function LoginScreen({ onLogin, isDarkMode, onToggleDarkMode }) {
+export default function LoginScreen({ onLogin }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
@@ -28,7 +28,7 @@ export default function LoginScreen({ onLogin, isDarkMode, onToggleDarkMode }) {
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <View style={isDesktop && styles.webWrapper}>
+      <FadeIn fromY={16} duration={360} style={isDesktop ? styles.webWrapper : undefined}>
         <Card style={[styles.card, isDesktop && styles.webCard]}>
           <Card.Content>
             <Title style={styles.title}>Paint Inventory Tracker</Title>
@@ -57,7 +57,7 @@ export default function LoginScreen({ onLogin, isDarkMode, onToggleDarkMode }) {
             </Button>
           </Card.Content>
         </Card>
-      </View>
+      </FadeIn>
     </View>
   );
 }

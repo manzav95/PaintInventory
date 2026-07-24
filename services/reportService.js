@@ -6,20 +6,25 @@ import MaterialUsageService from "./materialUsageService";
 import InventoryService from "./inventoryService";
 import {
   bucketKeyForCalendarDate,
-  calendarDateParts,
   formatYearMonthBucketLabel,
   resolveCustomColorsRange,
+  weekMondayKey,
+  calendarDateInRange,
+  todayReportIso,
 } from "../utils/reportBuckets";
 
 const API_URL = config.API_URL;
 
 function getWeekStart(d) {
-  const date = new Date(d);
-  date.setHours(12, 0, 0, 0);
-  const day = date.getDay();
-  const daysToMonday = (day + 6) % 7;
-  date.setDate(date.getDate() - daysToMonday);
-  return date;
+  const key = weekMondayKey(d);
+  if (!key || key === "unknown") {
+    const date = new Date(d);
+    date.setHours(12, 0, 0, 0);
+    const day = date.getDay();
+    date.setDate(date.getDate() - ((day + 6) % 7));
+    return date;
+  }
+  return new Date(`${key}T12:00:00`);
 }
 
 function normalizeGroupBy(groupBy) {
@@ -47,24 +52,16 @@ function normalizeCustomColorsGroupBy(groupBy) {
 
 function bucketKeyForDate(date, groupBy) {
   const gb =
-    groupBy === "lifetime" || groupBy === "year" || groupBy === "month"
+    groupBy === "lifetime" ||
+    groupBy === "year" ||
+    groupBy === "month" ||
+    groupBy === "day"
       ? groupBy
       : normalizeGroupBy(groupBy);
   const calKey = bucketKeyForCalendarDate(date, gb);
   if (calKey) return calKey;
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return "unknown";
-  if (gb === "day") {
-    const parts = calendarDateParts(date);
-    if (parts) {
-      return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
-    }
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-  return getWeekStart(d).toISOString();
+  if (Number.isNaN(new Date(date).getTime())) return "unknown";
+  return weekMondayKey(date);
 }
 
 function parseBucketDate(key, groupBy) {
@@ -77,7 +74,7 @@ function parseBucketDate(key, groupBy) {
   if (gb === "year" && /^\d{4}$/.test(s)) {
     return new Date(`${s}-01-01T12:00:00`);
   }
-  if (gb === "day" && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+  if ((gb === "day" || gb === "week") && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
     return new Date(`${s}T12:00:00`);
   }
   if (gb === "month" && /^\d{4}-\d{2}$/.test(s)) {
@@ -107,12 +104,20 @@ function formatBucketLabel(key, groupBy) {
 }
 
 function inDateRange(isoOrDate, from, to) {
-  const d = new Date(isoOrDate);
-  if (Number.isNaN(d.getTime())) return false;
-  const t = d.getTime();
-  const f = new Date(`${from}T00:00:00`).getTime();
-  const te = new Date(`${to}T23:59:59`).getTime();
-  return t >= f && t <= te;
+  return calendarDateInRange(isoOrDate, from, to);
+}
+
+function auditQtyGallons(details) {
+  const q = parseFloat(details?.quantityChange);
+  if (Number.isFinite(q)) return Math.abs(q);
+  const q2 = parseFloat(details?._quantityChange);
+  if (Number.isFinite(q2)) return Math.abs(q2);
+  const oldQ = parseFloat(details?.oldQuantity);
+  const newQ = parseFloat(details?.newQuantity);
+  if (Number.isFinite(oldQ) && Number.isFinite(newQ)) {
+    return Math.abs(oldQ - newQ);
+  }
+  return 0;
 }
 
 function emptyUsageByType() {
@@ -423,24 +428,63 @@ async function fetchSummaryFromApi(baseUrl, from, to, groupBy) {
   if (to) params.set("to", to);
   params.set("groupBy", normalizeGroupBy(groupBy));
   const url = `${baseUrl.replace(/\/$/, "")}/api/reports/summary?${params.toString()}`;
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
-  const text = await response.text();
-  const trimmed = text.trim();
-  if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
-    throw new Error("Reports API not available on this server (redeploy backend or use local server).");
-  }
-  let data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error("Invalid response from reports API.");
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const trimmed = text.trim();
+    if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
+      throw new Error("Reports API not available on this server (redeploy backend or use local server).");
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error("Invalid response from reports API.");
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!response.ok) {
-    throw new Error(data.error || `HTTP ${response.status}`);
+}
+
+async function fetchItemActivityFromApi(baseUrl, from, to) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const url = `${baseUrl.replace(/\/$/, "")}/api/reports/item-activity?${params.toString()}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    const trimmed = text.trim();
+    if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
+      throw new Error("Item activity API not available on this server.");
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error("Invalid response from item activity API.");
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    return Array.isArray(data) ? data : [];
+  } finally {
+    clearTimeout(timer);
   }
-  return data;
 }
 
 async function buildClientSummary(from, to, groupBy) {
@@ -492,7 +536,7 @@ async function buildClientSummary(from, to, groupBy) {
         details = {};
       }
     }
-    const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+    const qty = auditQtyGallons(details);
     const action = row.action;
     const actionType = details?._actionType;
     const isCheckout =
@@ -644,7 +688,7 @@ async function buildItemActivityReport(from, to) {
         details = {};
       }
     }
-    const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+    const qty = auditQtyGallons(details);
     const action = row.action;
     const actionType = details?._actionType;
     const isCheckout =
@@ -704,8 +748,8 @@ async function buildItemTimelineReport(itemId, from, to, groupBy) {
       : {
           from:
             from ||
-            new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10),
-          to: to || new Date().toISOString().slice(0, 10),
+            todayReportIso(new Date(Date.now() - 84 * 86400000)),
+          to: to || todayReportIso(),
         };
   const fromDate = range.from;
   const toDate = range.to;
@@ -756,7 +800,7 @@ async function buildItemTimelineReport(itemId, from, to, groupBy) {
         details = {};
       }
     }
-    const qty = Math.abs(parseFloat(details?.quantityChange) || 0);
+    const qty = auditQtyGallons(details);
     const action = row.action;
     const actionType = details?._actionType;
     const isCheckout =
@@ -871,9 +915,25 @@ class ReportService {
 
   async getItemActivity({ from, to } = {}) {
     const fromDate =
-      from || new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10);
-    const toDate = to || new Date().toISOString().slice(0, 10);
-    return buildItemActivityReport(fromDate, toDate);
+      from || todayReportIso(new Date(Date.now() - 84 * 86400000));
+    const toDate = to || todayReportIso();
+
+    let lastErr;
+    for (const base of alternateApiBases()) {
+      try {
+        return await fetchItemActivityFromApi(base, fromDate, toDate);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`Item activity API failed (${base}):`, e?.message || e);
+      }
+    }
+
+    try {
+      return await buildItemActivityReport(fromDate, toDate);
+    } catch (e) {
+      console.error("Item activity client fallback failed:", e);
+      throw lastErr || e;
+    }
   }
 
   async getItemTimeline({ itemId, from, to, groupBy = "week" } = {}) {
@@ -882,29 +942,25 @@ class ReportService {
 
   async getSummary({ from, to, groupBy = "week" } = {}) {
     const gb = normalizeGroupBy(groupBy);
-    const range =
-      gb === "year" || gb === "lifetime"
-        ? resolveCustomColorsRange(from, to, gb)
-        : {
-            from:
-              from ||
-              new Date(Date.now() - 84 * 86400000).toISOString().slice(0, 10),
-            to: to || new Date().toISOString().slice(0, 10),
-          };
+    const range = resolveCustomColorsRange(from, to, gb);
     const fromDate = range.from;
     const toDate = range.to;
 
-    const useClientOnly = gb === "year" || gb === "lifetime";
+    // Prefer primary API only first (avoid slow multi-host retries on every click)
+    const bases = alternateApiBases();
     let lastErr;
-    if (!useClientOnly) {
-      for (const base of alternateApiBases()) {
-        try {
-          const data = await fetchSummaryFromApi(base, fromDate, toDate, gb);
-          return data;
-        } catch (e) {
-          lastErr = e;
-          console.warn(`Reports API failed (${base}):`, e?.message || e);
-        }
+    try {
+      return await fetchSummaryFromApi(bases[0], fromDate, toDate, gb);
+    } catch (e) {
+      lastErr = e;
+      console.warn(`Reports API failed (${bases[0]}):`, e?.message || e);
+    }
+    for (const base of bases.slice(1)) {
+      try {
+        return await fetchSummaryFromApi(base, fromDate, toDate, gb);
+      } catch (e) {
+        lastErr = e;
+        console.warn(`Reports API failed (${base}):`, e?.message || e);
       }
     }
 

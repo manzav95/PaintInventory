@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet } from "react-native";
 import { Text, useTheme } from "react-native-paper";
+import FadeIn from "./FadeIn";
 
 export function getTimeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -15,7 +16,7 @@ export default function DashboardGreeting({ isAdmin, userName, style }) {
   const greetingPhrase = getTimeGreeting();
 
   return (
-    <View style={[styles.block, style]}>
+    <FadeIn fromY={8} duration={300} delay={60} style={[styles.block, style]}>
       <Text style={styles.greeting}>
         <Text style={{ color: theme.colors.onSurfaceVariant }}>
           {greetingPhrase},{" "}
@@ -24,7 +25,7 @@ export default function DashboardGreeting({ isAdmin, userName, style }) {
           {displayName}
         </Text>
       </Text>
-    </View>
+    </FadeIn>
   );
 }
 

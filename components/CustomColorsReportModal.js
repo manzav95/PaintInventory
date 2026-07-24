@@ -26,16 +26,17 @@ import {
   CUSTOM_COLORS_EARLIEST,
   clampCustomColorsFrom,
   resolveCustomColorsRange,
+  todayReportIso,
 } from "../utils/reportBuckets";
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return todayReportIso();
 }
 
 function defaultFromDate() {
   const d = new Date();
   d.setDate(d.getDate() - 84);
-  const rolling = d.toISOString().slice(0, 10);
+  const rolling = todayReportIso(d);
   return rolling < CUSTOM_COLORS_EARLIEST ? CUSTOM_COLORS_EARLIEST : rolling;
 }
 

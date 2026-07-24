@@ -432,12 +432,28 @@ app.get('/api/reports/summary', async (req, res) => {
         ? 'month'
         : req.query.groupBy === 'day'
           ? 'day'
-          : 'week';
+          : req.query.groupBy === 'year'
+            ? 'year'
+            : req.query.groupBy === 'lifetime'
+              ? 'lifetime'
+              : 'week';
     const summary = await db.getReportsSummary(fromDate, toDate, groupBy);
     res.json(summary);
   } catch (error) {
     console.error('Error fetching reports summary:', error);
     res.status(500).json({ error: 'Failed to fetch reports summary' });
+  }
+});
+
+app.get('/api/reports/item-activity', async (req, res) => {
+  try {
+    const fromDate = (req.query.from && String(req.query.from).trim()) || null;
+    const toDate = (req.query.to && String(req.query.to).trim()) || null;
+    const rows = await db.getReportsItemActivity(fromDate, toDate);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching reports item activity:', error);
+    res.status(500).json({ error: 'Failed to fetch item activity' });
   }
 });
 
