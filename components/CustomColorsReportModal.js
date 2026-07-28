@@ -157,6 +157,8 @@ export default function CustomColorsReportModal({
     if (selectedBucket) {
       return {
         totalQuantity: selectedBucket.totalQuantity || 0,
+        checkoutGallons: selectedBucket.checkoutGallons || 0,
+        usageGallons: selectedBucket.usageGallons || 0,
         colorCount: (selectedBucket.colors || []).length,
         jobCount: (selectedBucket.jobs || []).length,
       };
@@ -171,6 +173,14 @@ export default function CustomColorsReportModal({
         value: `${periodTotals.totalQuantity || 0} gal`,
       },
       {
+        label: "Checked out (gal)",
+        value: `${periodTotals.checkoutGallons || 0} gal`,
+      },
+      {
+        label: "Material used (gal)",
+        value: `${periodTotals.usageGallons || 0} gal`,
+      },
+      {
         label: "Colors",
         value: String(
           periodTotals.colorCount ?? report?.totals?.colorCount ?? 0,
@@ -182,7 +192,10 @@ export default function CustomColorsReportModal({
       },
       {
         label: "Period",
-        value: periodLabel.length > 18 ? `${periodLabel.slice(0, 16)}…` : periodLabel,
+        value:
+          periodLabel.length > 18
+            ? `${periodLabel.slice(0, 16)}…`
+            : periodLabel,
       },
     ],
     [periodTotals, periodLabel, report?.totals],
@@ -211,14 +224,33 @@ export default function CustomColorsReportModal({
   const colorTimeline = useMemo(() => {
     if (!selectedColorId || !report?.bucketDetails?.length) return null;
     const buckets = report.bucketDetails.map((b) => b.label);
-    const data = report.bucketDetails.map((b) => {
+    const ordered = report.bucketDetails.map((b) => {
       const match = (b.colors || []).find(
         (c) => String(c.itemId) === String(selectedColorId),
       );
       return match?.quantity || 0;
     });
-    const total = data.reduce((sum, v) => sum + v, 0);
-    return { buckets, data, total };
+    const checkout = report.bucketDetails.map((b) => {
+      const match = (b.colors || []).find(
+        (c) => String(c.itemId) === String(selectedColorId),
+      );
+      return match?.checkoutGallons || 0;
+    });
+    const usage = report.bucketDetails.map((b) => {
+      const match = (b.colors || []).find(
+        (c) => String(c.itemId) === String(selectedColorId),
+      );
+      return match?.usageGallons || 0;
+    });
+    return {
+      buckets,
+      ordered,
+      checkout,
+      usage,
+      totalOrdered: ordered.reduce((sum, v) => sum + v, 0),
+      totalCheckout: checkout.reduce((sum, v) => sum + v, 0),
+      totalUsage: usage.reduce((sum, v) => sum + v, 0),
+    };
   }, [selectedColorId, report]);
 
   useEffect(() => {
@@ -226,9 +258,13 @@ export default function CustomColorsReportModal({
     setSelectedColorBucketIndex(len > 0 ? len - 1 : null);
   }, [colorTimeline, groupBy]);
 
-  const selectedColorBucketQty = useMemo(() => {
+  const selectedColorBucketStats = useMemo(() => {
     if (!colorTimeline || selectedColorBucketIndex == null) return null;
-    return colorTimeline.data[selectedColorBucketIndex] ?? 0;
+    return {
+      ordered: colorTimeline.ordered[selectedColorBucketIndex] ?? 0,
+      checkout: colorTimeline.checkout[selectedColorBucketIndex] ?? 0,
+      usage: colorTimeline.usage[selectedColorBucketIndex] ?? 0,
+    };
   }, [colorTimeline, selectedColorBucketIndex]);
 
   return (
@@ -398,14 +434,25 @@ export default function CustomColorsReportModal({
                                   {color.itemId} · {typeLabel(color.type)}
                                 </Text>
                               </View>
-                              <Text
-                                style={[
-                                  styles.jobTotal,
-                                  { color: theme.colors.primary },
-                                ]}
-                              >
-                                {color.totalQuantity} gal
-                              </Text>
+                              <View style={styles.colorSearchStats}>
+                                <Text
+                                  style={[
+                                    styles.jobTotal,
+                                    { color: theme.colors.primary },
+                                  ]}
+                                >
+                                  Ord {color.totalQuantity || 0} gal
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.subMeta,
+                                    { color: theme.colors.onSurfaceVariant },
+                                  ]}
+                                >
+                                  Out {color.checkoutGallons || 0} · Use{" "}
+                                  {color.usageGallons || 0}
+                                </Text>
+                              </View>
                             </Pressable>
                           );
                         })
@@ -421,16 +468,36 @@ export default function CustomColorsReportModal({
                             {selectedColor.itemName}:{" "}
                             {colorTimeline.buckets[selectedColorBucketIndex] ||
                               "All periods"}
-                            {selectedColorBucketQty != null
-                              ? ` · ${selectedColorBucketQty} gal`
-                              : ` · ${colorTimeline.total} gal total`}
+                            {selectedColorBucketStats
+                              ? ` · Ord ${selectedColorBucketStats.ordered} · Out ${selectedColorBucketStats.checkout} · Use ${selectedColorBucketStats.usage} gal`
+                              : ` · Ord ${colorTimeline.totalOrdered} · Out ${colorTimeline.totalCheckout} · Use ${colorTimeline.totalUsage} gal`}
                           </Text>
                           <SimpleLineChart
                             title={`Ordered per ${groupByChartLabel(groupBy)}`}
-                            data={colorTimeline.data}
+                            data={colorTimeline.ordered}
                             labels={colorTimeline.buckets}
                             color="#7e57c2"
-                            height={220}
+                            height={200}
+                            interactive
+                            selectedIndex={selectedColorBucketIndex}
+                            onPointSelect={setSelectedColorBucketIndex}
+                          />
+                          <SimpleLineChart
+                            title={`Checked out per ${groupByChartLabel(groupBy)}`}
+                            data={colorTimeline.checkout}
+                            labels={colorTimeline.buckets}
+                            color={theme.colors.primary}
+                            height={200}
+                            interactive
+                            selectedIndex={selectedColorBucketIndex}
+                            onPointSelect={setSelectedColorBucketIndex}
+                          />
+                          <SimpleLineChart
+                            title={`Material used per ${groupByChartLabel(groupBy)}`}
+                            data={colorTimeline.usage}
+                            labels={colorTimeline.buckets}
+                            color="#ba68c8"
+                            height={200}
                             interactive
                             selectedIndex={selectedColorBucketIndex}
                             onPointSelect={setSelectedColorBucketIndex}
@@ -538,7 +605,27 @@ export default function CustomColorsReportModal({
                           data={report.bucketTotals || []}
                           labels={report.buckets || []}
                           color="#7e57c2"
-                          height={240}
+                          height={220}
+                          interactive
+                          selectedIndex={selectedBucketIndex}
+                          onPointSelect={setSelectedBucketIndex}
+                        />
+                        <SimpleLineChart
+                          title={`Checked out per ${groupByChartLabel(groupBy)}`}
+                          data={report.bucketCheckoutTotals || []}
+                          labels={report.buckets || []}
+                          color={theme.colors.primary}
+                          height={220}
+                          interactive
+                          selectedIndex={selectedBucketIndex}
+                          onPointSelect={setSelectedBucketIndex}
+                        />
+                        <SimpleLineChart
+                          title={`Material used per ${groupByChartLabel(groupBy)}`}
+                          data={report.bucketUsageTotals || []}
+                          labels={report.buckets || []}
+                          color="#ba68c8"
+                          height={220}
                           interactive
                           selectedIndex={selectedBucketIndex}
                           onPointSelect={setSelectedBucketIndex}
@@ -624,7 +711,8 @@ export default function CustomColorsReportModal({
                                   { color: theme.colors.onSurfaceVariant },
                                 ]}
                               >
-                                {c.quantity} gal
+                                {c.quantity} ord · {c.checkoutGallons || 0} out ·{" "}
+                                {c.usageGallons || 0} use
                               </Text>
                             </View>
                           ))}
@@ -737,14 +825,25 @@ export default function CustomColorsReportModal({
                                 {color.itemId} · {typeLabel(color.type)}
                               </Text>
                             </View>
-                            <Text
-                              style={[
-                                styles.jobTotal,
-                                { color: theme.colors.primary },
-                              ]}
-                            >
-                              {color.totalQuantity} gal
-                            </Text>
+                            <View style={styles.colorSearchStats}>
+                              <Text
+                                style={[
+                                  styles.jobTotal,
+                                  { color: theme.colors.primary },
+                                ]}
+                              >
+                                Ord {color.totalQuantity || 0} gal
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.subMeta,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Out {color.checkoutGallons || 0} · Use{" "}
+                                {color.usageGallons || 0}
+                              </Text>
+                            </View>
                           </View>
                           {(color.jobs || []).map((j) => (
                             <View key={`${color.itemId}-${j.jobName}`} style={styles.subRow}>
@@ -788,7 +887,7 @@ export default function CustomColorsReportModal({
                     </Text>
                     {(report.bucketDetails || []).length === 0 ? (
                       <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                        No orders in this range.
+                        No data in this range.
                       </Text>
                     ) : (
                       report.bucketDetails.map((bucket, idx) => (
@@ -800,14 +899,25 @@ export default function CustomColorsReportModal({
                             >
                               {bucket.label}
                             </Text>
-                            <Text
-                              style={[
-                                styles.jobTotal,
-                                { color: theme.colors.primary },
-                              ]}
-                            >
-                              {bucket.totalQuantity} gal
-                            </Text>
+                            <View style={styles.colorSearchStats}>
+                              <Text
+                                style={[
+                                  styles.jobTotal,
+                                  { color: theme.colors.primary },
+                                ]}
+                              >
+                                Ord {bucket.totalQuantity || 0} gal
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.subMeta,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Out {bucket.checkoutGallons || 0} · Use{" "}
+                                {bucket.usageGallons || 0}
+                              </Text>
+                            </View>
                           </View>
                           {(bucket.colors || []).map((c) => (
                             <View key={`${bucket.label}-${c.itemId}`} style={styles.subRow}>
@@ -826,7 +936,8 @@ export default function CustomColorsReportModal({
                                   { color: theme.colors.onSurfaceVariant },
                                 ]}
                               >
-                                {c.quantity} gal
+                                {c.quantity} ord · {c.checkoutGallons || 0} out ·{" "}
+                                {c.usageGallons || 0} use
                               </Text>
                             </View>
                           ))}
@@ -933,6 +1044,11 @@ const styles = StyleSheet.create({
   jobName: { fontSize: 15, fontWeight: "600", flex: 1 },
   jobTotal: { fontSize: 15, fontWeight: "700" },
   colorTitleWrap: { flex: 1, minWidth: 0, marginRight: 8 },
+  colorSearchStats: {
+    alignItems: "flex-end",
+    gap: 2,
+    flexShrink: 0,
+  },
   colorSearchRow: {
     flexDirection: "row",
     alignItems: "center",

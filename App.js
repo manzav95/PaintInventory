@@ -3,11 +3,17 @@ import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'reac
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
+import {
+  normalizeItemIdQuery,
+  resolveBestInventoryMatch,
+} from './utils/itemLookup';
 import showAlert from './utils/showAlert';
+import showToast from './utils/showToast';
 import { injectWebMotionStyles } from './utils/injectWebMotionStyles';
 import ScreenTransition from './components/ScreenTransition';
 import FadeOverlay from './components/FadeOverlay';
 import FadeIn from './components/FadeIn';
+import ToastHost from './components/ToastHost';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -581,59 +587,47 @@ export default function App() {
 
     setScanLookupLoading(true);
     try {
-      const normalizedId = (() => {
-        const raw = itemId.toString().trim().toUpperCase();
-        // If it's a 1-4 digit number (legacy format), pad it to 4 digits for backward compatibility
-        if (/^\d{1,4}$/.test(raw)) return raw.padStart(4, '0');
-        // If it's already in Sherwin Williams format, return as-is
-        if (/^H66[A-Z]{3}\d{5}$/.test(raw)) return raw;
-        // Otherwise return as-is (could be partial or other format)
-        return raw;
-      })();
+      const rawQuery = itemId.toString().trim();
+      const normalizedId = normalizeItemIdQuery(rawQuery);
 
       let item = null;
       try {
-        // Online lookup first
+        // Online lookup by ID first (exact)
         item = await InventoryService.getItem(normalizedId);
       } catch (err) {
-        const msg = err?.message || String(err);
-        // Likely offline or server unreachable – fall back to local inventory
-        if (/Network request failed|Failed to fetch|TypeError|NetworkError|HTTP 502|HTTP 503|HTTP 504/i.test(msg)) {
-          const norm = normalizedId.toLowerCase();
-          item =
-            inventory.find(
-              (i) =>
-                String(i.id ?? '')
-                  .trim()
-                  .toLowerCase() === norm ||
-                String(i.external_code ?? '')
-                  .trim()
-                  .toLowerCase() === norm,
-            ) || null;
-        } else {
-          throw err;
+        // Network / server errors — fall through to local name/fuzzy search
+        console.warn('Item ID lookup failed, trying local search:', err?.message || err);
+      }
+
+      if (!item) {
+        const { item: localBest, matches } = resolveBestInventoryMatch(
+          inventory,
+          rawQuery,
+        );
+        if (localBest) {
+          item = localBest;
+        } else if (matches.length > 0) {
+          item = matches[0]?.item || null;
         }
       }
 
       if (!item) {
-        const title = 'Paint Not Found';
+        const title = 'Material Not Found';
         const msg =
-          `No paint found with ID: ${normalizedId}.\n\n` +
-          'If you are offline, make sure the paint exists in this device’s inventory first (via a full sync while online).';
+          `No material matched "${rawQuery}".\n\n` +
+          'Try the full name, ID, or pick a suggestion from the list. If you are offline, sync inventory while online first.';
 
-        // RN Web `Alert.alert` can be unreliable/suppressed; use browser-native alert.
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           window.alert(`${title}\n\n${msg}`);
-          setCurrentScreen('list');
+          setCurrentScreen('qrscan');
         } else {
           showAlert(title, msg, [
-            { text: 'OK', onPress: () => setCurrentScreen('list') },
+            { text: 'OK', onPress: () => setCurrentScreen('qrscan') },
           ]);
         }
         return;
       }
 
-      // Item exists - show check in/out screen
       setScannedItem(item);
       setCurrentScreen('checkinout');
     } finally {
@@ -649,10 +643,10 @@ export default function App() {
         const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
         if (result.success) {
           await loadInventory();
-          showAlert(
-            'Success',
-            `Checked in ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-          );
+          showToast({
+            title: 'Checked in',
+            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+          });
           await AuditService.log({
             type: 'check_in',
             user: actorName,
@@ -673,10 +667,11 @@ export default function App() {
           userName: actorName,
           actionType: 'check_in',
         });
-        showAlert(
-          'Saved offline',
-          `Check-in for "${scannedItem.name}" will sync when you are back online.`
-        );
+        showToast({
+          type: 'info',
+          title: 'Saved offline',
+          message: `Check-in for "${scannedItem.name}" will sync when online.`,
+        });
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -706,10 +701,10 @@ export default function App() {
         }
         await loadInventory();
         await refreshReceiveOrders(true);
-        showAlert(
-          'Success',
-          `Received ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-        );
+        showToast({
+          title: 'Received',
+          message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+        });
         await AuditService.log({
           type: 'receiving',
           user: actorName,
@@ -728,10 +723,11 @@ export default function App() {
           actionType: 'receiving',
           orderId,
         });
-        showAlert(
-          'Saved offline',
-          `Receiving for "${scannedItem.name}" will sync when you are back online.`
-        );
+        showToast({
+          type: 'info',
+          title: 'Saved offline',
+          message: `Receiving for "${scannedItem.name}" will sync when online.`,
+        });
       }
       setScannedItem(null);
       const target = previousScreen || 'home';
@@ -747,10 +743,10 @@ export default function App() {
         const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
         if (result.success) {
           await loadInventory();
-          showAlert(
-            'Success',
-            `Checked out ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`
-          );
+          showToast({
+            title: 'Checked out',
+            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+          });
           await AuditService.log({
             type: 'check_out',
             user: actorName,
@@ -774,10 +770,11 @@ export default function App() {
           userName: actorName,
           actionType: 'check_out',
         });
-        showAlert(
-          'Saved offline',
-          `Check-out for "${scannedItem.name}" will sync when you are back online.`
-        );
+        showToast({
+          type: 'info',
+          title: 'Saved offline',
+          message: `Check-out for "${scannedItem.name}" will sync when online.`,
+        });
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -799,10 +796,10 @@ export default function App() {
         );
         if (result.success) {
           await loadInventory();
-          showAlert(
-            'Recycled',
-            `Recycled ${quantity} gallons for "${scannedItem.name}".\n\nNew quantity: ${result.item.quantity} gallons`,
-          );
+          showToast({
+            title: 'Recycled',
+            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+          });
           await AuditService.log({
             type: 'recycled',
             user: actorName,
@@ -825,10 +822,11 @@ export default function App() {
           userName: actorName,
           actionType: 'recycled',
         });
-        showAlert(
-          'Saved offline',
-          `Recycle for "${scannedItem.name}" will sync when you are back online.`,
-        );
+        showToast({
+          type: 'info',
+          title: 'Saved offline',
+          message: `Recycle for "${scannedItem.name}" will sync when online.`,
+        });
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -854,7 +852,7 @@ export default function App() {
           await loadInventory();
           setCurrentScreen('home');
           setPreviousScreen('home');
-          showAlert('Success', 'Item added successfully.');
+          showToast({ title: 'Saved', message: 'Item added successfully.' });
           await AuditService.log({
             type: 'add_item',
             user: actorName,
@@ -979,7 +977,7 @@ export default function App() {
       } else if (result.item) {
         setSelectedItem(result.item);
       }
-      showAlert('Success', 'Item saved successfully.');
+      showToast({ title: 'Saved', message: 'Item saved successfully.' });
       await AuditService.log({
         type: isExistingItem ? 'edit_item' : 'add_item',
         user: actorName,
@@ -1002,7 +1000,7 @@ export default function App() {
         setSelectedItem(null);
         await loadInventory();
         setCurrentScreen('home');
-        Alert.alert('Success', 'Item deleted successfully.');
+        showToast({ title: 'Deleted', message: 'Item deleted successfully.' });
         await AuditService.log({
           type: 'delete_item',
           user: actorName,
@@ -1064,7 +1062,7 @@ export default function App() {
       const url = `${API_URL}/api/export/excel`;
       if (Platform.OS === 'web') {
         window.open(url, '_blank');
-        Alert.alert('Success', 'Excel file download started.');
+        showToast({ title: 'Export', message: 'Excel file download started.' });
       } else {
         Alert.alert('Export Excel', `Please visit this URL to download:\n${url}`, [{ text: 'OK' }]);
       }
@@ -1085,7 +1083,10 @@ export default function App() {
     const url = MaterialUsageService.getExportExcelUrl(from, to);
     if (Platform.OS === 'web' && typeof window !== 'undefined' && window.open) {
       window.open(url, '_blank');
-      Alert.alert('Success', 'Material usage Excel download started.');
+      showToast({
+        title: 'Export',
+        message: 'Material usage Excel download started.',
+      });
     } else {
       Alert.alert('Export', `Open this URL to download:\n${url}`);
     }
@@ -1272,6 +1273,7 @@ export default function App() {
         return (
           <QRScanScreen
             embeddedInShell={embeddedInShell}
+            inventory={inventory}
             onScanResult={handleScanResult}
             onCancel={exitCheckInFlow}
           />
@@ -1540,6 +1542,7 @@ export default function App() {
             <Text style={styles.loadingText}>Looking up material…</Text>
           </View>
         </FadeOverlay>
+        <ToastHost />
         <Modal
           visible={showAdminItemDialog}
           transparent

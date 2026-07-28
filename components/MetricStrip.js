@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet, Pressable } from "react-native";
 import { Card, Text, Title, useTheme } from "react-native-paper";
+import BumpText from "./BumpText";
 
 /**
  * @param {Array<{ id?: string, label: string, value: string|number, color?: string, onPress?: () => void, active?: boolean }>} items
@@ -20,14 +21,19 @@ export default function MetricStrip({ items = [], style }) {
             >
               {item.label}
             </Text>
-            <Title
-              style={[
-                styles.value,
-                { color: item.color || theme.colors.primary },
-              ]}
+            <BumpText
+              value={item.value}
+              bumpKey={`${item.id || item.label}:${item.value}`}
             >
-              {item.value}
-            </Title>
+              <Title
+                style={[
+                  styles.value,
+                  { color: item.color || theme.colors.primary },
+                ]}
+              >
+                {item.value}
+              </Title>
+            </BumpText>
           </Card.Content>
         );
 

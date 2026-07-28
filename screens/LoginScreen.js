@@ -9,6 +9,8 @@ import {
   useTheme,
 } from "react-native-paper";
 import FadeIn from "../components/FadeIn";
+import ShakeView from "../components/ShakeView";
+import showToast from "../utils/showToast";
 
 export default function LoginScreen({ onLogin }) {
   const theme = useTheme();
@@ -17,10 +19,19 @@ export default function LoginScreen({ onLogin }) {
   const desktopBreakpoint = 700;
   const isDesktop = isWeb && width >= desktopBreakpoint;
   const [name, setName] = useState("");
+  const [shakeTick, setShakeTick] = useState(0);
 
   const submit = () => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Name required",
+        message: "Enter your name to continue.",
+      });
+      return;
+    }
     onLogin(trimmed);
   };
 
@@ -28,35 +39,41 @@ export default function LoginScreen({ onLogin }) {
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <FadeIn fromY={16} duration={360} style={isDesktop ? styles.webWrapper : undefined}>
-        <Card style={[styles.card, isDesktop && styles.webCard]}>
-          <Card.Content>
-            <Title style={styles.title}>Paint Inventory Tracker</Title>
-            <Paragraph style={styles.subtitle}>
-              Enter your name to continue.
-            </Paragraph>
+      <FadeIn
+        fromY={16}
+        duration={360}
+        style={isDesktop ? styles.webWrapper : undefined}
+      >
+        <ShakeView trigger={shakeTick}>
+          <Card style={[styles.card, isDesktop && styles.webCard]}>
+            <Card.Content>
+              <Title style={styles.title}>Paint Inventory Tracker</Title>
+              <Paragraph style={styles.subtitle}>
+                Enter your name to continue.
+              </Paragraph>
 
-            <TextInput
-              label="Name"
-              value={name}
-              onChangeText={setName}
-              mode="outlined"
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-              onSubmitEditing={submit}
-            />
+              <TextInput
+                label="Name"
+                value={name}
+                onChangeText={setName}
+                mode="outlined"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+                onSubmitEditing={submit}
+                error={shakeTick > 0 && !name.trim()}
+              />
 
-            <Button
-              mode="contained"
-              onPress={submit}
-              disabled={!name.trim()}
-              style={styles.button}
-            >
-              Continue
-            </Button>
-          </Card.Content>
-        </Card>
+              <Button
+                mode="contained"
+                onPress={submit}
+                style={styles.button}
+              >
+                Continue
+              </Button>
+            </Card.Content>
+          </Card>
+        </ShakeView>
       </FadeIn>
     </View>
   );
@@ -98,12 +115,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 12,
   },
-  toggleLabel: {
-    color: "#666",
-  },
   webWrapper: {
     width: "100%",
-    maxWidth: 450,
+    maxWidth: 420,
     alignSelf: "center",
   },
   webCard: {

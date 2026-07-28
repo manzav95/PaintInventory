@@ -21,6 +21,7 @@ import ToolbarCard from "../components/ToolbarCard";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import SimpleLineChart from "../components/SimpleLineChart";
 import DateField from "../components/DateField";
+import { SkeletonStack } from "../components/SkeletonBlock";
 import ReportService from "../services/reportService";
 import CustomColorsReportModal from "../components/CustomColorsReportModal";
 import MaterialUsageReportModal from "../components/MaterialUsageReportModal";
@@ -508,9 +509,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                 Color search · {reportRange.from} to {reportRange.to}
               </Text>
               {itemActivityLoading ? (
-                <View style={styles.searchPlaceholder}>
-                  <ActivityIndicator />
-                </View>
+                <SkeletonStack lines={3} style={{ marginTop: 4 }} />
               ) : searchResults.length === 0 ? (
                 <View style={styles.searchPlaceholder}>
                   <Text style={{ color: theme.colors.onSurfaceVariant }}>
@@ -609,7 +608,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                 <View style={styles.itemTimelineSection}>
                   {itemTimelineLoading || !itemTimeline ? (
                     <View style={styles.itemTimelinePlaceholder}>
-                      <ActivityIndicator />
+                      <SkeletonStack lines={6} />
                     </View>
                   ) : (
                     <>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -270,6 +270,59 @@ export default function PlaceOrderScreen({
   const [modalQty, setModalQty] = useState("");
   const [modalJob, setModalJob] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const searchInputRef = useRef(null);
+  const qtyInputRef = useRef(null);
+  const jobInputRef = useRef(null);
+  /** Bump after add so we refocus search once the modal has fully closed. */
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+
+  const focusSearch = useCallback(() => {
+    const run = () => {
+      try {
+        searchInputRef.current?.focus?.();
+      } catch (_) {
+        /* ignore */
+      }
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        const host = document.querySelector(
+          '[data-search-anchor="place-order-search"]',
+        );
+        const input = host?.querySelector?.("input");
+        if (input && typeof input.focus === "function") {
+          input.focus();
+          try {
+            input.select?.();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+      }
+    };
+    run();
+    // Modal teardown on web needs a few frames
+    requestAnimationFrame(run);
+    setTimeout(run, 50);
+    setTimeout(run, 150);
+    setTimeout(run, 300);
+  }, []);
+
+  useEffect(() => {
+    focusSearch();
+  }, [focusSearch]);
+
+  useEffect(() => {
+    if (!searchFocusToken || addModalItem) return undefined;
+    focusSearch();
+    return undefined;
+  }, [searchFocusToken, addModalItem, focusSearch]);
+
+  useEffect(() => {
+    if (!addModalItem) return undefined;
+    const t = setTimeout(() => {
+      qtyInputRef.current?.focus?.();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [addModalItem]);
 
   const inventoryById = useMemo(() => {
     const map = new Map();
@@ -305,6 +358,13 @@ export default function PlaceOrderScreen({
     () => buildGroupedBundles(filteredItems, filterTab),
     [filteredItems, filterTab],
   );
+
+  const topSearchItem = useMemo(() => {
+    for (const bundle of groupedBundles) {
+      if (bundle?.items?.length) return bundle.items[0];
+    }
+    return filteredItems[0] || null;
+  }, [groupedBundles, filteredItems]);
 
   const orderLines = useMemo(() => {
     return orderLineIds
@@ -342,6 +402,12 @@ export default function PlaceOrderScreen({
     [lineState],
   );
 
+  const handleSearchSubmit = useCallback(() => {
+    const q = (searchQuery || "").trim();
+    if (!q || !topSearchItem) return;
+    openAddModal(topSearchItem);
+  }, [searchQuery, topSearchItem, openAddModal]);
+
   const confirmAddModal = useCallback(() => {
     if (!addModalItem?.id) return;
     const parsed = parseGallonQuantity(modalQty, addModalItem.type);
@@ -365,7 +431,9 @@ export default function PlaceOrderScreen({
       },
     }));
     setOrderLineIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setSearchQuery("");
     closeAddModal();
+    setSearchFocusToken((n) => n + 1);
   }, [addModalItem, modalQty, modalJob, closeAddModal]);
 
   const handleSubmit = async () => {
@@ -543,15 +611,22 @@ export default function PlaceOrderScreen({
           <Text
             style={[styles.intro, { color: theme.colors.onSurfaceVariant }]}
           >
-            Tap an item to enter quantity. Your order stays pinned above while
-            you browse.
+            Tap an item to enter quantity, or type a search and press Enter for
+            the top match. After adding, search clears for the next item.
           </Text>
 
           <OutlinedSearchInput
+            ref={searchInputRef}
+            inputDomId="place-order-search"
             placeholder="Search name or code"
             value={searchQuery}
             onChangeText={setSearchQuery}
             style={styles.filterSearch}
+            returnKeyType="search"
+            blurOnSubmit={false}
+            onSubmitEditing={handleSearchSubmit}
+            autoCorrect={false}
+            autoCapitalize="none"
           />
 
           <View
@@ -966,23 +1041,26 @@ export default function PlaceOrderScreen({
                     ID: {String(addModalItem.id)}
                   </Text>
                   <TextInput
+                    ref={qtyInputRef}
                     mode="outlined"
-                    label={
-                      allowsHalfGallon(addModalItem.type)
-                        ? "Quantity (gal, 0.5 ok)"
-                        : "Quantity (gal)"
-                    }
+                    label="Quantity (gal)"
                     value={modalQty}
                     onChangeText={(t) =>
                       setModalQty(
                         sanitizeGallonInput(t, allowsHalfGallon(addModalItem.type)),
                       )
                     }
-                    onSubmitEditing={
-                      isCustomColorItem(addModalItem)
-                        ? undefined
-                        : confirmAddModal
+                    onSubmitEditing={() => {
+                      if (isCustomColorItem(addModalItem)) {
+                        jobInputRef.current?.focus?.();
+                        return;
+                      }
+                      confirmAddModal();
+                    }}
+                    returnKeyType={
+                      isCustomColorItem(addModalItem) ? "next" : "done"
                     }
+                    blurOnSubmit={!isCustomColorItem(addModalItem)}
                     keyboardType={
                       allowsHalfGallon(addModalItem.type)
                         ? "decimal-pad"
@@ -994,11 +1072,13 @@ export default function PlaceOrderScreen({
                   />
                   {isCustomColorItem(addModalItem) ? (
                     <TextInput
+                      ref={jobInputRef}
                       mode="outlined"
                       label="Job number"
                       value={modalJob}
                       onChangeText={setModalJob}
                       onSubmitEditing={confirmAddModal}
+                      returnKeyType="done"
                       placeholder="#"
                       keyboardType="number-pad"
                       maxLength={10}

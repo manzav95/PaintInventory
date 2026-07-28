@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   Platform,
   useWindowDimensions,
+  Pressable,
 } from "react-native";
 import { CameraView, Camera } from "expo-camera";
 import {
@@ -18,18 +19,80 @@ import {
 } from "react-native-paper";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import {
+  findInventoryLookupMatches,
+  resolveBestInventoryMatch,
+} from "../utils/itemLookup";
+
+function LookupSuggestions({ matches, theme, onPick }) {
+  if (!matches.length) return null;
+  return (
+    <View
+      style={[
+        styles.suggestBox,
+        {
+          borderColor: theme.colors.outlineVariant,
+          backgroundColor: theme.colors.surfaceContainerHigh,
+        },
+      ]}
+    >
+      {matches.map(({ item, score }, idx) => (
+        <Pressable
+          key={String(item.id)}
+          onPress={() => onPick(item)}
+          style={({ pressed }) => [
+            styles.suggestRow,
+            idx > 0 && {
+              borderTopWidth: 1,
+              borderTopColor: theme.colors.outlineVariant,
+            },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <View style={styles.suggestMain}>
+            <Text
+              style={[styles.suggestName, { color: theme.colors.onSurface }]}
+              numberOfLines={1}
+            >
+              {item.name || item.id}
+            </Text>
+            <Text
+              style={[
+                styles.suggestMeta,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+              numberOfLines={1}
+            >
+              {item.id}
+              {item.external_code ? ` · ${item.external_code}` : ""}
+            </Text>
+          </View>
+          {score < 900 ? (
+            <Text
+              style={[
+                styles.suggestHint,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              close match
+            </Text>
+          ) : null}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
 
 export default function QRScanScreen({
   onScanResult,
   onCancel,
   embeddedInShell = false,
+  inventory = [],
 }) {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
-  const isTabletOrSmaller = !isDesktop;
 
-  // Check if we're on web accessing via IP (not localhost) - camera won't work
   const isWebViaIP =
     isWeb &&
     typeof window !== "undefined" &&
@@ -39,11 +102,16 @@ export default function QRScanScreen({
 
   const [hasPermission, setHasPermission] = useState(null);
   const [scanned, setScanned] = useState(false);
-  // Always default to manual input; users can switch to camera if desired
   const [inputMode, setInputMode] = useState("manual");
   const [manualInput, setManualInput] = useState("");
   const [permissionError, setPermissionError] = useState(null);
   const theme = useTheme();
+
+  const lookupMatches = useMemo(
+    () =>
+      findInventoryLookupMatches(inventory, manualInput, { limit: 8 }),
+    [inventory, manualInput],
+  );
 
   const requestCameraPermission = async () => {
     try {
@@ -51,7 +119,6 @@ export default function QRScanScreen({
       const { status } = await Camera.requestCameraPermissionsAsync();
       setHasPermission(status === "granted");
       if (status === "granted") {
-        // If permission granted and we're in manual mode, switch to camera
         if (inputMode === "manual" && !isDesktop) {
           setInputMode("camera");
         }
@@ -65,38 +132,52 @@ export default function QRScanScreen({
 
   useEffect(() => {
     if (isWebViaIP) {
-      // Web via IP - camera won't work, skip permission request
       setHasPermission(false);
       setPermissionError(
         "Camera requires HTTPS or localhost. Use manual entry instead.",
       );
     } else if (isDesktop) {
-      // On desktop localhost, we don't need camera permission
       setHasPermission(false);
     } else {
-      // On native mobile/tablet, we'll request permission only when user switches to camera
       setHasPermission(null);
     }
   }, []);
 
   const handleBarCodeScanned = ({ type, data }) => {
-    if (scanned) return;
-
-    setScanned(true);
-    if (data) {
+    if (!scanned) {
+      setScanned(true);
       onScanResult(data);
-    } else {
-      Alert.alert("Scan Failed", "Could not read QR code.");
-      setScanned(false);
+      setTimeout(() => {
+        setScanned(false);
+      }, 2000);
     }
+  };
+
+  const pickItem = (item) => {
+    if (!item?.id) return;
+    onScanResult(String(item.id));
   };
 
   const handleManualSubmit = () => {
     const trimmed = manualInput.trim();
     if (!trimmed) {
-      Alert.alert("Invalid Input", "Please enter a Paint Code ID.");
+      Alert.alert("Invalid Input", "Please enter a material name or ID.");
       return;
     }
+
+    const { item, matches } = resolveBestInventoryMatch(inventory, trimmed);
+    if (item?.id) {
+      onScanResult(String(item.id));
+      return;
+    }
+    if (matches.length > 1) {
+      Alert.alert(
+        "Multiple matches",
+        "Several materials look similar — pick one from the list below.",
+      );
+      return;
+    }
+    // Still allow raw ID submit (online lookup / not yet in local list)
     onScanResult(trimmed);
   };
 
@@ -109,7 +190,52 @@ export default function QRScanScreen({
     />
   ) : null;
 
-  // Desktop: Always show manual input only
+  const renderManualFields = ({ title, subtitle, autoFocus = false }) => (
+    <>
+      <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+        {title}
+      </Text>
+      <Text
+        style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}
+      >
+        {subtitle}
+      </Text>
+
+      <TextInput
+        label="Name or ID"
+        value={manualInput}
+        onChangeText={setManualInput}
+        mode="outlined"
+        style={styles.input}
+        autoFocus={autoFocus}
+        placeholder="e.g. white primer or H66…"
+        autoCorrect={false}
+        autoCapitalize="none"
+        onSubmitEditing={handleManualSubmit}
+      />
+
+      <LookupSuggestions
+        matches={lookupMatches}
+        theme={theme}
+        onPick={pickItem}
+      />
+
+      <View style={styles.buttonRow}>
+        <Button mode="outlined" onPress={onCancel} style={styles.button}>
+          Cancel
+        </Button>
+        <Button
+          mode="contained"
+          onPress={handleManualSubmit}
+          style={styles.button}
+          disabled={!manualInput.trim()}
+        >
+          Continue
+        </Button>
+      </View>
+    </>
+  );
+
   if (isDesktop) {
     return (
       <View
@@ -120,6 +246,7 @@ export default function QRScanScreen({
             styles.manualContainer,
             styles.webManualContainer,
           ]}
+          keyboardShouldPersistTaps="handled"
         >
           <View style={styles.webWrapper}>
             {shellHeader}
@@ -135,46 +262,12 @@ export default function QRScanScreen({
               ]}
             >
               <Card.Content>
-                <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-                  Enter Material Code
-                </Text>
-                <Text
-                  style={[
-                    styles.subtitle,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  Type or scan the material code below
-                </Text>
-
-                <TextInput
-                  label="Material Code"
-                  value={manualInput}
-                  onChangeText={setManualInput}
-                  mode="outlined"
-                  style={styles.input}
-                  autoFocus
-                  placeholder="Enter material ID"
-                  onSubmitEditing={handleManualSubmit}
-                />
-
-                <View style={styles.buttonRow}>
-                  <Button
-                    mode="outlined"
-                    onPress={onCancel}
-                    style={styles.button}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    mode="contained"
-                    onPress={handleManualSubmit}
-                    style={styles.button}
-                    disabled={!manualInput.trim()}
-                  >
-                    Submit
-                  </Button>
-                </View>
+                {renderManualFields({
+                  title: "Find material",
+                  subtitle:
+                    "Search by name or ID. Close spellings still match when possible.",
+                  autoFocus: true,
+                })}
               </Card.Content>
             </Card>
           </View>
@@ -183,19 +276,17 @@ export default function QRScanScreen({
     );
   }
 
-  // Tablet/Mobile: Camera / Manual toggle lives in the same card as manual entry
   return (
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      {embeddedInShell && (
-        <View style={styles.shellHeaderWrap}>
-          {shellHeader}
-        </View>
-      )}
-      {/* Manual input mode */}
+      {shellHeader}
+
       {inputMode === "manual" && (
-        <ScrollView contentContainerStyle={styles.manualContainer}>
+        <ScrollView
+          contentContainerStyle={styles.manualContainer}
+          keyboardShouldPersistTaps="handled"
+        >
           <Card
             style={[
               styles.card,
@@ -230,9 +321,6 @@ export default function QRScanScreen({
                   },
                 ]}
               />
-              <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-                Enter Paint Code ID
-              </Text>
               {isWebViaIP && (
                 <Text
                   style={[
@@ -244,45 +332,21 @@ export default function QRScanScreen({
                     },
                   ]}
                 >
-                  ⚠️ Camera access requires HTTPS or localhost. Manual entry is
+                  Camera access requires HTTPS or localhost. Manual entry is
                   available.
                 </Text>
               )}
-
-              <TextInput
-                label="Paint Code ID"
-                value={manualInput}
-                onChangeText={setManualInput}
-                mode="outlined"
-                style={styles.input}
-                autoFocus
-                placeholder="Enter paint ID"
-                onSubmitEditing={handleManualSubmit}
-              />
-
-              <View style={styles.buttonRow}>
-                <Button
-                  mode="outlined"
-                  onPress={onCancel}
-                  style={styles.button}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  mode="contained"
-                  onPress={handleManualSubmit}
-                  style={styles.button}
-                  disabled={!manualInput.trim()}
-                >
-                  Submit
-                </Button>
-              </View>
+              {renderManualFields({
+                title: "Find material",
+                subtitle:
+                  "Search by name or ID. Close spellings still match when possible.",
+                autoFocus: true,
+              })}
             </Card.Content>
           </Card>
         </ScrollView>
       )}
 
-      {/* Camera mode */}
       {inputMode === "camera" && (
         <>
           {hasPermission === null && (
@@ -293,7 +357,10 @@ export default function QRScanScreen({
               ]}
             >
               <Card
-                style={[styles.card, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+                style={[
+                  styles.card,
+                  { backgroundColor: theme.colors.surfaceContainerHighest },
+                ]}
               >
                 <Card.Content style={styles.content}>
                   <SegmentedButtons
@@ -330,9 +397,12 @@ export default function QRScanScreen({
           {hasPermission === false && (
             <ScrollView contentContainerStyle={styles.manualContainer}>
               <Card
-                style={[styles.card, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+                style={[
+                  styles.card,
+                  { backgroundColor: theme.colors.surfaceContainerHighest },
+                ]}
               >
-                <Card.Content style={styles.content}>
+                <Card.Content>
                   <SegmentedButtons
                     value={inputMode}
                     onValueChange={(value) => {
@@ -357,125 +427,89 @@ export default function QRScanScreen({
                     ]}
                   />
                   <Text
-                    style={[styles.message, { color: theme.colors.onSurface }]}
+                    style={[styles.title, { color: theme.colors.onSurface }]}
                   >
-                    {permissionError
-                      ? `Camera error: ${permissionError}`
-                      : "Camera permission is required to scan QR codes."}
+                    Camera Permission Required
                   </Text>
                   <Text
                     style={[
                       styles.subtitle,
-                      {
-                        color: theme.colors.onSurfaceVariant,
-                        marginBottom: 20,
-                      },
+                      { color: theme.colors.onSurfaceVariant },
                     ]}
                   >
                     You can use manual entry instead, or try granting permission
                     again.
                   </Text>
-                  <View style={styles.buttonRow}>
-                    <Button
-                      mode="outlined"
-                      onPress={onCancel}
-                      style={styles.button}
+                  {permissionError ? (
+                    <Text
+                      style={{
+                        color: theme.colors.error,
+                        marginBottom: 12,
+                        fontSize: 12,
+                      }}
                     >
-                      Go Back
-                    </Button>
-                    <Button
-                      mode="contained"
-                      onPress={requestCameraPermission}
-                      style={styles.button}
-                    >
-                      Request Permission
-                    </Button>
-                  </View>
+                      {permissionError}
+                    </Text>
+                  ) : null}
+                  <Button
+                    mode="contained"
+                    onPress={requestCameraPermission}
+                    style={styles.button}
+                  >
+                    Grant Permission
+                  </Button>
+                  <Button
+                    mode="outlined"
+                    onPress={() => setInputMode("manual")}
+                    style={styles.button}
+                  >
+                    Use Manual Entry
+                  </Button>
                 </Card.Content>
               </Card>
             </ScrollView>
           )}
 
           {hasPermission === true && (
-            <View style={styles.cameraModeColumn}>
-              <Card
-                style={[
-                  styles.cardCameraHeader,
-                  { backgroundColor: theme.colors.surfaceContainerHighest },
+            <View style={styles.cameraWrap}>
+              <SegmentedButtons
+                value={inputMode}
+                onValueChange={(value) => {
+                  setInputMode(value);
+                  if (value === "camera" && hasPermission !== true) {
+                    requestCameraPermission();
+                  }
+                }}
+                style={[styles.modeSegmented, styles.cameraSegmented]}
+                buttons={[
+                  {
+                    value: "camera",
+                    label: "Camera",
+                    icon: "camera",
+                    disabled: isWebViaIP,
+                  },
+                  {
+                    value: "manual",
+                    label: "Manual",
+                    icon: "keyboard",
+                  },
                 ]}
-              >
-                <Card.Content style={styles.cardCameraHeaderContent}>
-                  <SegmentedButtons
-                    value={inputMode}
-                    onValueChange={(value) => {
-                      setInputMode(value);
-                      if (value === "camera" && hasPermission !== true) {
-                        requestCameraPermission();
-                      }
-                    }}
-                    style={styles.modeSegmented}
-                    buttons={[
-                      {
-                        value: "camera",
-                        label: "Camera",
-                        icon: "camera",
-                        disabled: isWebViaIP,
-                      },
-                      {
-                        value: "manual",
-                        label: "Manual",
-                        icon: "keyboard",
-                      },
-                    ]}
-                  />
-                </Card.Content>
-              </Card>
+              />
               <CameraView
                 style={styles.camera}
                 facing="back"
-                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
                 barcodeScannerSettings={{
                   barcodeTypes: ["qr"],
                 }}
-              >
-                <View style={styles.overlay}>
-                  <View style={styles.scanArea}>
-                    <View style={[styles.corner, styles.topLeft]} />
-                    <View style={[styles.corner, styles.topRight]} />
-                    <View style={[styles.corner, styles.bottomLeft]} />
-                    <View style={[styles.corner, styles.bottomRight]} />
-                  </View>
-                  <Text style={styles.instruction}>
-                    Position the QR code within the frame
-                  </Text>
-                </View>
-              </CameraView>
-
-              <View
-                style={[
-                  styles.controls,
-                  { backgroundColor: theme.colors.surfaceContainerHighest },
-                ]}
-              >
-                <Button
-                  mode="outlined"
-                  onPress={() => {
-                    setScanned(false);
-                    onCancel();
-                  }}
-                  style={styles.button}
-                >
-                  Cancel
-                </Button>
-                {scanned && (
-                  <Button
-                    mode="contained"
-                    onPress={() => setScanned(false)}
-                    style={styles.button}
-                  >
-                    Scan Again
+                onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+              />
+              <View style={styles.cameraOverlay}>
+                <Text style={styles.cameraHint}>Align QR code in frame</Text>
+                {scanned ? (
+                  <Button mode="contained" onPress={() => setScanned(false)}>
+                    Scan again
                   </Button>
-                )}
+                ) : null}
               </View>
             </View>
           )}
@@ -486,138 +520,77 @@ export default function QRScanScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  cameraModeColumn: {
-    flex: 1,
-    width: "100%",
-  },
-  cardCameraHeader: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 0,
-    elevation: 4,
-  },
-  cardCameraHeaderContent: {
-    paddingVertical: 4,
-  },
-  modeSegmented: {
-    marginBottom: 16,
-  },
-  camera: {
-    flex: 1,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  scanArea: {
-    width: 250,
-    height: 250,
-    position: "relative",
-  },
-  corner: {
-    position: "absolute",
-    width: 30,
-    height: 30,
-    borderColor: "#6f95ab",
-    borderWidth: 3,
-  },
-  topLeft: {
-    top: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderBottomWidth: 0,
-  },
-  topRight: {
-    top: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderBottomWidth: 0,
-  },
-  bottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderRightWidth: 0,
-    borderTopWidth: 0,
-  },
-  bottomRight: {
-    bottom: 0,
-    right: 0,
-    borderLeftWidth: 0,
-    borderTopWidth: 0,
-  },
-  instruction: {
-    color: "#fff",
-    fontSize: 16,
-    marginTop: 30,
-    textAlign: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 10,
-    borderRadius: 5,
-  },
-  controls: {
-    padding: 20,
-    backgroundColor: "#fff",
-  },
-  button: {
-    marginTop: 10,
-  },
-  card: {
-    margin: 20,
-    elevation: 4,
-  },
-  content: {
-    alignItems: "stretch",
-    paddingVertical: 24,
-  },
-  message: {
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  shellHeaderWrap: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    maxWidth: 1200,
-    alignSelf: "center",
-    width: "100%",
-  },
+  container: { flex: 1 },
   manualContainer: {
+    padding: 16,
+    paddingBottom: 40,
     flexGrow: 1,
-    justifyContent: "center",
-    padding: 20,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 14,
-    marginBottom: 24,
-    textAlign: "center",
-  },
-  input: {
-    marginBottom: 20,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
+  webManualContainer: {
+    alignItems: "center",
   },
   webWrapper: {
     width: "100%",
-    maxWidth: 500,
-    alignSelf: "center",
+    maxWidth: 480,
   },
-  webCard: {
-    width: "100%",
+  webCard: { width: "100%" },
+  card: { elevation: 2 },
+  content: { gap: 12 },
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 6,
   },
-  webManualContainer: {},
+  subtitle: {
+    fontSize: 14,
+    marginBottom: 14,
+  },
+  input: {
+    marginBottom: 10,
+    backgroundColor: "transparent",
+  },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 8,
+  },
+  button: { flex: 1 },
+  modeSegmented: { marginBottom: 14 },
+  cameraSegmented: {
+    margin: 12,
+  },
+  cameraWrap: { flex: 1 },
+  camera: { flex: 1 },
+  cameraOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 24,
+    alignItems: "center",
+    gap: 12,
+  },
+  cameraHint: {
+    color: "#fff",
+    fontWeight: "600",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 4,
+  },
+  suggestBox: {
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 10,
+    overflow: "hidden",
+  },
+  suggestRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  suggestMain: { flex: 1, minWidth: 0 },
+  suggestName: { fontSize: 15, fontWeight: "600" },
+  suggestMeta: { fontSize: 12, marginTop: 2 },
+  suggestHint: { fontSize: 11, fontStyle: "italic" },
 });

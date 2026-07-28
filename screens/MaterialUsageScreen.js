@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   View,
   StyleSheet,
   ScrollView,
   Platform,
   useWindowDimensions,
-  FlatList,
   Pressable,
   RefreshControl,
   Modal,
@@ -23,7 +22,14 @@ import {
   Checkbox,
 } from "react-native-paper";
 import DateField from "../components/DateField";
+import TimeField from "../components/TimeField";
 import PageHeader from "../components/PageHeader";
+import ShakeView from "../components/ShakeView";
+import FormHelp from "../components/FormHelp";
+import StaggerItem from "../components/StaggerItem";
+import { SkeletonStack } from "../components/SkeletonBlock";
+import showToast from "../utils/showToast";
+import { MATERIAL_USAGE_FORM_HELP } from "../constants/formHelpContent";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
@@ -56,41 +62,6 @@ function formatTimeForInput(d) {
   const h12 = h % 12 || 12;
   const ampm = h < 12 ? "AM" : "PM";
   return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-}
-
-/** Parse "3:00 PM" into { timePart: "3:00", ampm: "PM" }. Used so AM/PM is not editable in the time field. */
-function parseEntryTime(entryTime) {
-  const s = (entryTime || "").trim();
-  const match = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (match)
-    return {
-      timePart: `${match[1]}:${match[2]}`,
-      ampm: match[3].toUpperCase(),
-    };
-  const parts = s.split(/\s+/);
-  if (parts.length >= 2) {
-    const ampmPart = (parts[parts.length - 1] || "").toUpperCase();
-    if (ampmPart === "AM" || ampmPart === "PM") {
-      const timePart = parts.slice(0, -1).join(" ").trim();
-      if (/^\d{1,2}:\d{2}$/.test(timePart)) return { timePart, ampm: ampmPart };
-    }
-  }
-  if (/^\d{1,2}:\d{2}$/.test(s)) return { timePart: s, ampm: "PM" };
-  return { timePart: "12:00", ampm: "PM" };
-}
-
-/** Restrict time input to digits and one colon (H:MM or HH:MM). Strips other characters, max 5 chars. */
-function sanitizeTimePart(input) {
-  let s = input.replace(/[^\d:]/g, "");
-  const firstColon = s.indexOf(":");
-  if (firstColon === -1) return s.slice(0, 2);
-  const before = s.slice(0, firstColon).slice(0, 2);
-  const after = s
-    .slice(firstColon + 1)
-    .replace(/:/g, "")
-    .slice(0, 2);
-  s = after.length ? `${before}:${after}` : `${before}:`;
-  return s.slice(0, 5);
 }
 
 function formatTimeDisplay(t) {
@@ -296,22 +267,17 @@ export default function MaterialUsageScreen({
   const now = useMemo(() => new Date(), []);
   const [entryDate, setEntryDate] = useState(() => formatDateForInput(now));
   const [entryTime, setEntryTime] = useState(() => formatTimeForInput(now));
-  const [timePart, setTimePart] = useState(
-    () => parseEntryTime(formatTimeForInput(now)).timePart,
-  );
-  const [ampm, setAmpm] = useState(
-    () => parseEntryTime(formatTimeForInput(now)).ampm,
-  );
   const [jobName, setJobName] = useState("");
   const [colorQuery, setColorQuery] = useState("");
   const [selectedItem, setSelectedItem] = useState(null);
-  const [showColorList, setShowColorList] = useState(false);
+  const [materialFocused, setMaterialFocused] = useState(false);
   const [customColor, setCustomColor] = useState("");
   const [qty, setQty] = useState("");
   const [cupGun, setCupGun] = useState(false);
   const [booth, setBoothState] = useState(BOOTH_OPTIONS[0].value);
   const [submitting, setSubmitting] = useState(false);
   const [catalyzedDialogVisible, setCatalyzedDialogVisible] = useState(false);
+  const [shakeTick, setShakeTick] = useState(0);
   const [pendingEntry, setPendingEntry] = useState(null);
   const [logs, setLogs] = useState([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
@@ -320,7 +286,6 @@ export default function MaterialUsageScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [expandedLogDayKeys, setExpandedLogDayKeys] = useState([]);
-  const lastAmpmTapRef = useRef(0);
 
   const setBooth = (value) => {
     setBoothState(value);
@@ -374,9 +339,9 @@ export default function MaterialUsageScreen({
 
   const effectiveMaterialType = useMemo(() => {
     if (selectedItem) return (selectedItem.type || "").toLowerCase() || null;
-    const custom = (customColor || "").trim();
+    const custom = (customColor || colorQuery || "").trim();
     return custom ? deriveCustomCategory(custom) : null;
-  }, [selectedItem, customColor]);
+  }, [selectedItem, customColor, colorQuery]);
 
   const needsCatalyst = useMemo(
     () =>
@@ -401,72 +366,32 @@ export default function MaterialUsageScreen({
     return Math.round(oz * 100) / 100;
   }, [qty, needsCatalyst, cupGun]);
 
-  const filteredInventory = useMemo(() => {
+  const materialSuggestions = useMemo(() => {
     const paintClearPrimer = inventory.filter((i) =>
       MATERIAL_USAGE_COLOR_TYPES.includes(String(i.type || "").toLowerCase()),
     );
     const q = (colorQuery || "").trim().toLowerCase();
-    if (!q) {
-      // Sort by: most recently used today → most used last 30 days → name/id
-      const todayKey = formatDateForInput(new Date());
-      const monthCutoff = new Date();
-      monthCutoff.setDate(monthCutoff.getDate() - 30);
-      monthCutoff.setHours(0, 0, 0, 0);
-
-      const lastUsedTodayById = new Map();
-      const monthCountById = new Map();
-
-      for (const row of logs || []) {
-        const id = row.item_id != null ? String(row.item_id).trim() : "";
-        if (!id) continue;
-
-        // Month usage count (based on entry_date)
-        if (row.entry_date) {
-          const d = new Date(String(row.entry_date).trim() + "T12:00:00.000Z");
-          if (!Number.isNaN(d.getTime()) && d >= monthCutoff) {
-            monthCountById.set(id, (monthCountById.get(id) || 0) + 1);
-          }
-        }
-
-        // Today's recency (based on "log day" so swing after midnight counts to prior day)
-        const logDay = getLogDate(row, materialUsageOvertime);
-        if (logDay !== todayKey) continue;
-        const minutes = parseTimeToMinutes(row.entry_time);
-        const base = Date.parse(todayKey + "T00:00:00.000Z");
-        const ts =
-          !Number.isNaN(minutes) && !Number.isNaN(base)
-            ? base + minutes * 60 * 1000
-            : Date.now();
-        const prev = lastUsedTodayById.get(id) || 0;
-        if (ts > prev) lastUsedTodayById.set(id, ts);
-      }
-
-      return [...paintClearPrimer]
-        .sort((a, b) => {
-          const aId = a?.id != null ? String(a.id) : "";
-          const bId = b?.id != null ? String(b.id) : "";
-          const aToday = lastUsedTodayById.get(aId) || 0;
-          const bToday = lastUsedTodayById.get(bId) || 0;
-          if (bToday !== aToday) return bToday - aToday;
-          const aCount = monthCountById.get(aId) || 0;
-          const bCount = monthCountById.get(bId) || 0;
-          if (bCount !== aCount) return bCount - aCount;
-          const aName = (a.name || "").toLowerCase();
-          const bName = (b.name || "").toLowerCase();
-          if (aName !== bName) return aName.localeCompare(bName);
-          return String(aId).localeCompare(String(bId));
-        })
-        .slice(0, 50);
-    }
+    // Live search: wait for a few letters, then top 5 hits
+    if (q.length < 2 || selectedItem) return [];
     return paintClearPrimer
       .filter(
         (i) =>
           (i.name || "").toLowerCase().includes(q) ||
           (i.id || "").toLowerCase().includes(q),
       )
-      .slice(0, 50);
-  }, [inventory, colorQuery, logs, materialUsageOvertime]);
+      .sort((a, b) => {
+        const aName = (a.name || a.id || "").toLowerCase();
+        const bName = (b.name || b.id || "").toLowerCase();
+        const aStarts = aName.startsWith(q) ? 0 : 1;
+        const bStarts = bName.startsWith(q) ? 0 : 1;
+        if (aStarts !== bStarts) return aStarts - bStarts;
+        return aName.localeCompare(bName);
+      })
+      .slice(0, 5);
+  }, [inventory, colorQuery, selectedItem]);
 
+  const showMaterialSuggestions =
+    materialFocused && !selectedItem && (colorQuery || "").trim().length >= 2;
   const filteredLogs = useMemo(() => {
     let list = logs;
     if (boothFilter && boothFilter !== "all") {
@@ -613,19 +538,21 @@ export default function MaterialUsageScreen({
       setQty("");
       const now = new Date();
       setEntryDate(formatDateForInput(now));
-      const freshTime = formatTimeForInput(now);
-      setEntryTime(freshTime);
-      const parsed = parseEntryTime(freshTime);
-      setTimePart(parsed.timePart);
-      setAmpm(parsed.ampm);
+      setEntryTime(formatTimeForInput(now));
       // Show the booth that was just logged so the new row is visible
       const nextBooth = entry.booth || boothFilter;
       if (entry.booth) {
         setBoothFilter(entry.booth);
       }
       await loadLogs(nextBooth);
+      showToast({ title: "Saved", message: "Material usage logged." });
     } catch (e) {
       console.error("Submit material usage:", e);
+      showToast({
+        type: "error",
+        title: "Error",
+        message: e?.message || "Failed to save entry.",
+      });
     } finally {
       setSubmitting(false);
       setPendingEntry(null);
@@ -635,10 +562,26 @@ export default function MaterialUsageScreen({
 
   const handleSubmit = () => {
     const job = (jobName || "").trim();
-    if (!job) return;
+    if (!job) {
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Required",
+        message: "Enter a job number.",
+      });
+      return;
+    }
     const customTrim = (customColor || colorQuery || "").trim();
     const hasSelection = selectedItem || customTrim;
-    if (!hasSelection) return;
+    if (!hasSelection) {
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Required",
+        message: "Choose a material or enter a custom one.",
+      });
+      return;
+    }
     if (customTrim && !selectedItem) {
       const parsed = parseCustomMaterialInput(customTrim);
       if (!parsed.ok) {
@@ -650,20 +593,21 @@ export default function MaterialUsageScreen({
           parsed.error === "no_keyword"
             ? 'Please include one of these in your material description: if it\'s a dye, write "dye"; if it\'s a stain, write "stain"; if it\'s a toner, write "toner" (counts as clear).'
             : "Your input contains more than one type (dye, stain, or toner). Please clarify which one applies.";
-        if (
-          Platform.OS === "web" &&
-          typeof window !== "undefined" &&
-          window.alert
-        ) {
-          window.alert(`${title}\n\n${message}`);
-        } else {
-          Alert.alert(title, message);
-        }
+        setShakeTick((n) => n + 1);
+        showToast({ type: "error", title, message, duration: 4200 });
         return;
       }
     }
     const rawQty = parseFloat(String(qty).replace(/,/g, ""), 10);
-    if (isNaN(rawQty) || rawQty <= 0) return;
+    if (isNaN(rawQty) || rawQty <= 0) {
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Required",
+        message: "Enter a quantity greater than zero.",
+      });
+      return;
+    }
     let qtyGallons;
     let catOz = 0;
     if (cupGun) {
@@ -726,7 +670,7 @@ export default function MaterialUsageScreen({
     await submitEntry({ ...pendingEntry, catalyzed_confirmed: true });
   };
 
-  const hasColor = selectedItem || (customColor && customColor.trim());
+  const hasColor = selectedItem || !!(customColor || colorQuery || "").trim();
   const canSubmit =
     (jobName || "").trim() &&
     hasColor &&
@@ -759,10 +703,9 @@ export default function MaterialUsageScreen({
           </View>
         </View>
       </Modal>
-      <View
-        style={[styles.root, { backgroundColor: theme.colors.background }]}
-      >
+      <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
         <ScrollView
+          style={{ width: "100%", maxWidth: "100%" }}
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           refreshControl={
@@ -779,281 +722,224 @@ export default function MaterialUsageScreen({
             embeddedInShell={embeddedInShell}
           />
           <Card style={surfaceCardStyle} mode="outlined">
-            <Card.Content style={styles.form}>
-              <Text
-                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-              >
-                Log mix
-              </Text>
-              <View style={styles.row}>
-                <DateField
-                  label="Date"
-                  value={entryDate}
-                  onChange={setEntryDate}
-                  style={styles.halfInput}
-                />
-                <View style={styles.timeInputRow}>
-                  <TextInput
-                    label="Time"
-                    value={timePart}
-                    onChangeText={(t) => {
-                      const sanitized = sanitizeTimePart(t);
-                      if (sanitized !== undefined) {
-                        setTimePart(sanitized);
-                        setEntryTime(`${sanitized} ${ampm}`);
-                      }
-                    }}
-                    mode="outlined"
-                    style={styles.timePartInput}
-                    placeholder="11:20"
-                    keyboardType="numbers-and-punctuation"
-                  />
-                  <Button
-                    mode="outlined"
-                    onPress={() => {
-                      const now = Date.now();
-                      if (now - lastAmpmTapRef.current < 600) {
-                        const next = ampm === "AM" ? "PM" : "AM";
-                        setAmpm(next);
-                        setEntryTime(`${timePart} ${next}`);
-                        lastAmpmTapRef.current = 0;
-                      } else {
-                        lastAmpmTapRef.current = now;
-                      }
-                    }}
-                    style={styles.ampmButton}
-                    compact
+            <ShakeView trigger={shakeTick} style={styles.shakePad}>
+              <Card.Content style={styles.form}>
+                <View style={styles.formHeaderRow}>
+                  <Text
+                    style={[
+                      styles.sectionLabel,
+                      { color: theme.colors.onSurface },
+                    ]}
                   >
-                    {ampm}
-                  </Button>
+                    Log mix
+                  </Text>
+                  <FormHelp content={MATERIAL_USAGE_FORM_HELP} />
                 </View>
-              </View>
-              <TextInput
-                label="Job Number"
-                value={jobName}
-                onChangeText={setJobName}
-                mode="outlined"
-                style={styles.input}
-                placeholder="e.g. 12345"
-              />
-              <View style={styles.colorSection}>
+                <View style={styles.row}>
+                  <DateField
+                    label="Date"
+                    value={entryDate}
+                    onChange={setEntryDate}
+                    style={styles.halfInput}
+                  />
+                  <TimeField
+                    label="Time"
+                    value={entryTime}
+                    onChange={setEntryTime}
+                    style={styles.halfInput}
+                  />
+                </View>
                 <TextInput
-                  label="Material"
-                  value={
-                    selectedItem
-                      ? selectedItem.name || selectedItem.id
-                      : customColor || colorQuery
-                  }
-                  onChangeText={(t) => {
-                    setColorQuery(t);
-                    if (selectedItem) setSelectedItem(null);
-                    if (customColor) {
-                      setCustomColor("");
-                      setShowColorList(false);
-                    } else {
-                      setShowColorList(true);
-                    }
-                  }}
-                  onFocus={() => {
-                    if (!selectedItem && !customColor) setShowColorList(true);
-                  }}
+                  label="Job Number"
+                  value={jobName}
+                  onChangeText={setJobName}
                   mode="outlined"
                   style={styles.input}
-                  placeholder="Search paint/clear/primer or type custom (e.g. dye, stain, toner)"
-                  right={
-                    selectedItem || customColor ? (
-                      <TextInput.Icon
-                        icon="close"
-                        onPress={() => {
-                          setSelectedItem(null);
-                          setCustomColor("");
-                          setColorQuery("");
-                        }}
-                      />
-                    ) : null
-                  }
+                  placeholder="e.g. 12345"
                 />
-              </View>
-              <Modal
-                visible={showColorList}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowColorList(false)}
-              >
-                <Pressable
-                  style={styles.colorModalOverlay}
-                  onPress={() => setShowColorList(false)}
-                >
-                  <Pressable
-                    style={[
-                      styles.colorModalContent,
-                      { backgroundColor: theme.colors.surface },
-                    ]}
-                    onPress={(e) => e.stopPropagation()}
-                  >
-                    <Text style={styles.colorModalTitle}>Choose Material</Text>
-                    <Text
-                      style={[
-                        styles.colorModalHint,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Paint, clear, primer, dye, stain, toner
-                    </Text>
-                    <TextInput
-                      mode="outlined"
-                      placeholder="Search or type custom..."
-                      value={colorQuery}
-                      onChangeText={(t) => {
-                        setColorQuery(t);
-                        if (selectedItem) setSelectedItem(null);
-                      }}
-                      style={styles.colorModalSearch}
-                      autoFocus
-                    />
-                    {(colorQuery || "").trim() ? (
-                      <Pressable
-                        onPress={() => {
-                          setCustomColor(colorQuery.trim());
-                          setSelectedItem(null);
-                          setColorQuery("");
-                          setShowColorList(false);
-                        }}
-                        style={({ pressed }) => [
-                          styles.colorRow,
-                          styles.colorRowCustom,
-                          pressed && styles.colorRowPressed,
-                        ]}
-                      >
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.colorRowText, { fontStyle: "italic" }]}
-                        >
-                          Use custom: {(colorQuery || "").trim()}
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                    <FlatList
-                      data={filteredInventory}
-                      keyExtractor={(item) => item.id}
-                      keyboardShouldPersistTaps="handled"
-                      style={styles.colorListInner}
-                      nestedScrollEnabled
-                      renderItem={({ item }) => (
-                        <Pressable
+                <View style={styles.colorSection}>
+                  <TextInput
+                    label="Material"
+                    value={
+                      selectedItem
+                        ? selectedItem.name || selectedItem.id
+                        : customColor || colorQuery
+                    }
+                    onChangeText={(t) => {
+                      setColorQuery(t);
+                      setCustomColor("");
+                      if (selectedItem) setSelectedItem(null);
+                    }}
+                    onFocus={() => setMaterialFocused(true)}
+                    onBlur={() => {
+                      // Delay so suggestion press can register before list unmounts
+                      setTimeout(() => setMaterialFocused(false), 150);
+                    }}
+                    mode="outlined"
+                    style={styles.input}
+                    placeholder="Type to search or custom dye/stain/toner"
+                    right={
+                      selectedItem || customColor || colorQuery ? (
+                        <TextInput.Icon
+                          icon="close"
                           onPress={() => {
-                            setSelectedItem(item);
+                            setSelectedItem(null);
                             setCustomColor("");
                             setColorQuery("");
-                            setShowColorList(false);
                           }}
-                          style={({ pressed }) => [
-                            styles.colorRow,
-                            pressed && styles.colorRowPressed,
-                          ]}
-                        >
-                          <Text numberOfLines={1} style={styles.colorRowText}>
-                            {item.name || item.id}
+                        />
+                      ) : null
+                    }
+                  />
+                  {showMaterialSuggestions ? (
+                    <View
+                      style={[
+                        styles.suggestBox,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: theme.colors.outlineVariant,
+                        },
+                      ]}
+                    >
+                      <ScrollView
+                        keyboardShouldPersistTaps="handled"
+                        nestedScrollEnabled
+                        style={styles.suggestScroll}
+                      >
+                        {materialSuggestions.map((item) => (
+                          <Pressable
+                            key={item.id}
+                            onPress={() => {
+                              setSelectedItem(item);
+                              setCustomColor("");
+                              setColorQuery("");
+                              setMaterialFocused(false);
+                            }}
+                            style={({ pressed }) => [
+                              styles.colorRow,
+                              pressed && styles.colorRowPressed,
+                            ]}
+                          >
+                            <Text numberOfLines={1} style={styles.colorRowText}>
+                              {item.name || item.id}
+                            </Text>
+                          </Pressable>
+                        ))}
+                        {(colorQuery || "").trim() ? (
+                          <Pressable
+                            onPress={() => {
+                              setCustomColor((colorQuery || "").trim());
+                              setSelectedItem(null);
+                              setMaterialFocused(false);
+                            }}
+                            style={({ pressed }) => [
+                              styles.colorRow,
+                              styles.colorRowCustom,
+                              pressed && styles.colorRowPressed,
+                            ]}
+                          >
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.colorRowText,
+                                { fontStyle: "italic" },
+                              ]}
+                            >
+                              Use custom: {(colorQuery || "").trim()}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        {materialSuggestions.length === 0 ? (
+                          <Text style={styles.emptyList}>
+                            No inventory matches
                           </Text>
-                        </Pressable>
-                      )}
-                      ListEmptyComponent={
-                        <Text style={styles.emptyList}>
-                          No matching paint/clear/primer
-                        </Text>
-                      }
-                    />
-                    <Button
-                      mode="outlined"
-                      onPress={() => setShowColorList(false)}
-                      style={styles.colorModalClose}
-                    >
-                      Cancel
-                    </Button>
-                  </Pressable>
-                </Pressable>
-              </Modal>
-              <View style={styles.row}>
-                <TextInput
-                  label={cupGun ? "Qty (oz)" : "Qty (gal)"}
-                  value={qty}
-                  onChangeText={setQty}
-                  mode="outlined"
-                  keyboardType="decimal-pad"
-                  style={needsCatalyst ? styles.halfInput : styles.input}
-                  placeholder={cupGun ? "ounces" : "0.25 increments"}
-                />
-                {needsCatalyst && (
-                  <View style={[styles.halfInput, styles.catalystDisplay]}>
-                    <Text
-                      style={[
-                        styles.catalystLabel,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Catalyst (4%)
-                    </Text>
-                    <Text
-                      style={[
-                        styles.catalystValue,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    >
-                      {catalystOz} oz
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.cupGunRow}>
-                <Checkbox
-                  status={cupGun ? "checked" : "unchecked"}
-                  onPress={() => setCupGun((prev) => !prev)}
-                  color={theme.colors.primary}
-                />
+                        ) : null}
+                      </ScrollView>
+                    </View>
+                  ) : null}
+                </View>
+                <View style={styles.row}>
+                  <TextInput
+                    label={cupGun ? "Qty (oz)" : "Qty (gal)"}
+                    value={qty}
+                    onChangeText={setQty}
+                    mode="outlined"
+                    keyboardType="decimal-pad"
+                    style={needsCatalyst ? styles.halfInput : styles.input}
+                    placeholder={cupGun ? "ounces" : "0.25 increments"}
+                  />
+                  {needsCatalyst && (
+                    <View style={[styles.halfInput, styles.catalystDisplay]}>
+                      <Text
+                        style={[
+                          styles.catalystLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Catalyst (4%)
+                      </Text>
+                      <Text
+                        style={[
+                          styles.catalystValue,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {catalystOz} oz
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.cupGunRow}>
+                  <Checkbox
+                    status={cupGun ? "checked" : "unchecked"}
+                    onPress={() => setCupGun((prev) => !prev)}
+                    color={theme.colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.cupGunLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                    onPress={() => setCupGun((prev) => !prev)}
+                  >
+                    Cup gun?
+                  </Text>
+                </View>
                 <Text
                   style={[
-                    styles.cupGunLabel,
+                    styles.fieldLabel,
                     { color: theme.colors.onSurfaceVariant },
                   ]}
-                  onPress={() => setCupGun((prev) => !prev)}
                 >
-                  Cup gun?
+                  Booth
                 </Text>
-              </View>
-              <Text
-                style={[
-                  styles.fieldLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Booth
-              </Text>
-              <View style={styles.buttonRow}>
-                {BOOTH_OPTIONS.map((opt) => (
+                <View style={styles.buttonRow}>
+                  {BOOTH_OPTIONS.map((opt) => (
+                    <Button
+                      key={opt.value}
+                      mode={booth === opt.value ? "contained" : "outlined"}
+                      onPress={() => setBooth(opt.value)}
+                      style={styles.filterButton}
+                      compact
+                    >
+                      {opt.label}
+                    </Button>
+                  ))}
+                </View>
+                <View style={styles.actions}>
                   <Button
-                    key={opt.value}
-                    mode={booth === opt.value ? "contained" : "outlined"}
-                    onPress={() => setBooth(opt.value)}
-                    style={styles.filterButton}
+                    mode="contained"
+                    onPress={handleSubmit}
+                    disabled={!canSubmit || submitting}
+                    loading={submitting}
                     compact
+                    icon="send"
                   >
-                    {opt.label}
+                    Submit
                   </Button>
-                ))}
-              </View>
-              <View style={styles.actions}>
-                <Button
-                  mode="contained"
-                  onPress={handleSubmit}
-                  disabled={!canSubmit || submitting}
-                  loading={submitting}
-                  compact
-                  icon="send"
-                >
-                  Submit
-                </Button>
-              </View>
-            </Card.Content>
+                </View>
+              </Card.Content>
+            </ShakeView>
           </Card>
 
           <Card style={surfaceCardStyle} mode="outlined">
@@ -1112,11 +998,7 @@ export default function MaterialUsageScreen({
                         style={styles.filterButton}
                         compact
                       >
-                        {sf === "all"
-                          ? "All"
-                          : sf === "day"
-                            ? "Day"
-                            : "Swing"}
+                        {sf === "all" ? "All" : sf === "day" ? "Day" : "Swing"}
                       </Button>
                     ))}
                   </View>
@@ -1200,10 +1082,7 @@ export default function MaterialUsageScreen({
                 </View>
               )}
               {!logsLoaded ? (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator size="small" />
-                  <Text style={styles.loadingText}>Loading…</Text>
-                </View>
+                <SkeletonStack lines={5} style={{ marginTop: 8 }} />
               ) : filteredLogs.length === 0 ? (
                 <Text style={styles.emptyLogs}>No entries</Text>
               ) : isDesktop ? (
@@ -1381,183 +1260,231 @@ export default function MaterialUsageScreen({
                 </ScrollView>
               ) : (
                 <View style={styles.logCardList}>
-                  {logsByDay.map(({ date, rows, totals }) => {
+                  {logsByDay.map(({ date, rows, totals }, dayIndex) => {
                     const dayKey = `day-${date}`;
                     const isExpanded = expandedLogDayKeys.includes(dayKey);
                     return (
-                      <React.Fragment key={date}>
-                        <Pressable
-                          onPress={() =>
-                            setExpandedLogDayKeys((prev) =>
-                              prev.includes(dayKey)
-                                ? prev.filter((k) => k !== dayKey)
-                                : [...prev, dayKey],
-                            )
-                          }
-                        >
-                          <View
-                            style={[
-                              styles.dayHeaderCard,
-                              {
-                                backgroundColor:
-                                  theme.colors.surfaceContainerHighest,
-                                borderLeftColor:
-                                  theme.colors.primary || "#6f95ab",
-                              },
-                            ]}
+                      <StaggerItem key={date} index={dayIndex}>
+                        <React.Fragment>
+                          <Pressable
+                            onPress={() =>
+                              setExpandedLogDayKeys((prev) =>
+                                prev.includes(dayKey)
+                                  ? prev.filter((k) => k !== dayKey)
+                                  : [...prev, dayKey],
+                              )
+                            }
                           >
-                            <Text
+                            <View
                               style={[
-                                styles.dayHeaderText,
-                                { color: theme.colors.onSurface },
-                              ]}
-                            >
-                              {formatLogDate(date)}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.dayHeaderTotals,
+                                styles.dayHeaderCard,
                                 {
-                                  color:
-                                    theme.colors.onSurfaceVariant || "#666",
+                                  backgroundColor:
+                                    theme.colors.surfaceContainerHighest,
+                                  borderLeftColor:
+                                    theme.colors.primary || "#6f95ab",
                                 },
                               ]}
                             >
-                              {formatDayTotals(totals)}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.dayHeaderToggle,
-                                {
-                                  color:
-                                    theme.colors.onSurfaceVariant || "#666",
-                                },
-                              ]}
-                            >
-                              {isExpanded ? "Tap to collapse" : "Tap to expand"}
-                            </Text>
-                          </View>
-                        </Pressable>
-                        {isExpanded &&
-                          rows.map((row) => {
-                            const resolvedType = getResolvedMaterialType(
-                              row,
-                              inventory,
-                            );
-                            const showCatalyst =
-                              resolvedType !== "dye" &&
-                              resolvedType !== "stain";
-                            const catalystDisplay =
-                              row.catalyst_oz != null
-                                ? Number(row.catalyst_oz).toFixed(2)
-                                : row.catalyst_gallons != null
-                                  ? (
-                                      Number(row.catalyst_gallons) * 128
-                                    ).toFixed(2)
-                                  : "—";
-                            const logItem = (inventory || []).find(
-                              (i) => String(i.id) === String(row.item_id),
-                            );
-                            const hexColor =
-                              logItem?.hex_color &&
-                              String(logItem.hex_color).trim()
-                                ? String(logItem.hex_color).trim()
-                                : null;
-                            const normalizedHex =
-                              hexColor &&
-                              /^#?[0-9A-Fa-f]{3,8}$/.test(hexColor.replace(/^#/, ""))
-                                ? hexColor.startsWith("#")
-                                  ? hexColor
-                                  : `#${hexColor}`
-                                : null;
-                            return (
-                              <View
-                                key={row.id}
+                              <Text
                                 style={[
-                                  styles.logCard,
+                                  styles.dayHeaderText,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                {formatLogDate(date)}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.dayHeaderTotals,
                                   {
-                                    borderLeftWidth: 4,
-                                    borderLeftColor: getMaterialTypeColor(
-                                      getResolvedMaterialType(row, inventory),
-                                      theme,
-                                    ),
+                                    color:
+                                      theme.colors.onSurfaceVariant || "#666",
                                   },
                                 ]}
                               >
-                                <View style={styles.logCardInnerRow}>
-                                  <View style={styles.logCardMain}>
-                                    {/* Very top left: Time + User, then Booth (same format) */}
-                                    <Text style={[styles.logCardMetaLine, { color: theme.colors.onSurfaceVariant }]}>
-                                      {formatTimeDisplay(row.entry_time)}
-                                      {" · "}
-                                      {row.user_name || "—"}
-                                    </Text>
-                                    <Text style={[styles.logCardMetaLine, styles.logCardMetaLineSecond, { color: theme.colors.onSurfaceVariant }]}>
-                                      {row.booth || "—"}
-                                    </Text>
+                                {formatDayTotals(totals)}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.dayHeaderToggle,
+                                  {
+                                    color:
+                                      theme.colors.onSurfaceVariant || "#666",
+                                  },
+                                ]}
+                              >
+                                {isExpanded
+                                  ? "Tap to collapse"
+                                  : "Tap to expand"}
+                              </Text>
+                            </View>
+                          </Pressable>
+                          {isExpanded &&
+                            rows.map((row) => {
+                              const resolvedType = getResolvedMaterialType(
+                                row,
+                                inventory,
+                              );
+                              const showCatalyst =
+                                resolvedType !== "dye" &&
+                                resolvedType !== "stain";
+                              const catalystDisplay =
+                                row.catalyst_oz != null
+                                  ? Number(row.catalyst_oz).toFixed(2)
+                                  : row.catalyst_gallons != null
+                                    ? (
+                                        Number(row.catalyst_gallons) * 128
+                                      ).toFixed(2)
+                                    : "—";
+                              const logItem = (inventory || []).find(
+                                (i) => String(i.id) === String(row.item_id),
+                              );
+                              const hexColor =
+                                logItem?.hex_color &&
+                                String(logItem.hex_color).trim()
+                                  ? String(logItem.hex_color).trim()
+                                  : null;
+                              const normalizedHex =
+                                hexColor &&
+                                /^#?[0-9A-Fa-f]{3,8}$/.test(
+                                  hexColor.replace(/^#/, ""),
+                                )
+                                  ? hexColor.startsWith("#")
+                                    ? hexColor
+                                    : `#${hexColor}`
+                                  : null;
+                              return (
+                                <View
+                                  key={row.id}
+                                  style={[
+                                    styles.logCard,
+                                    {
+                                      borderLeftWidth: 4,
+                                      borderLeftColor: getMaterialTypeColor(
+                                        getResolvedMaterialType(row, inventory),
+                                        theme,
+                                      ),
+                                    },
+                                  ]}
+                                >
+                                  <View style={styles.logCardInnerRow}>
+                                    <View style={styles.logCardMain}>
+                                      {/* Very top left: Time + User, then Booth (same format) */}
+                                      <Text
+                                        style={[
+                                          styles.logCardMetaLine,
+                                          {
+                                            color:
+                                              theme.colors.onSurfaceVariant,
+                                          },
+                                        ]}
+                                      >
+                                        {formatTimeDisplay(row.entry_time)}
+                                        {" · "}
+                                        {row.user_name || "—"}
+                                      </Text>
+                                      <Text
+                                        style={[
+                                          styles.logCardMetaLine,
+                                          styles.logCardMetaLineSecond,
+                                          {
+                                            color:
+                                              theme.colors.onSurfaceVariant,
+                                          },
+                                        ]}
+                                      >
+                                        {row.booth || "—"}
+                                      </Text>
 
-                                    {/* Job */}
-                                    <View style={styles.logCardJobBlock}>
-                                      <Text style={styles.logCardJobLabel}>Job</Text>
-                                      <Text style={styles.logCardJobValue} numberOfLines={2}>
-                                        {row.job_name || "—"}
-                                      </Text>
-                                    </View>
-
-                                    {/* Color — large */}
-                                    <View style={styles.logCardHighlightBlock}>
-                                      <Text style={styles.logCardHighlightLabel}>Color</Text>
-                                      <Text style={styles.logCardHighlightValue} numberOfLines={2}>
-                                        {row.color_name || "—"}
-                                      </Text>
-                                    </View>
-
-                                    {/* Qty — large, catalyst small below (last block: no extra bottom margin) */}
-                                    <View style={[styles.logCardHighlightBlock, styles.logCardHighlightBlockLast]}>
-                                      <Text style={styles.logCardHighlightLabel}>
-                                        Qty ({row.cup_gun ? "oz" : "gal"})
-                                      </Text>
-                                      <Text style={styles.logCardHighlightValue}>
-                                        {formatQtyDisplay(row)}
-                                      </Text>
-                                      {showCatalyst && (
-                                        <Text style={styles.logCardCatalystSub}>
-                                          Cat {catalystDisplay} oz
+                                      {/* Job */}
+                                      <View style={styles.logCardJobBlock}>
+                                        <Text style={styles.logCardJobLabel}>
+                                          Job
                                         </Text>
-                                      )}
+                                        <Text
+                                          style={styles.logCardJobValue}
+                                          numberOfLines={2}
+                                        >
+                                          {row.job_name || "—"}
+                                        </Text>
+                                      </View>
+
+                                      {/* Color — large */}
+                                      <View
+                                        style={styles.logCardHighlightBlock}
+                                      >
+                                        <Text
+                                          style={styles.logCardHighlightLabel}
+                                        >
+                                          Color
+                                        </Text>
+                                        <Text
+                                          style={styles.logCardHighlightValue}
+                                          numberOfLines={2}
+                                        >
+                                          {row.color_name || "—"}
+                                        </Text>
+                                      </View>
+
+                                      {/* Qty — large, catalyst small below (last block: no extra bottom margin) */}
+                                      <View
+                                        style={[
+                                          styles.logCardHighlightBlock,
+                                          styles.logCardHighlightBlockLast,
+                                        ]}
+                                      >
+                                        <Text
+                                          style={styles.logCardHighlightLabel}
+                                        >
+                                          Qty ({row.cup_gun ? "oz" : "gal"})
+                                        </Text>
+                                        <Text
+                                          style={styles.logCardHighlightValue}
+                                        >
+                                          {formatQtyDisplay(row)}
+                                        </Text>
+                                        {showCatalyst && (
+                                          <Text
+                                            style={styles.logCardCatalystSub}
+                                          >
+                                            Cat {catalystDisplay} oz
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+
+                                    {/* Right: Type at top */}
+                                    <View style={styles.logCardRightCol}>
+                                      <Text
+                                        style={[
+                                          styles.logCardTypePill,
+                                          {
+                                            color: getMaterialTypeColor(
+                                              resolvedType,
+                                              theme,
+                                            ),
+                                          },
+                                        ]}
+                                      >
+                                        {formatMaterialTypeLabel(resolvedType)}
+                                      </Text>
                                     </View>
                                   </View>
-
-                                  {/* Right: Type at top */}
-                                  <View style={styles.logCardRightCol}>
-                                    <Text
+                                  {/* Color swatch: fixed bottom-right ~25% of card, same spot every card */}
+                                  {normalizedHex ? (
+                                    <View
                                       style={[
-                                        styles.logCardTypePill,
-                                        {
-                                          color: getMaterialTypeColor(
-                                            resolvedType,
-                                            theme,
-                                          ),
-                                        },
+                                        styles.logCardColorSwatchFixed,
+                                        { backgroundColor: normalizedHex },
                                       ]}
-                                    >
-                                      {formatMaterialTypeLabel(resolvedType)}
-                                    </Text>
-                                  </View>
+                                    />
+                                  ) : null}
                                 </View>
-                                {/* Color swatch: fixed bottom-right ~25% of card, same spot every card */}
-                                {normalizedHex ? (
-                                  <View
-                                    style={[
-                                      styles.logCardColorSwatchFixed,
-                                      { backgroundColor: normalizedHex },
-                                    ]}
-                                  />
-                                ) : null}
-                              </View>
-                            );
-                          })}
-                      </React.Fragment>
+                              );
+                            })}
+                        </React.Fragment>
+                      </StaggerItem>
                     );
                   })}
                 </View>
@@ -1603,6 +1530,7 @@ export default function MaterialUsageScreen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    minWidth: 0,
   },
   savingOverlay: {
     flex: 1,
@@ -1621,23 +1549,49 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   scroll: {
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     paddingBottom: 48,
     maxWidth: 720,
     width: "100%",
     alignSelf: "center",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
   },
   card: {
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: 14,
+    overflow: "hidden",
+    alignSelf: "stretch",
+    maxWidth: "100%",
+  },
+  shakePad: {
+    paddingTop: 4,
+    paddingBottom: 4,
+    maxWidth: "100%",
   },
   form: {
-    gap: 10,
+    gap: 14,
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    paddingTop: 20,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  formHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: -4,
   },
   sectionLabel: {
     fontSize: 15,
     fontWeight: "700",
-    marginTop: 4,
+    marginTop: 0,
+    flex: 1,
+    flexShrink: 1,
   },
   fieldLabel: {
     fontSize: 12,
@@ -1645,77 +1599,44 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: "row",
-    gap: 10,
+    alignItems: "flex-start",
+    gap: 12,
+    alignSelf: "stretch",
+    maxWidth: "100%",
   },
   halfInput: {
     flex: 1,
-    backgroundColor: "transparent",
-  },
-  timeInputRow: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8,
     minWidth: 0,
-  },
-  timePartInput: {
-    flex: 1,
-    minWidth: 0,
+    maxWidth: "100%",
     backgroundColor: "transparent",
-  },
-  ampmButton: {
-    minWidth: 56,
   },
   input: {
     backgroundColor: "transparent",
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    minWidth: 0,
   },
-  colorSection: {},
-  colorModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
+  colorSection: {
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    minWidth: 0,
+    zIndex: 2,
   },
-  colorModalContent: {
-    width: "100%",
-    maxWidth: 400,
-    maxHeight: "80%",
+  suggestBox: {
+    marginTop: 6,
+    borderWidth: 1,
     borderRadius: 8,
-    padding: 16,
-    elevation: 4,
-    ...(Platform.OS === "web"
-      ? { boxShadow: "0px 2px 8px rgba(0,0,0,0.25)" }
-      : {
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.25,
-          shadowRadius: 4,
-        }),
+    overflow: "hidden",
+    maxWidth: "100%",
   },
-  colorModalTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-  colorModalHint: {
-    fontSize: 12,
-    marginBottom: 12,
-  },
-  colorModalSearch: {
-    marginBottom: 12,
-    backgroundColor: "transparent",
-  },
-  colorModalClose: {
-    marginTop: 12,
-  },
-  colorListInner: {
-    maxHeight: 220,
+  suggestScroll: {
+    maxHeight: 200,
   },
   colorRow: {
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "transparent",
+    borderBottomColor: "rgba(128,128,128,0.25)",
   },
   colorRowCustom: {
     backgroundColor: "rgba(0,0,0,0.03)",
@@ -1734,6 +1655,7 @@ const styles = StyleSheet.create({
   catalystDisplay: {
     justifyContent: "center",
     paddingHorizontal: 4,
+    paddingVertical: 8,
   },
   catalystLabel: {
     fontSize: 12,
@@ -1746,16 +1668,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+    width: "100%",
+    maxWidth: "100%",
   },
   filterButton: {
     marginRight: 0,
     marginBottom: 0,
+    flexGrow: 0,
+    flexShrink: 1,
   },
   actions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 4,
+    marginTop: 8,
+    marginBottom: 4,
+    width: "100%",
   },
   catalystDialog: {
     alignSelf: "center",
@@ -1787,6 +1715,7 @@ const styles = StyleSheet.create({
   },
   logCardList: {
     gap: 12,
+    width: "100%",
   },
   logCard: {
     padding: 12,
@@ -1804,10 +1733,15 @@ const styles = StyleSheet.create({
           shadowRadius: 3,
         }),
     position: "relative",
+    width: "100%",
+    maxWidth: "100%",
+    overflow: "hidden",
   },
   logCardInnerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
+    width: "100%",
+    minWidth: 0,
   },
   logCardMain: {
     flex: 1,
@@ -1818,6 +1752,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: "flex-end",
     justifyContent: "flex-start",
+    maxWidth: "40%",
   },
   logCardTopRow: {
     flexDirection: "row",
@@ -1948,9 +1883,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 0,
+    flexWrap: "wrap",
+    width: "100%",
   },
   cupGunLabel: {
     fontSize: 14,
+    flexShrink: 1,
   },
   logCardValueMain: {
     fontSize: 16,
@@ -1963,6 +1901,8 @@ const styles = StyleSheet.create({
   },
   tableHorizontalWrap: {
     marginTop: 4,
+    width: "100%",
+    maxWidth: "100%",
   },
   tableContainer: {
     minWidth: 720,
@@ -2060,6 +2000,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: "rgba(0,0,0,0.08)",
+    width: "100%",
   },
   totalsTitle: {
     fontSize: 15,
@@ -2070,6 +2011,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
+    width: "100%",
   },
   totalsRow: {
     fontSize: 14,

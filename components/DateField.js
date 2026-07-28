@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Platform, View } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { TextInput, useTheme } from "react-native-paper";
 
@@ -57,8 +57,8 @@ export default function DateField({
     const fg = theme.colors?.onSurface ?? "#111";
     const labelColor = theme.colors?.onSurfaceVariant ?? fg;
     return (
-      <View style={style}>
-        <label style={{ display: "block" }}>
+      <View style={[styles.wrap, style]}>
+        <label style={styles.webLabel}>
           <div style={{ marginBottom: 6, fontSize: 12, color: labelColor }}>
             {label}
           </div>
@@ -72,6 +72,9 @@ export default function DateField({
             style={{
               display: "block",
               width: "100%",
+              maxWidth: "100%",
+              minWidth: 0,
+              WebkitMinLogicalWidth: 0,
               boxSizing: "border-box",
               padding: 12,
               fontSize: 16,
@@ -88,14 +91,14 @@ export default function DateField({
   }
 
   return (
-    <View style={[style, { width: "100%", alignSelf: "stretch" }]}>
+    <View style={[styles.wrap, style]}>
       <TextInput
         label={label}
         value={formatMdy(value)}
         mode={mode}
         editable={false}
         disabled={disabled}
-        style={{ width: "100%", alignSelf: "stretch" }}
+        style={styles.nativeInput}
         outlineColor={theme.colors?.outline}
         activeOutlineColor={theme.colors?.primary}
         textColor={theme.colors?.onSurface}
@@ -118,3 +121,24 @@ export default function DateField({
   );
 }
 
+const styles = StyleSheet.create({
+  wrap: {
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflow: "hidden",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  webLabel: {
+    display: "block",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  nativeInput: {
+    width: "100%",
+    maxWidth: "100%",
+    alignSelf: "stretch",
+  },
+});

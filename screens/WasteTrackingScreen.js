@@ -6,6 +6,7 @@ import {
   Platform,
   Alert,
   RefreshControl,
+  Pressable,
 } from "react-native";
 import {
   Text,
@@ -13,11 +14,16 @@ import {
   Button,
   Card,
   useTheme,
-  ActivityIndicator,
 } from "react-native-paper";
 import * as Clipboard from "expo-clipboard";
 import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
+import StaggerItem from "../components/StaggerItem";
+import ShakeView from "../components/ShakeView";
+import FormHelp from "../components/FormHelp";
+import { SkeletonStack } from "../components/SkeletonBlock";
+import showToast from "../utils/showToast";
+import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
 import {
   WASTE_MATERIALS,
@@ -25,10 +31,17 @@ import {
   formatGallonsTenths,
   roundGallonsTenths,
   formatRecordGallonsForExcel,
+  formatWeekGallonsGridForExcel,
   buildConversionChart,
   GALLONS_PER_INCH,
   todayPacificIso,
   formatMonthDayYear,
+  formatWeekdayBeforeDate,
+  bundleWasteByWeek,
+  computeWasteSummary,
+  buildWasteAlerts,
+  formatTotalsBreakdown,
+  formatMonthLabel,
 } from "../utils/wasteDrumConversion";
 
 function parseInches(raw) {
@@ -74,9 +87,12 @@ export default function WasteTrackingScreen({
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [copiedWeek, setCopiedWeek] = useState(null);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [shakeTick, setShakeTick] = useState(0);
+  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
 
   useEffect(() => {
     if (userName && !name) setName(userName);
@@ -111,11 +127,30 @@ export default function WasteTrackingScreen({
 
   const chart = useMemo(() => buildConversionChart(15), []);
 
+  const summary = useMemo(
+    () => computeWasteSummary(records, todayPacificIso()),
+    [records],
+  );
+  const alerts = useMemo(() => buildWasteAlerts(summary), [summary]);
+  const weeks = useMemo(() => bundleWasteByWeek(records), [records]);
+
+  useEffect(() => {
+    if (!weeks.length) return;
+    setExpandedWeeks((prev) => {
+      if (prev.size > 0) return prev;
+      // Expand current + previous week by default
+      const next = new Set();
+      weeks.slice(0, 2).forEach((w) => next.add(w.monday));
+      return next;
+    });
+  }, [weeks]);
+
   const loadRecords = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const rows = await WasteTrackingService.list(50);
+      // Enough history for YTD / month / week comparisons
+      const rows = await WasteTrackingService.list(2000);
       setRecords(rows);
     } catch (e) {
       console.error(e);
@@ -154,29 +189,67 @@ export default function WasteTrackingScreen({
       await Clipboard.setStringAsync(tsv);
       setCopiedId(row.id);
       setTimeout(() => setCopiedId(null), 2000);
-      if (Platform.OS !== "web") {
-        Alert.alert(
-          "Copied",
-          "Paste into Excel — 4 cells in a row (Paint, Clear, Primer, Acetone).",
-        );
-      }
+      showToast({
+        title: "Copied",
+        message: "Paste into Excel — Paint, Clear, Primer, Acetone.",
+      });
     } catch (e) {
-      Alert.alert("Copy failed", e?.message || "Could not copy.");
+      showToast({
+        type: "error",
+        title: "Copy failed",
+        message: e?.message || "Could not copy.",
+      });
     }
+  };
+
+  const handleCopyWeek = async (week) => {
+    if (!isAdmin || !week) return;
+    const tsv = formatWeekGallonsGridForExcel(week.rows, week.monday);
+    try {
+      await Clipboard.setStringAsync(tsv);
+      setCopiedWeek(week.monday);
+      setTimeout(() => setCopiedWeek(null), 2000);
+      showToast({
+        title: "Week copied",
+        message: "Paste into Excel — 4 columns × 5 rows (Mon–Fri).",
+      });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Copy failed",
+        message: e?.message || "Could not copy.",
+      });
+    }
+  };
+
+  const toggleWeek = (monday) => {
+    setExpandedWeeks((prev) => {
+      const next = new Set(prev);
+      if (next.has(monday)) next.delete(monday);
+      else next.add(monday);
+      return next;
+    });
   };
 
   const handleSubmit = async () => {
     const trimmedName = String(name || "").trim();
     if (!trimmedName) {
-      Alert.alert("Required", "Enter a name.");
+      setShakeTick((n) => n + 1);
+      showToast({ type: "error", title: "Required", message: "Enter a name." });
       return;
     }
     if (!entryDate) {
-      Alert.alert("Required", "Enter a date.");
+      setShakeTick((n) => n + 1);
+      showToast({ type: "error", title: "Required", message: "Enter a date." });
       return;
     }
     if (totalGal <= 0) {
-      Alert.alert("Required", "Enter at least one inches value.");
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Required",
+        message: "Enter at least one inches value.",
+      });
       return;
     }
 
@@ -212,7 +285,7 @@ export default function WasteTrackingScreen({
         acetone_gallons: gallons.acetone,
       });
 
-      Alert.alert("Saved", "Waste record saved.");
+      showToast({ title: "Saved", message: "Waste record saved." });
 
       setInches({
         paint: "",
@@ -222,7 +295,11 @@ export default function WasteTrackingScreen({
       });
       await loadRecords();
     } catch (e) {
-      Alert.alert("Error", e?.message || "Failed to save.");
+      showToast({
+        type: "error",
+        title: "Error",
+        message: e?.message || "Failed to save.",
+      });
     } finally {
       setSubmitting(false);
     }
@@ -248,7 +325,11 @@ export default function WasteTrackingScreen({
       await WasteTrackingService.delete(row.id);
       await loadRecords();
     } catch (e) {
-      Alert.alert("Error", e?.message || "Failed to delete.");
+      showToast({
+        type: "error",
+        title: "Error",
+        message: e?.message || "Failed to delete.",
+      });
     } finally {
       setDeletingId(null);
     }
@@ -257,6 +338,7 @@ export default function WasteTrackingScreen({
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       <ScrollView
+        style={{ width: "100%", maxWidth: "100%" }}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -282,11 +364,21 @@ export default function WasteTrackingScreen({
           ]}
           mode="outlined"
         >
+          <ShakeView trigger={shakeTick} style={styles.shakePad}>
           <Card.Content style={styles.form}>
+            <View style={styles.formHeaderRow}>
+              <Text
+                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+              >
+                Log waste
+              </Text>
+              <FormHelp content={WASTE_FORM_HELP} />
+            </View>
             <DateField
               label="Date"
               value={entryDate}
               onChange={setEntryDate}
+              style={styles.input}
             />
             <TextInput
               label="Name"
@@ -313,41 +405,59 @@ export default function WasteTrackingScreen({
             </Text>
 
             <View style={styles.inchGrid}>
-              {WASTE_MATERIALS.map((m, idx) => {
-                const isLast = idx === WASTE_MATERIALS.length - 1;
-                return (
-                  <View key={m.key} style={styles.inchField}>
-                    <TextInput
-                      ref={(r) => {
-                        inputRefs.current[m.key] = r;
-                      }}
-                      label={m.label}
-                      value={inches[m.key]}
-                      onChangeText={(v) => setInchField(m.key, v)}
-                      mode="outlined"
-                      keyboardType={
-                        Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                      }
-                      inputMode="decimal"
-                      returnKeyType={isLast ? "done" : "next"}
-                      blurOnSubmit={isLast}
-                      onSubmitEditing={() => {
-                        if (!isLast) focusNext(m.key);
-                      }}
-                      style={styles.input}
-                      dense
-                    />
-                    <Text
-                      style={[
-                        styles.galOut,
-                        { color: theme.colors.primary },
-                      ]}
-                    >
-                      {formatGallonsTenths(gallons[m.key])} gal
-                    </Text>
-                  </View>
-                );
-              })}
+              {Array.from(
+                { length: Math.ceil(WASTE_MATERIALS.length / 2) },
+                (_, rowIdx) => {
+                  const pair = WASTE_MATERIALS.slice(rowIdx * 2, rowIdx * 2 + 2);
+                  return (
+                    <View key={`inch-row-${rowIdx}`} style={styles.inchRow}>
+                      {pair.map((m) => {
+                        const idx = WASTE_MATERIALS.findIndex(
+                          (x) => x.key === m.key,
+                        );
+                        const isLast = idx === WASTE_MATERIALS.length - 1;
+                        return (
+                          <View key={m.key} style={styles.inchField}>
+                            <TextInput
+                              ref={(r) => {
+                                inputRefs.current[m.key] = r;
+                              }}
+                              label={m.label}
+                              value={inches[m.key]}
+                              onChangeText={(v) => setInchField(m.key, v)}
+                              mode="outlined"
+                              keyboardType={
+                                Platform.OS === "ios"
+                                  ? "decimal-pad"
+                                  : "numeric"
+                              }
+                              inputMode="decimal"
+                              returnKeyType={isLast ? "done" : "next"}
+                              blurOnSubmit={isLast}
+                              onSubmitEditing={() => {
+                                if (!isLast) focusNext(m.key);
+                              }}
+                              style={styles.input}
+                              dense
+                            />
+                            <Text
+                              style={[
+                                styles.galOut,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              {formatGallonsTenths(gallons[m.key])} gal
+                            </Text>
+                          </View>
+                        );
+                      })}
+                      {pair.length === 1 ? (
+                        <View style={styles.inchField} />
+                      ) : null}
+                    </View>
+                  );
+                },
+              )}
             </View>
 
             <Text
@@ -368,6 +478,7 @@ export default function WasteTrackingScreen({
               </Button>
             </View>
           </Card.Content>
+          </ShakeView>
         </Card>
 
         {isAdmin ? (
@@ -415,82 +526,318 @@ export default function WasteTrackingScreen({
           ]}
           mode="outlined"
         >
+          <Card.Content style={styles.form}>
+            <Text
+              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+            >
+              Waste totals
+            </Text>
+            {loading && records.length === 0 ? (
+              <SkeletonStack lines={3} />
+            ) : (
+              <>
+                <View style={styles.statBlock}>
+                  <Text
+                    style={[
+                      styles.statTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    YTD {summary.today.slice(0, 4)} ·{" "}
+                    {formatGallonsTenths(summary.ytd.total)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.statMeta,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {formatTotalsBreakdown(summary.ytd)}
+                  </Text>
+                </View>
+                <View style={styles.statBlock}>
+                  <Text
+                    style={[
+                      styles.statTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    This month ({formatMonthLabel(summary.month)}) ·{" "}
+                    {formatGallonsTenths(summary.thisMonth.total)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.statMeta,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {formatTotalsBreakdown(summary.thisMonth)}
+                  </Text>
+                </View>
+                <View style={styles.statBlock}>
+                  <Text
+                    style={[
+                      styles.statTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    This week · {formatGallonsTenths(summary.thisWeek.total)} gal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.statMeta,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {formatTotalsBreakdown(summary.thisWeek)}
+                  </Text>
+                </View>
+                {summary.months.length > 0 ? (
+                  <View style={styles.monthList}>
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      By month
+                    </Text>
+                    {summary.months.map((m) => (
+                      <Text
+                        key={m.key}
+                        style={[
+                          styles.monthRow,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        {m.label}: {formatGallonsTenths(m.totals.total)} gal
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+              </>
+            )}
+          </Card.Content>
+        </Card>
+
+        {alerts.length > 0 ? (
+          <Card
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.dark
+                  ? "rgba(255, 152, 0, 0.12)"
+                  : "rgba(255, 152, 0, 0.1)",
+                borderColor: theme.dark ? "#ffb74d" : "#ef6c00",
+              },
+            ]}
+            mode="outlined"
+          >
+            <Card.Content style={styles.form}>
+              <Text
+                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+              >
+                Data alerts
+              </Text>
+              <Text
+                style={[
+                  styles.hint,
+                  { color: theme.colors.onSurfaceVariant, marginTop: 0 },
+                ]}
+              >
+                Unusual increase vs the previous week or month (≥50% and +0.8
+                gal).
+              </Text>
+              {alerts.map((a) => (
+                <Text
+                  key={a.id}
+                  style={[styles.alertLine, { color: theme.colors.onSurface }]}
+                >
+                  · {a.message}
+                </Text>
+              ))}
+            </Card.Content>
+          </Card>
+        ) : null}
+
+        <Card
+          style={[
+            styles.card,
+            {
+              backgroundColor: theme.colors.surfaceContainerHighest,
+              borderColor: theme.colors.outlineVariant,
+            },
+          ]}
+          mode="outlined"
+        >
           <Card.Content>
             <Text
               style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
             >
-              Waste Records in gal
+              Waste records by week (gal)
+            </Text>
+            <Text
+              style={[
+                styles.hint,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
+              Primer, Acetone).
             </Text>
             {loading && records.length === 0 ? (
-              <ActivityIndicator style={{ marginTop: 12 }} />
-            ) : records.length === 0 ? (
+              <SkeletonStack lines={4} style={{ marginTop: 8 }} />
+            ) : weeks.length === 0 ? (
               <Text style={{ color: theme.colors.onSurfaceVariant }}>
                 No records yet.
               </Text>
             ) : (
-              records.map((r) => {
-                const paint = formatGallonsTenths(r.paint_gallons);
-                const clear = formatGallonsTenths(r.clear_toner_gallons);
-                const primer = formatGallonsTenths(r.primer_gallons);
-                const acetone = formatGallonsTenths(r.acetone_gallons);
-                const total = formatGallonsTenths(
-                  roundGallonsTenths(
-                    (Number(r.paint_gallons) || 0) +
-                      (Number(r.clear_toner_gallons) || 0) +
-                      (Number(r.primer_gallons) || 0) +
-                      (Number(r.acetone_gallons) || 0),
-                  ),
-                );
+              weeks.map((week, wIdx) => {
+                const open = expandedWeeks.has(week.monday);
                 return (
-                  <View
-                    key={r.id}
-                    style={[
-                      styles.recordRow,
-                      { borderTopColor: theme.colors.outlineVariant },
-                    ]}
-                  >
-                    <View style={styles.recordMain}>
+                  <StaggerItem key={week.monday} index={wIdx}>
+                    <View
+                      style={[
+                        styles.weekBlock,
+                        { borderTopColor: theme.colors.outlineVariant },
+                      ]}
+                    >
+                      <View style={styles.weekHeader}>
+                        <Pressable
+                          onPress={() => toggleWeek(week.monday)}
+                          style={styles.weekTogglePress}
+                        >
+                          <Text
+                            style={[
+                              styles.weekToggleLabel,
+                              { color: theme.colors.onSurface },
+                            ]}
+                          >
+                            {open ? "▾ " : "▸ "}
+                            {week.label}
+                          </Text>
+                        </Pressable>
+                        <View style={styles.weekHeaderRight}>
+                          <Text
+                            style={[
+                              styles.weekTotal,
+                              { color: theme.colors.onSurface },
+                            ]}
+                          >
+                            {formatGallonsTenths(week.totals.total)} gal
+                          </Text>
+                          {isAdmin ? (
+                            <Button
+                              mode="outlined"
+                              compact
+                              icon={
+                                copiedWeek === week.monday
+                                  ? "check"
+                                  : "content-copy"
+                              }
+                              onPress={() => handleCopyWeek(week)}
+                              style={styles.weekCopyBtn}
+                            >
+                              {copiedWeek === week.monday
+                                ? "Copied"
+                                : "Copy week"}
+                            </Button>
+                          ) : null}
+                        </View>
+                      </View>
                       <Text
                         style={[
-                          styles.recordTitle,
-                          { color: theme.colors.onSurface },
-                        ]}
-                      >
-                        {formatMonthDayYear(r.entry_date)} · {r.user_name || "—"}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.recordMeta,
+                          styles.statMeta,
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        Paint {paint} · Clear {clear} · Primer {primer} ·
-                        Acetone {acetone} · Total {total} gal
+                        {formatTotalsBreakdown(week.totals)}
                       </Text>
+                      {open
+                        ? week.rows.map((r) => {
+                            const paint = formatGallonsTenths(r.paint_gallons);
+                            const clear = formatGallonsTenths(
+                              r.clear_toner_gallons,
+                            );
+                            const primer = formatGallonsTenths(
+                              r.primer_gallons,
+                            );
+                            const acetone = formatGallonsTenths(
+                              r.acetone_gallons,
+                            );
+                            const total = formatGallonsTenths(
+                              roundGallonsTenths(
+                                (Number(r.paint_gallons) || 0) +
+                                  (Number(r.clear_toner_gallons) || 0) +
+                                  (Number(r.primer_gallons) || 0) +
+                                  (Number(r.acetone_gallons) || 0),
+                              ),
+                            );
+                            return (
+                              <View
+                                key={r.id}
+                                style={[
+                                  styles.recordRow,
+                                  {
+                                    borderTopColor: theme.colors.outlineVariant,
+                                  },
+                                ]}
+                              >
+                                <View style={styles.recordMain}>
+                                  <Text
+                                    style={[
+                                      styles.recordTitle,
+                                      { color: theme.colors.onSurface },
+                                    ]}
+                                  >
+                                    {formatWeekdayBeforeDate(r.entry_date)} ·{" "}
+                                    {r.user_name || "—"}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      styles.recordMeta,
+                                      {
+                                        color: theme.colors.onSurfaceVariant,
+                                      },
+                                    ]}
+                                  >
+                                    Paint {paint} · Clear {clear} · Primer{" "}
+                                    {primer} · Acetone {acetone} · Total {total}{" "}
+                                    gal
+                                  </Text>
+                                </View>
+                                {isAdmin ? (
+                                  <View style={styles.recordActions}>
+                                    <Button
+                                      mode="outlined"
+                                      compact
+                                      icon={
+                                        copiedId === r.id
+                                          ? "check"
+                                          : "content-copy"
+                                      }
+                                      onPress={() => handleCopyRecord(r)}
+                                    >
+                                      {copiedId === r.id ? "Copied" : "Copy"}
+                                    </Button>
+                                    <Button
+                                      mode="outlined"
+                                      compact
+                                      textColor={theme.colors.error}
+                                      onPress={() => handleDelete(r)}
+                                      loading={deletingId === r.id}
+                                      disabled={deletingId != null}
+                                    >
+                                      Delete
+                                    </Button>
+                                  </View>
+                                ) : null}
+                              </View>
+                            );
+                          })
+                        : null}
                     </View>
-                    {isAdmin ? (
-                      <View style={styles.recordActions}>
-                        <Button
-                          mode="outlined"
-                          compact
-                          icon={copiedId === r.id ? "check" : "content-copy"}
-                          onPress={() => handleCopyRecord(r)}
-                        >
-                          {copiedId === r.id ? "Copied" : "Copy"}
-                        </Button>
-                        <Button
-                          mode="outlined"
-                          compact
-                          textColor={theme.colors.error}
-                          onPress={() => handleDelete(r)}
-                          loading={deletingId === r.id}
-                          disabled={deletingId != null}
-                        >
-                          Delete
-                        </Button>
-                      </View>
-                    ) : null}
-                  </View>
+                  </StaggerItem>
                 );
               })
             )}
@@ -502,26 +849,82 @@ export default function WasteTrackingScreen({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  scroll: { padding: 16, paddingBottom: 48, maxWidth: 720, width: "100%", alignSelf: "center" },
-  card: { borderWidth: 1, marginBottom: 12 },
-  form: { gap: 10 },
-  input: { backgroundColor: "transparent" },
+  root: { flex: 1, minWidth: 0 },
+  scroll: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 48,
+    maxWidth: 720,
+    width: "100%",
+    alignSelf: "center",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  card: {
+    borderWidth: 1,
+    marginBottom: 14,
+    overflow: "hidden",
+    alignSelf: "stretch",
+    maxWidth: "100%",
+  },
+  shakePad: {
+    paddingTop: 4,
+    paddingBottom: 4,
+    maxWidth: "100%",
+  },
+  form: {
+    gap: 14,
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    paddingTop: 20,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    overflow: "hidden",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  formHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: -4,
+  },
+  input: {
+    backgroundColor: "transparent",
+    alignSelf: "stretch",
+    maxWidth: "100%",
+    minWidth: 0,
+  },
   sectionLabel: {
     fontSize: 15,
     fontWeight: "700",
-    marginTop: 4,
+    marginTop: 0,
+    flex: 1,
+    flexShrink: 1,
   },
-  hint: { fontSize: 12, marginTop: -4 },
+  hint: {
+    fontSize: 12,
+    marginTop: -2,
+    marginBottom: 4,
+    flexShrink: 1,
+    lineHeight: 18,
+    maxWidth: "100%",
+  },
   inchGrid: {
+    gap: 14,
+    alignSelf: "stretch",
+    maxWidth: "100%",
+  },
+  inchRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+    alignItems: "flex-start",
+    gap: 12,
+    alignSelf: "stretch",
+    maxWidth: "100%",
   },
   inchField: {
-    flexGrow: 1,
-    flexBasis: 140,
-    minWidth: 130,
+    flex: 1,
+    minWidth: 0,
+    maxWidth: "100%",
   },
   galOut: {
     fontSize: 13,
@@ -532,44 +935,114 @@ const styles = StyleSheet.create({
   total: {
     fontSize: 16,
     fontWeight: "700",
-    marginTop: 4,
+    marginTop: 8,
   },
   actions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 4,
+    marginTop: 8,
+    marginBottom: 4,
   },
   chartGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    gap: 8,
     marginTop: 8,
+    alignSelf: "stretch",
+    maxWidth: "100%",
   },
   chartCell: {
-    width: "23%",
-    minWidth: 90,
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 120,
+    maxWidth: "100%",
   },
   chartText: { fontSize: 11 },
-  recordRow: {
+  fieldLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  statBlock: {
+    gap: 4,
+    marginBottom: 8,
+  },
+  statTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  statMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    flexShrink: 1,
+  },
+  monthList: {
+    marginTop: 6,
+    gap: 4,
+  },
+  monthRow: {
+    fontSize: 12,
+  },
+  alertLine: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  weekBlock: {
+    borderTopWidth: 1,
+    paddingTop: 12,
+    marginTop: 10,
+    gap: 8,
+    width: "100%",
+  },
+  weekHeader: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 8,
+    width: "100%",
+  },
+  weekTogglePress: {
+    alignSelf: "stretch",
+    paddingVertical: 2,
+  },
+  weekToggleLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  weekHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
-    paddingVertical: 10,
+    flexWrap: "wrap",
+    gap: 8,
+    width: "100%",
+  },
+  weekCopyBtn: {
+    flexShrink: 0,
+  },
+  weekTotal: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  recordRow: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 8,
+    paddingVertical: 12,
     borderTopWidth: 1,
+    width: "100%",
   },
   recordMain: {
-    flex: 1,
+    width: "100%",
     minWidth: 0,
-    gap: 2,
+    gap: 4,
   },
   recordActions: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    gap: 8,
     alignItems: "center",
   },
-  recordTitle: { fontSize: 14, fontWeight: "600" },
-  recordMeta: { fontSize: 12 },
+  recordTitle: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
+  recordMeta: { fontSize: 12, lineHeight: 18, flexShrink: 1 },
 });

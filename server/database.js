@@ -1889,6 +1889,8 @@ class Database {
           itemName: itemName || id,
           type: itemType || "custom_paint",
           totalQuantity: 0,
+          checkoutGallons: 0,
+          usageGallons: 0,
           jobs: new Map(),
         });
       }
@@ -1903,7 +1905,11 @@ class Database {
             key,
             label: "Lifetime",
             totalQuantity: 0,
+            checkoutGallons: 0,
+            usageGallons: 0,
             colors: new Map(),
+            checkoutByColor: new Map(),
+            usageByColor: new Map(),
             jobs: new Map(),
           });
         }
@@ -1917,12 +1923,19 @@ class Database {
           key,
           label: formatBucketLabel(bucketDate),
           totalQuantity: 0,
+          checkoutGallons: 0,
+          usageGallons: 0,
           colors: new Map(),
+          checkoutByColor: new Map(),
+          usageByColor: new Map(),
           jobs: new Map(),
         });
       }
       return bucketMap.get(key);
     };
+
+    let totalCheckout = 0;
+    let totalUsage = 0;
 
     for (const row of result.rows) {
       const qty = parseStoredGallons(row.quantity) || 0;
@@ -1962,12 +1975,109 @@ class Database {
       bucket.jobs.set(jobName, (bucket.jobs.get(jobName) || 0) + qty);
     }
 
+    const qtyExpr = `ABS(COALESCE(
+      NULLIF(TRIM(COALESCE(a.details::jsonb->>'quantityChange', '')), '')::double precision,
+      0
+    ))`;
+    const actionTypeExpr = `COALESCE(a.details::jsonb->>'_actionType', '')`;
+    const auditBucket =
+      trunc === "lifetime"
+        ? `NULL::timestamptz`
+        : sqlPacificBucket("a.timestamp", trunc);
+    const usageBucket =
+      trunc === "lifetime"
+        ? `NULL::timestamptz`
+        : `date_trunc('${trunc}', (mu.entry_date::date)::timestamp)`;
+
+    const [checkoutResult, usageResult] = await Promise.all([
+      this.pool.query(
+        `SELECT
+           ${auditBucket} AS bucket,
+           a.item_id,
+           i.name AS item_name,
+           i.type AS item_type,
+           SUM(${qtyExpr})::float AS checkout_gallons
+         FROM audit_log a
+         JOIN items i ON i.id = a.item_id
+         WHERE lower(i.type) IN ('custom_paint', 'custom_stain')
+           AND (timezone('${REPORT_TZ}', a.timestamp::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', a.timestamp::timestamptz))::date <= $2::date
+           AND (
+             a.action = 'check_out'
+             OR (a.action = 'update' AND ${actionTypeExpr} = 'check_out')
+           )
+         GROUP BY bucket, a.item_id, i.name, i.type`,
+        [from, to],
+      ),
+      this.pool.query(
+        `SELECT
+           ${usageBucket} AS bucket,
+           mu.item_id,
+           COALESCE(i.name, mu.color_name, mu.item_id) AS item_name,
+           COALESCE(i.type, mu.material_type, 'custom_paint') AS item_type,
+           SUM(COALESCE(mu.qty_gallons, 0))::float AS usage_gallons
+         FROM material_usage mu
+         LEFT JOIN items i ON i.id = mu.item_id
+         WHERE (mu.entry_date::date) >= $1::date
+           AND (mu.entry_date::date) <= $2::date
+           AND (
+             lower(COALESCE(i.type, '')) IN ('custom_paint', 'custom_stain')
+             OR lower(COALESCE(mu.material_type, '')) IN ('custom_paint', 'custom_stain')
+           )
+         GROUP BY bucket, mu.item_id, COALESCE(i.name, mu.color_name, mu.item_id),
+                  COALESCE(i.type, mu.material_type, 'custom_paint')`,
+        [from, to],
+      ),
+    ]);
+
+    for (const row of checkoutResult.rows) {
+      const qty = Math.round((parseFloat(row.checkout_gallons) || 0) * 10) / 10;
+      if (qty <= 0) continue;
+      totalCheckout += qty;
+      const itemId = String(row.item_id || "");
+      if (!itemId) continue;
+      const color = ensureColor(
+        itemId,
+        row.item_name || itemId,
+        (row.item_type || "custom_paint").toLowerCase(),
+      );
+      color.checkoutGallons += qty;
+      const bucket = ensureBucket(row.bucket);
+      bucket.checkoutGallons += qty;
+      bucket.checkoutByColor.set(
+        itemId,
+        (bucket.checkoutByColor.get(itemId) || 0) + qty,
+      );
+    }
+
+    for (const row of usageResult.rows) {
+      const qty = Math.round((parseFloat(row.usage_gallons) || 0) * 10) / 10;
+      if (qty <= 0) continue;
+      totalUsage += qty;
+      const itemId = String(row.item_id || "");
+      if (!itemId) continue;
+      const color = ensureColor(
+        itemId,
+        row.item_name || itemId,
+        (row.item_type || "custom_paint").toLowerCase(),
+      );
+      color.usageGallons += qty;
+      const bucket = ensureBucket(row.bucket);
+      bucket.usageGallons += qty;
+      bucket.usageByColor.set(
+        itemId,
+        (bucket.usageByColor.get(itemId) || 0) + qty,
+      );
+    }
+
     for (const periodDate of Database.enumerateReportPeriods(from, to, trunc)) {
       ensureBucket(periodDate);
     }
     if (trunc === "lifetime") {
       ensureBucket(null);
     }
+
+    const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 
     const byJob = [...byJobMap.values()]
       .map((j) => ({
@@ -1984,41 +2094,64 @@ class Database {
         itemId: c.itemId,
         itemName: c.itemName,
         type: c.type,
-        totalQuantity: c.totalQuantity,
+        totalQuantity: round1(c.totalQuantity),
+        checkoutGallons: round1(c.checkoutGallons),
+        usageGallons: round1(c.usageGallons),
         jobs: [...c.jobs.entries()]
           .map(([jobName, quantity]) => ({ jobName, quantity }))
           .sort((a, b) => b.quantity - a.quantity),
       }))
-      .sort((a, b) => b.totalQuantity - a.totalQuantity);
+      .sort(
+        (a, b) =>
+          b.totalQuantity + b.checkoutGallons + b.usageGallons -
+          (a.totalQuantity + a.checkoutGallons + a.usageGallons),
+      );
 
     const sortedBuckets = [...bucketMap.values()].sort((a, b) =>
       a.key.localeCompare(b.key),
     );
 
-    const bucketDetails = sortedBuckets.map((b) => ({
-      label: b.label,
-      totalQuantity: b.totalQuantity,
-      colors: [...b.colors.entries()]
-        .map(([itemId, quantity]) => {
-          const c = byColorMap.get(itemId);
-          return {
-            itemId,
-            itemName: c?.itemName || itemId,
-            quantity,
-          };
-        })
-        .sort((a, b) => b.quantity - a.quantity),
-      jobs: [...b.jobs.entries()]
-        .map(([jobName, quantity]) => ({ jobName, quantity }))
-        .sort((a, b) => b.quantity - a.quantity),
-    }));
+    const bucketDetails = sortedBuckets.map((b) => {
+      const ids = new Set([
+        ...b.colors.keys(),
+        ...b.checkoutByColor.keys(),
+        ...b.usageByColor.keys(),
+      ]);
+      return {
+        label: b.label,
+        totalQuantity: round1(b.totalQuantity),
+        checkoutGallons: round1(b.checkoutGallons),
+        usageGallons: round1(b.usageGallons),
+        colors: [...ids]
+          .map((itemId) => {
+            const c = byColorMap.get(itemId);
+            return {
+              itemId,
+              itemName: c?.itemName || itemId,
+              quantity: round1(b.colors.get(itemId) || 0),
+              checkoutGallons: round1(b.checkoutByColor.get(itemId) || 0),
+              usageGallons: round1(b.usageByColor.get(itemId) || 0),
+            };
+          })
+          .sort(
+            (a, b2) =>
+              b2.quantity + b2.checkoutGallons + b2.usageGallons -
+              (a.quantity + a.checkoutGallons + a.usageGallons),
+          ),
+        jobs: [...b.jobs.entries()]
+          .map(([jobName, quantity]) => ({ jobName, quantity }))
+          .sort((a, b2) => b2.quantity - a.quantity),
+      };
+    });
 
     return {
       from,
       to,
       groupBy: trunc,
       totals: {
-        totalQuantity,
+        totalQuantity: round1(totalQuantity),
+        checkoutGallons: round1(totalCheckout),
+        usageGallons: round1(totalUsage),
         lineCount,
         colorCount: byColorMap.size,
         jobCount: byJobMap.size,
@@ -2026,7 +2159,9 @@ class Database {
       byJob,
       byColor,
       buckets: sortedBuckets.map((b) => b.label),
-      bucketTotals: sortedBuckets.map((b) => b.totalQuantity),
+      bucketTotals: sortedBuckets.map((b) => round1(b.totalQuantity)),
+      bucketCheckoutTotals: sortedBuckets.map((b) => round1(b.checkoutGallons)),
+      bucketUsageTotals: sortedBuckets.map((b) => round1(b.usageGallons)),
       bucketDetails,
     };
   }

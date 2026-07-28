@@ -202,12 +202,16 @@ function roundUsageByType(obj) {
   return out;
 }
 
-function aggregateCustomColorLines(lines, trunc, from, to) {
+function aggregateCustomColorLines(lines, trunc, from, to, extraByItem = {}) {
   const byJobMap = new Map();
   const byColorMap = new Map();
   const bucketMap = new Map();
   let totalQuantity = 0;
+  let totalCheckout = 0;
+  let totalUsage = 0;
   let lineCount = 0;
+
+  const round1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 
   const ensureJob = (jobName) => {
     const key = jobName || "(No job)";
@@ -229,6 +233,8 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
         itemName: itemName || id,
         type: itemType || "custom_paint",
         totalQuantity: 0,
+        checkoutGallons: 0,
+        usageGallons: 0,
         jobs: new Map(),
       });
     }
@@ -241,7 +247,11 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
         key,
         label: formatBucketLabel(key, trunc),
         totalQuantity: 0,
+        checkoutGallons: 0,
+        usageGallons: 0,
         colors: new Map(),
+        checkoutByColor: new Map(),
+        usageByColor: new Map(),
         jobs: new Map(),
       });
     }
@@ -288,6 +298,38 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
     bucket.jobs.set(jobName, (bucket.jobs.get(jobName) || 0) + qty);
   }
 
+  for (const [itemId, extra] of Object.entries(extraByItem || {})) {
+    const color = ensureColor(
+      itemId,
+      extra.itemName || itemId,
+      extra.itemType || "custom_paint",
+    );
+    for (const ev of extra.checkoutEvents || []) {
+      const qty = round1(ev.quantity);
+      if (qty <= 0) continue;
+      totalCheckout += qty;
+      color.checkoutGallons += qty;
+      const bucket = ensureBucket(ev.at);
+      bucket.checkoutGallons += qty;
+      bucket.checkoutByColor.set(
+        itemId,
+        (bucket.checkoutByColor.get(itemId) || 0) + qty,
+      );
+    }
+    for (const ev of extra.usageEvents || []) {
+      const qty = round1(ev.quantity);
+      if (qty <= 0) continue;
+      totalUsage += qty;
+      color.usageGallons += qty;
+      const bucket = ensureBucket(ev.at);
+      bucket.usageGallons += qty;
+      bucket.usageByColor.set(
+        itemId,
+        (bucket.usageByColor.get(itemId) || 0) + qty,
+      );
+    }
+  }
+
   const byJob = [...byJobMap.values()]
     .map((j) => ({
       jobName: j.jobName,
@@ -303,12 +345,18 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
       itemId: c.itemId,
       itemName: c.itemName,
       type: c.type,
-      totalQuantity: c.totalQuantity,
+      totalQuantity: round1(c.totalQuantity),
+      checkoutGallons: round1(c.checkoutGallons),
+      usageGallons: round1(c.usageGallons),
       jobs: [...c.jobs.entries()]
         .map(([jobName, quantity]) => ({ jobName, quantity }))
         .sort((a, b) => b.quantity - a.quantity),
     }))
-    .sort((a, b) => b.totalQuantity - a.totalQuantity);
+    .sort(
+      (a, b) =>
+        b.totalQuantity + b.checkoutGallons + b.usageGallons -
+        (a.totalQuantity + a.checkoutGallons + a.usageGallons),
+    );
 
   if (from && to) {
     for (const key of enumerateBucketKeys(from, to, trunc)) {
@@ -320,27 +368,44 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
     a.key.localeCompare(b.key),
   );
 
-  const bucketDetails = sortedBuckets.map((b) => ({
-    label: b.label,
-    totalQuantity: b.totalQuantity,
-    colors: [...b.colors.entries()]
-      .map(([itemId, quantity]) => {
-        const c = byColorMap.get(itemId);
-        return {
-          itemId,
-          itemName: c?.itemName || itemId,
-          quantity,
-        };
-      })
-      .sort((a, b) => b.quantity - a.quantity),
-    jobs: [...b.jobs.entries()]
-      .map(([jobName, quantity]) => ({ jobName, quantity }))
-      .sort((a, b) => b.quantity - a.quantity),
-  }));
+  const bucketDetails = sortedBuckets.map((b) => {
+    const ids = new Set([
+      ...b.colors.keys(),
+      ...b.checkoutByColor.keys(),
+      ...b.usageByColor.keys(),
+    ]);
+    return {
+      label: b.label,
+      totalQuantity: round1(b.totalQuantity),
+      checkoutGallons: round1(b.checkoutGallons),
+      usageGallons: round1(b.usageGallons),
+      colors: [...ids]
+        .map((itemId) => {
+          const c = byColorMap.get(itemId);
+          return {
+            itemId,
+            itemName: c?.itemName || itemId,
+            quantity: round1(b.colors.get(itemId) || 0),
+            checkoutGallons: round1(b.checkoutByColor.get(itemId) || 0),
+            usageGallons: round1(b.usageByColor.get(itemId) || 0),
+          };
+        })
+        .sort(
+          (a, b2) =>
+            b2.quantity + b2.checkoutGallons + b2.usageGallons -
+            (a.quantity + a.checkoutGallons + a.usageGallons),
+        ),
+      jobs: [...b.jobs.entries()]
+        .map(([jobName, quantity]) => ({ jobName, quantity }))
+        .sort((a, b2) => b2.quantity - a.quantity),
+    };
+  });
 
   return {
     totals: {
-      totalQuantity,
+      totalQuantity: round1(totalQuantity),
+      checkoutGallons: round1(totalCheckout),
+      usageGallons: round1(totalUsage),
       lineCount,
       colorCount: byColorMap.size,
       jobCount: byJobMap.size,
@@ -348,16 +413,20 @@ function aggregateCustomColorLines(lines, trunc, from, to) {
     byJob,
     byColor,
     buckets: sortedBuckets.map((b) => b.label),
-    bucketTotals: sortedBuckets.map((b) => b.totalQuantity),
+    bucketTotals: sortedBuckets.map((b) => round1(b.totalQuantity)),
+    bucketCheckoutTotals: sortedBuckets.map((b) => round1(b.checkoutGallons)),
+    bucketUsageTotals: sortedBuckets.map((b) => round1(b.usageGallons)),
     bucketDetails,
   };
 }
 
 async function buildClientCustomColorsReport(from, to, groupBy) {
   const trunc = normalizeCustomColorsGroupBy(groupBy);
-  const [orders, items] = await Promise.all([
+  const [orders, items, auditLogs, usageRows] = await Promise.all([
     OrderService.getOrders(500),
     InventoryService.getAllItems().catch(() => []),
+    AuditService.list(2000),
+    MaterialUsageService.list(null, 2000, { from, to }),
   ]);
 
   const customTypes = new Set(["custom_paint", "custom_stain"]);
@@ -386,7 +455,74 @@ async function buildClientCustomColorsReport(from, to, groupBy) {
     }
   }
 
-  const agg = aggregateCustomColorLines(lines, trunc, from, to);
+  const extraByItem = {};
+  const ensureExtra = (itemId, itemName, itemType) => {
+    const id = String(itemId);
+    if (!extraByItem[id]) {
+      extraByItem[id] = {
+        itemName: itemName || id,
+        itemType: itemType || "custom_paint",
+        checkoutEvents: [],
+        usageEvents: [],
+      };
+    }
+    return extraByItem[id];
+  };
+
+  for (const row of auditLogs || []) {
+    const ts = row.timestamp;
+    if (!inDateRange(ts, from, to)) continue;
+    const itemId = String(row.itemId || row.item_id || "");
+    const inv = itemById[itemId];
+    const type = (inv?.type || "").toLowerCase();
+    if (!customTypes.has(type)) continue;
+    let details = row.details;
+    if (typeof details === "string") {
+      try {
+        details = JSON.parse(details || "{}");
+      } catch {
+        details = {};
+      }
+    }
+    const action = row.action;
+    const actionType = details?._actionType;
+    const isCheckout =
+      action === "check_out" ||
+      (action === "update" && actionType === "check_out");
+    if (!isCheckout) continue;
+    const qty = auditQtyGallons(details);
+    if (qty <= 0) continue;
+    ensureExtra(itemId, inv?.name || itemId, type).checkoutEvents.push({
+      at: ts,
+      quantity: qty,
+    });
+  }
+
+  for (const row of usageRows || []) {
+    const ed = row.entry_date;
+    if (!inDateRange(ed, from, to)) continue;
+    const itemId = String(row.item_id || row.itemId || "");
+    const inv = itemById[itemId];
+    const type = (
+      inv?.type ||
+      row.material_type ||
+      row.materialType ||
+      ""
+    ).toLowerCase();
+    if (!customTypes.has(type)) continue;
+    const gal = parseFloat(row.qty_gallons) || 0;
+    if (gal <= 0) continue;
+    ensureExtra(
+      itemId || `custom:${row.color_name || "unknown"}`,
+      inv?.name || row.color_name || itemId,
+      type,
+    ).usageEvents.push({
+      at: `${ed}T12:00:00`,
+      quantity: gal,
+    });
+  }
+
+  const agg = aggregateCustomColorLines(lines, trunc, from, to, extraByItem);
   return {
     from,
     to,
