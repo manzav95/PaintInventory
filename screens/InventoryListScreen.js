@@ -231,6 +231,19 @@ export default function InventoryListScreen({
     top: false,
     bottom: false,
   });
+  const mobileListMetricsRef = useRef({ contentH: 0, layoutH: 0 });
+  const [mobileListFades, setMobileListFades] = useState({
+    top: false,
+    bottom: false,
+  });
+
+  const syncScrollFades = (setter, y, contentH, layoutH) => {
+    const canScroll = contentH > layoutH + 2;
+    setter({
+      top: canScroll && y > 2,
+      bottom: canScroll && y + layoutH < contentH - 2,
+    });
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -2210,6 +2223,13 @@ export default function InventoryListScreen({
   if (isMobileLandscape) {
     return (
       <>
+        <View
+          style={[
+            styles.container,
+            styles.tableScrollFadeHost,
+            { backgroundColor: theme.colors.background },
+          ]}
+        >
         <ScrollView
           style={[
             styles.container,
@@ -2218,6 +2238,37 @@ export default function InventoryListScreen({
           ]}
           contentContainerStyle={styles.mobileLandscapeScrollContent}
           showsVerticalScrollIndicator={true}
+          scrollEventThrottle={16}
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } =
+              e.nativeEvent;
+            syncScrollFades(
+              setMobileListFades,
+              contentOffset.y,
+              contentSize.height,
+              layoutMeasurement.height,
+            );
+          }}
+          onContentSizeChange={(_w, h) => {
+            mobileListMetricsRef.current.contentH = h;
+            const layoutH = mobileListMetricsRef.current.layoutH;
+            if (layoutH > 0) {
+              syncScrollFades(
+                setMobileListFades,
+                0,
+                h,
+                layoutH,
+              );
+            }
+          }}
+          onLayout={(e) => {
+            const layoutH = e.nativeEvent.layout.height;
+            mobileListMetricsRef.current.layoutH = layoutH;
+            const contentH = mobileListMetricsRef.current.contentH;
+            if (contentH > 0) {
+              syncScrollFades(setMobileListFades, 0, contentH, layoutH);
+            }
+          }}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -2585,6 +2636,13 @@ export default function InventoryListScreen({
             </View>
           )}
         </ScrollView>
+        {mobileListFades.top ? (
+          <EdgeFade color={theme.colors.background} side="top" />
+        ) : null}
+        {mobileListFades.bottom ? (
+          <EdgeFade color={theme.colors.background} side="bottom" />
+        ) : null}
+        </View>
         {receivePoModal}
         <ColorPreviewModal />
       </>
@@ -2752,42 +2810,85 @@ export default function InventoryListScreen({
             </Text>
           </View>
         ) : (
-          <FlatList
-            ref={listRef}
-            key={viewMode}
-            data={
-              viewMode === "inventory"
-                ? filteredAndSortedInventory
-                : colorBookItems
-            }
-            renderItem={viewMode === "inventory" ? renderItem : renderColorCard}
-            keyExtractor={(item) =>
-              item.id?.toString() || String(Math.random())
-            }
-            numColumns={viewMode === "colorBook" ? 2 : 1}
-            columnWrapperStyle={
-              viewMode === "colorBook" ? styles.colorBookRow : undefined
-            }
-            style={styles.listFlex}
-            contentContainerStyle={
-              viewMode === "colorBook" ? styles.colorBookList : styles.list
-            }
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefreshing}
-                onRefresh={onRefresh}
-                tintColor={theme.colors.primary}
-              />
-            }
-            keyboardDismissMode="none"
-            keyboardShouldPersistTaps="handled"
-            onScroll={(e) => {
-              const y = e?.nativeEvent?.contentOffset?.y ?? 0;
-              setScrollOffset(y);
-              notifyViewState({ scrollOffset: y });
-            }}
-            scrollEventThrottle={16}
-          />
+          <View style={[styles.listFlex, styles.tableScrollFadeHost]}>
+            <FlatList
+              ref={listRef}
+              key={viewMode}
+              data={
+                viewMode === "inventory"
+                  ? filteredAndSortedInventory
+                  : colorBookItems
+              }
+              renderItem={
+                viewMode === "inventory" ? renderItem : renderColorCard
+              }
+              keyExtractor={(item) =>
+                item.id?.toString() || String(Math.random())
+              }
+              numColumns={viewMode === "colorBook" ? 2 : 1}
+              columnWrapperStyle={
+                viewMode === "colorBook" ? styles.colorBookRow : undefined
+              }
+              style={styles.listFlex}
+              contentContainerStyle={
+                viewMode === "colorBook" ? styles.colorBookList : styles.list
+              }
+              refreshControl={
+                <RefreshControl
+                  refreshing={isRefreshing}
+                  onRefresh={onRefresh}
+                  tintColor={theme.colors.primary}
+                />
+              }
+              keyboardDismissMode="none"
+              keyboardShouldPersistTaps="handled"
+              onScroll={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } =
+                  e.nativeEvent;
+                const y = contentOffset.y ?? 0;
+                setScrollOffset(y);
+                notifyViewState({ scrollOffset: y });
+                syncScrollFades(
+                  setMobileListFades,
+                  y,
+                  contentSize.height,
+                  layoutMeasurement.height,
+                );
+              }}
+              onContentSizeChange={(_w, h) => {
+                mobileListMetricsRef.current.contentH = h;
+                const layoutH = mobileListMetricsRef.current.layoutH;
+                if (layoutH > 0) {
+                  syncScrollFades(
+                    setMobileListFades,
+                    scrollOffset,
+                    h,
+                    layoutH,
+                  );
+                }
+              }}
+              onLayout={(e) => {
+                const layoutH = e.nativeEvent.layout.height;
+                mobileListMetricsRef.current.layoutH = layoutH;
+                const contentH = mobileListMetricsRef.current.contentH;
+                if (contentH > 0) {
+                  syncScrollFades(
+                    setMobileListFades,
+                    scrollOffset,
+                    contentH,
+                    layoutH,
+                  );
+                }
+              }}
+              scrollEventThrottle={16}
+            />
+            {mobileListFades.top ? (
+              <EdgeFade color={theme.colors.background} side="top" />
+            ) : null}
+            {mobileListFades.bottom ? (
+              <EdgeFade color={theme.colors.background} side="bottom" />
+            ) : null}
+          </View>
         )}
       </View>
       {receivePoModal}
