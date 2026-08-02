@@ -5,8 +5,29 @@ export const LANDSCAPE_SIDEBAR_MIN_WIDTH = 600;
 /** Web viewports above this width hide the dedicated Check In / Out control (sidebar / home). */
 export const CHECK_IN_OUT_HIDE_MIN_WIDTH = 1024;
 
-/** Screens that stay full-screen (no persistent sidebar) on any layout. */
+/** Screens that stay full-screen (no app shell) on any layout. */
 export const FULLSCREEN_ROUTES = new Set(["login", "scan"]);
+
+/** Titles for the mobile shell top bar. */
+export const SCREEN_TITLES = {
+  home: "Dashboard",
+  list: "Inventory",
+  orders: "Purchase Orders",
+  placeOrder: "Place Order",
+  materialUsage: "Material Usage",
+  wasteTracking: "Waste Tracking",
+  reports: "Reports",
+  settings: "Settings",
+  qrscan: "Check In / Out",
+  checkinout: "Check In / Out",
+  add: "Add Item",
+  detail: "Item Detail",
+  history: "Transaction History",
+};
+
+export function getScreenTitle(screen) {
+  return SCREEN_TITLES[screen] || "Paint Inventory";
+}
 
 export function useAppLayout() {
   const { width, height } = useWindowDimensions();
@@ -36,8 +57,8 @@ export function useAppLayout() {
   };
 }
 
-export function shouldUseShell(currentScreen, showPersistentSidebar) {
-  if (!showPersistentSidebar) return false;
+/** Use shell for any logged-in screen except fullscreen routes. */
+export function shouldUseShell(currentScreen) {
   if (FULLSCREEN_ROUTES.has(currentScreen)) return false;
   return true;
 }

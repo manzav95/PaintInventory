@@ -40,6 +40,15 @@ import {
 import showToast from "../utils/showToast";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import { EdgeFade } from "../components/ScrollFrame";
+import {
+  colors as kitColors,
+  space,
+  radius,
+  type as kitType,
+  fontFamily,
+  mutedTextColor,
+} from "../theme/tokens";
+import { AppEmptyState, AppBadge } from "../components/ui";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const STANDARD_TYPES = [
@@ -1036,7 +1045,7 @@ export default function InventoryListScreen({
     const lowStockCardStyle = isLowStock
       ? {
           borderLeftWidth: 4,
-          borderLeftColor: "#ff6b6b",
+          borderLeftColor: kitColors.semantic.lowStockText,
           backgroundColor: theme.dark
             ? theme.colors.surfaceContainerHighest
             : "#fef5f5",
@@ -1056,50 +1065,34 @@ export default function InventoryListScreen({
               >
                 {item.name || "Unnamed Item"}
               </Text>
-              <View style={styles.itemHeaderRight}>
-                <Text
-                  style={[
-                    styles.itemQuantity,
-                    isLowStock && styles.lowStockText,
-                  ]}
-                >
-                  {item.quantity || 0} gal
-                </Text>
-                {hasOpen && (
+              <Text
+                style={[
+                  styles.itemQuantity,
+                  isLowStock && styles.lowStockText,
+                ]}
+              >
+                {item.quantity || 0} gal
+              </Text>
+            </View>
+            {(item.location || hasOpen) && (
+              <View style={styles.itemMetaRow}>
+                {item.location ? (
+                  <Text style={styles.itemLocation} numberOfLines={1}>
+                    📍 {item.location}
+                  </Text>
+                ) : (
+                  <View style={styles.itemMetaSpacer} />
+                )}
+                {hasOpen ? (
                   <View style={styles.itemBadgeRow}>
-                    <View style={styles.itemBadge}>
-                      <Text
-                        style={[styles.itemBadgeText, { color: "#1976d2" }]}
-                      >
-                        Open
-                      </Text>
-                    </View>
-                    {isLate && (
-                      <View style={[styles.itemBadge, styles.itemBadgeLate]}>
-                        <Text
-                          style={[styles.itemBadgeText, { color: "#c62828" }]}
-                        >
-                          Late
-                        </Text>
-                      </View>
-                    )}
+                    <AppBadge tone="primary">Open</AppBadge>
+                    {isLate && <AppBadge tone="late">Late</AppBadge>}
                     {isBackOrdered && (
-                      <View
-                        style={[styles.itemBadge, styles.itemBadgeBackOrder]}
-                      >
-                        <Text
-                          style={[styles.itemBadgeText, { color: "#e65100" }]}
-                        >
-                          Back ordered
-                        </Text>
-                      </View>
+                      <AppBadge tone="backOrder">Back ordered</AppBadge>
                     )}
                   </View>
-                )}
+                ) : null}
               </View>
-            </View>
-            {item.location && (
-              <Text style={styles.itemLocation}>📍 {item.location}</Text>
             )}
             {renderCopyableItemId({
               id: itemId === "N/A" ? "" : itemId,
@@ -1122,7 +1115,9 @@ export default function InventoryListScreen({
                     })
                   : "";
                 const isLate = expDate && expDate.getTime() < Date.now();
-                const textColor = isLate ? "#c62828" : theme.colors.primary;
+                const textColor = isLate
+                  ? kitColors.semantic.recycleDueDate
+                  : theme.colors.primary;
                 const po = orderInfo.poNumber || orderInfo.po_number || "";
                 return (
                   <View style={styles.onOrderBlock}>
@@ -1232,8 +1227,8 @@ export default function InventoryListScreen({
       >
         <View style={[styles.webContainer, styles.webContainerFlex]}>
           <PageHeader
-            title="Inventory Dashboard"
-            onBack={handleBack}
+            title="Inventory"
+            showBack={false}
             embeddedInShell={embeddedInShell}
             actions={
               <>
@@ -1315,13 +1310,13 @@ export default function InventoryListScreen({
                 autoCapitalize="none"
               />
               {colorBookItems.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>
-                    {searchQuery
+                <AppEmptyState
+                  title={
+                    searchQuery
                       ? "No paint colors found"
-                      : "No paint colors with hex in inventory"}
-                  </Text>
-                </View>
+                      : "No paint colors with hex in inventory"
+                  }
+                />
               ) : (
                 <ScrollView
                   style={styles.colorBookScrollDesktop}
@@ -1405,7 +1400,7 @@ export default function InventoryListScreen({
                           <Title
                             style={[
                               styles.analyticsValue,
-                              { color: "#ff9800" },
+                              { color: kitColors.semantic.lowStockValue },
                             ]}
                           >
                             {analytics.lowStockCount}
@@ -1450,7 +1445,7 @@ export default function InventoryListScreen({
                           <Title
                             style={[
                               styles.analyticsValue,
-                              { color: "#f44336" },
+                              { color: kitColors.semantic.outOfStockValue },
                             ]}
                           >
                             {analytics.outOfStockCount}
@@ -1658,13 +1653,13 @@ export default function InventoryListScreen({
                       </View>
 
                       {filteredAndSortedInventory.length === 0 ? (
-                        <View style={styles.emptyState}>
-                          <Text style={styles.emptyText}>
-                            {searchQuery
+                        <AppEmptyState
+                          title={
+                            searchQuery
                               ? "No items found"
-                              : "No items in inventory"}
-                          </Text>
-                        </View>
+                              : "No items in inventory"
+                          }
+                        />
                       ) : (
                         <ScrollView
                           horizontal
@@ -1849,7 +1844,7 @@ export default function InventoryListScreen({
                                                 ? theme.colors.surfaceContainerHighest
                                                 : "#fef5f5",
                                               borderLeftWidth: 4,
-                                              borderLeftColor: "#ff6b6b",
+                                              borderLeftColor: kitColors.semantic.lowStockText,
                                             }
                                           : undefined
                                       }
@@ -1903,7 +1898,7 @@ export default function InventoryListScreen({
                                             {
                                               color: theme.dark
                                                 ? "#fff"
-                                                : "#666",
+                                                : mutedTextColor(theme),
                                             },
                                           ],
                                         })}
@@ -1940,7 +1935,7 @@ export default function InventoryListScreen({
                                             {
                                               color: theme.dark
                                                 ? "#fff"
-                                                : "#666",
+                                                : mutedTextColor(theme),
                                             },
                                           ]}
                                         >
@@ -2002,7 +1997,7 @@ export default function InventoryListScreen({
                                                     {
                                                       color: theme.dark
                                                         ? "#fff"
-                                                        : "#666",
+                                                        : mutedTextColor(theme),
                                                     },
                                                   ]}
                                                 >
@@ -2026,7 +2021,7 @@ export default function InventoryListScreen({
                                                     {
                                                       color: theme.dark
                                                         ? "#aaa"
-                                                        : "#666",
+                                                        : mutedTextColor(theme),
                                                     },
                                                   ]}
                                                 >
@@ -2042,7 +2037,7 @@ export default function InventoryListScreen({
                                                 {
                                                   color: theme.dark
                                                     ? "#fff"
-                                                    : "#666",
+                                                    : mutedTextColor(theme),
                                                 },
                                               ]}
                                             >
@@ -2085,7 +2080,7 @@ export default function InventoryListScreen({
                                               expDate &&
                                               expDate.getTime() < Date.now();
                                             const textColor = isLate
-                                              ? "#c62828"
+                                              ? kitColors.semantic.recycleDueDate
                                               : theme.colors.primary;
                                             const po =
                                               orderInfo.poNumber ||
@@ -2278,12 +2273,6 @@ export default function InventoryListScreen({
           }
         >
           <View style={styles.header}>
-            <Button icon="arrow-left" onPress={handleBack} mode="text">
-              Back
-            </Button>
-            <Text style={styles.headerTitle}>
-              {viewMode === "colorBook" ? "Color Book" : "Inventory"}
-            </Text>
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
                 {isAdmin && viewMode !== "colorBook" && (
@@ -2470,7 +2459,7 @@ export default function InventoryListScreen({
                       <Title
                         style={[
                           styles.analyticsValueMobile,
-                          { color: "#ff9800" },
+                          { color: kitColors.semantic.lowStockValue },
                         ]}
                       >
                         {analytics.lowStockCount}
@@ -2512,7 +2501,7 @@ export default function InventoryListScreen({
                       <Title
                         style={[
                           styles.analyticsValueMobile,
-                          { color: "#f44336" },
+                          { color: kitColors.semantic.outOfStockValue },
                         ]}
                       >
                         {analytics.outOfStockCount}
@@ -2590,16 +2579,16 @@ export default function InventoryListScreen({
 
           {viewMode === "inventory" ? (
             filteredAndSortedInventory.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {searchQuery ? "No items found" : "No items in inventory"}
-                </Text>
-                <Text style={styles.emptySubtext}>
-                  {searchQuery
+              <AppEmptyState
+                title={
+                  searchQuery ? "No items found" : "No items in inventory"
+                }
+                subtitle={
+                  searchQuery
                     ? "Try a different search term"
-                    : "Scan a QR Code to add your first item"}
-                </Text>
-              </View>
+                    : "Scan a QR Code to add your first item"
+                }
+              />
             ) : (
               <View style={[styles.list, styles.listLandscape]}>
                 {filteredAndSortedInventory.map((item) => (
@@ -2610,18 +2599,18 @@ export default function InventoryListScreen({
               </View>
             )
           ) : colorBookItems.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>
-                {searchQuery
+            <AppEmptyState
+              title={
+                searchQuery
                   ? "No paint colors found"
-                  : "No paint colors with hex in inventory"}
-              </Text>
-              <Text style={styles.emptySubtext}>
-                {searchQuery
+                  : "No paint colors with hex in inventory"
+              }
+              subtitle={
+                searchQuery
                   ? "Try a different search"
-                  : "Add paint items with a color (hex) to see them here"}
-              </Text>
-            </View>
+                  : "Add paint items with a color (hex) to see them here"
+              }
+            />
           ) : (
             <View
               style={[styles.list, styles.listLandscape, styles.colorBookGrid]}
@@ -2655,15 +2644,6 @@ export default function InventoryListScreen({
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
       <View style={styles.headerMobilePortrait}>
-        <View style={styles.headerRow1}>
-          <Button icon="arrow-left" onPress={handleBack} mode="text">
-            Back
-          </Button>
-          <Text style={styles.headerTitle}>
-            {viewMode === "colorBook" ? "Color Book" : "Inventory"}
-          </Text>
-          <View style={styles.refreshContainer} />
-        </View>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
             {isAdmin && viewMode !== "colorBook" && (
@@ -2786,29 +2766,27 @@ export default function InventoryListScreen({
       )}
       <View style={styles.listContent}>
         {viewMode === "inventory" && filteredAndSortedInventory.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {searchQuery ? "No items found" : "No items in inventory"}
-            </Text>
-            <Text style={styles.emptySubtext}>
-              {searchQuery
+          <AppEmptyState
+            title={searchQuery ? "No items found" : "No items in inventory"}
+            subtitle={
+              searchQuery
                 ? "Try a different search term"
-                : "Scan a QR Code to add your first item"}
-            </Text>
-          </View>
+                : "Scan a QR Code to add your first item"
+            }
+          />
         ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>
-              {searchQuery
+          <AppEmptyState
+            title={
+              searchQuery
                 ? "No paint colors found"
-                : "No paint colors with hex in inventory"}
-            </Text>
-            <Text style={styles.emptySubtext}>
-              {searchQuery
+                : "No paint colors with hex in inventory"
+            }
+            subtitle={
+              searchQuery
                 ? "Try a different search"
-                : "Add paint items with a color (hex) to see them here"}
-            </Text>
-          </View>
+                : "Add paint items with a color (hex) to see them here"
+            }
+          />
         ) : (
           <View style={[styles.listFlex, styles.tableScrollFadeHost]}>
             <FlatList
@@ -3095,7 +3073,7 @@ const styles = StyleSheet.create({
   filterSummaryText: {
     fontSize: 12,
     fontWeight: "500",
-    color: "#666",
+    color: kitColors.light.textMuted,
   },
   list: {
     padding: 16,
@@ -3120,32 +3098,43 @@ const styles = StyleSheet.create({
   itemHeaderRight: {
     alignItems: "flex-end",
   },
+  itemMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  itemMetaSpacer: {
+    flex: 1,
+  },
   itemBadgeRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     justifyContent: "flex-end",
+    alignItems: "center",
     gap: 6,
-    marginTop: 6,
+    flexShrink: 0,
   },
   itemBadge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: space[2],
     paddingVertical: 2,
-    borderRadius: 12,
-    backgroundColor: "rgba(0,0,0,0.06)",
+    borderRadius: radius.lg,
+    backgroundColor: kitColors.semantic.badgeBg,
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.12)",
+    borderColor: kitColors.semantic.badgeBorder,
   },
   itemBadgeLate: {
-    backgroundColor: "#ffebee",
-    borderColor: "#ffcdd2",
+    backgroundColor: kitColors.semantic.lateBadgeBg,
+    borderColor: kitColors.semantic.lateBadgeBorder,
   },
   itemBadgeBackOrder: {
-    backgroundColor: "#fff3e0",
-    borderColor: "#ffe0b2",
+    backgroundColor: kitColors.semantic.backOrderBadgeBg,
+    borderColor: kitColors.semantic.backOrderBadgeBorder,
   },
   itemBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
+    ...kitType.badge,
   },
   cardBottomRow: {
     flexDirection: "row",
@@ -3173,13 +3162,13 @@ const styles = StyleSheet.create({
   },
   // lowStockCard style is now handled inline with theme-aware colors
   lowStockText: {
-    color: "#ff6b6b",
+    color: kitColors.semantic.lowStockText,
   },
   itemHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    alignItems: "baseline",
+    marginBottom: 4,
   },
   itemName: {
     fontSize: 18,
@@ -3190,17 +3179,20 @@ const styles = StyleSheet.create({
   itemQuantity: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#6f95ab",
+    color: kitColors.brand.primary,
+    flexShrink: 0,
   },
   itemLocation: {
     fontSize: 14,
-    color: "#666",
-    marginBottom: 4,
+    color: kitColors.light.textMuted,
+    flex: 1,
+    minWidth: 0,
+    marginBottom: 0,
   },
   itemId: {
     fontSize: 12,
-    color: "#999",
-    fontFamily: "monospace",
+    color: kitColors.light.textDim,
+    fontFamily: fontFamily.mono,
     marginBottom: 4,
   },
   copiedHint: {
@@ -3226,7 +3218,7 @@ const styles = StyleSheet.create({
   },
   lastScanned: {
     fontSize: 12,
-    color: "#999",
+    color: kitColors.light.textDim,
     flex: 1,
     minWidth: 0,
   },
@@ -3239,12 +3231,12 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#666",
+    color: kitColors.light.textMuted,
     marginBottom: 8,
   },
   emptySubtext: {
     fontSize: 14,
-    color: "#999",
+    color: kitColors.light.textDim,
     textAlign: "center",
   },
   colorModalBackdrop: {
@@ -3310,7 +3302,7 @@ const styles = StyleSheet.create({
   },
   colorModalId: {
     fontSize: 13,
-    fontFamily: "monospace",
+    fontFamily: fontFamily.mono,
     marginTop: 4,
   },
   colorModalClose: {
@@ -3350,7 +3342,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   recycleDateDue: {
-    color: "#c62828",
+    color: kitColors.semantic.recycleDueDate,
     fontWeight: "600",
   },
   jobsColCell: {
@@ -3420,7 +3412,7 @@ const styles = StyleSheet.create({
   recycleDueBannerText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#e65100",
+    color: kitColors.semantic.recycleBannerText,
   },
   analyticsRow: {
     flexDirection: "row",
@@ -3485,7 +3477,7 @@ const styles = StyleSheet.create({
   },
   analyticsLabelMobile: {
     fontSize: 10,
-    color: "#666",
+    color: kitColors.light.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.3,
     marginBottom: 0,
@@ -3493,16 +3485,16 @@ const styles = StyleSheet.create({
   analyticsValueMobile: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#6f95ab",
+    color: kitColors.brand.primary,
   },
   analyticsSubtextMobile: {
     fontSize: 9,
-    color: "#999",
+    color: kitColors.light.textDim,
     marginTop: 1,
   },
   analyticsLabel: {
     fontSize: 11,
-    color: "#666",
+    color: kitColors.light.textMuted,
     marginBottom: 4,
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -3510,15 +3502,15 @@ const styles = StyleSheet.create({
   analyticsValue: {
     fontSize: 24,
     fontWeight: "bold",
-    color: "#6f95ab",
+    color: kitColors.brand.primary,
   },
   analyticsValueUnit: {
     fontSize: 14,
-    color: "#666",
+    color: kitColors.light.textMuted,
   },
   analyticsSubtext: {
     fontSize: 10,
-    color: "#999",
+    color: kitColors.light.textDim,
     marginTop: 2,
   },
   tableCardWrapper: {
@@ -3582,7 +3574,7 @@ const styles = StyleSheet.create({
   },
   resultCount: {
     fontSize: 12,
-    color: "#666",
+    color: kitColors.light.textMuted,
   },
   orderToggleButton: {
     alignSelf: "center",
@@ -3646,7 +3638,7 @@ const styles = StyleSheet.create({
   },
   idText: {
     fontSize: 12,
-    fontFamily: "monospace",
+    fontFamily: fontFamily.mono,
     // Color is set inline based on theme
   },
   locationText: {
@@ -3666,7 +3658,7 @@ const styles = StyleSheet.create({
   },
   userText: {
     fontSize: 11,
-    color: "#999",
+    color: kitColors.light.textDim,
     marginTop: 2,
   },
   // lowStockRow style is now handled inline with theme-aware colors

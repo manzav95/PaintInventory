@@ -9,6 +9,7 @@ import {
 import { Text, useTheme } from "react-native-paper";
 import { subscribeToasts } from "../utils/showToast";
 import { MOTION, SPRING_EASING } from "../utils/motionSprings";
+import { colors } from "../theme/tokens";
 
 const useNative = Platform.OS !== "web";
 
@@ -64,7 +65,7 @@ function ToastItem({ toast, onDone }) {
       ? theme.colors.error
       : toast.type === "info"
         ? theme.colors.primary
-        : "#2e7d32";
+        : colors.semantic.success;
   const mark =
     toast.type === "error" ? "!" : toast.type === "info" ? "i" : "✓";
 

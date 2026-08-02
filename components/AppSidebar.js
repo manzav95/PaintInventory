@@ -1,16 +1,9 @@
 import React, { useRef } from "react";
 import { View, StyleSheet, ScrollView, Animated, Platform } from "react-native";
-import {
-  Button,
-  Text,
-  Title,
-  useTheme,
-  IconButton,
-  ActivityIndicator,
-} from "react-native-paper";
-import NotificationsBell from "./NotificationsBell";
+import { Button, Text, Title, useTheme } from "react-native-paper";
 import FadeIn from "./FadeIn";
 import version from "../version";
+import { space, radius, colors } from "../theme/tokens";
 
 const useNative = Platform.OS !== "web";
 
@@ -35,23 +28,24 @@ function NavButton({ label, icon, onPress, active }) {
     }).start();
   };
 
+  const activeBg = theme.dark
+    ? colors.semantic.activeTintDark
+    : colors.semantic.activeTintLight;
+
   return (
     <Animated.View style={{ transform: [{ scale: press }] }}>
       <Button
-        mode="outlined"
+        mode="text"
         onPress={onPress}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
         icon={icon}
-        style={[
-          styles.navButton,
-          active && {
-            backgroundColor: theme.colors.surfaceContainerHighest,
-            borderColor: theme.colors.primary,
-          },
-        ]}
-        textColor={active ? theme.colors.primary : theme.colors.onSurface}
+        style={[styles.navButton, active && { backgroundColor: activeBg }]}
+        textColor={
+          active ? theme.colors.onSurface : theme.colors.onSurfaceVariant
+        }
         contentStyle={styles.navButtonContent}
+        labelStyle={styles.navButtonLabel}
       >
         {label}
       </Button>
@@ -59,81 +53,38 @@ function NavButton({ label, icon, onPress, active }) {
   );
 }
 
+/**
+ * Navigation list for desktop sidebar / mobile drawer.
+ * Settings + sign out live in the shell avatar menu; refresh/bell in the top bar.
+ */
 export default function AppSidebar({
   currentScreen,
   ordersInitialFilter,
   isAdmin,
-  userName,
-  inventory = [],
-  inventoryLoaded = true,
-  minQuantity = 30,
-  isRefreshing = false,
   onNavigate,
   onAddManual,
-  onRefresh,
-  onOpenSettings,
-  onToggleDarkMode,
-  onSwitchUser,
-  onOpenRecycleDue,
-  onOpenBackOrders,
-  onOpenLateOrders,
-  onOpenLowStock,
   showCheckInOutNav = true,
+  inDrawer = false,
 }) {
   const theme = useTheme();
 
-  const isOrdersActive =
-    currentScreen === "orders" ||
-    currentScreen === "placeOrder";
-  const ordersFilterActive = (filter) =>
-    currentScreen === "orders" && ordersInitialFilter === filter;
-
-  return (
-    <FadeIn fromY={8} duration={320} style={styles.fadeRoot}>
+  const body = (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.headerRow}>
-        <View style={styles.headerTitleBlock}>
+      {!inDrawer ? (
+        <View style={styles.headerRow}>
           <Title style={[styles.title, { color: theme.colors.onBackground }]}>
             Paint Inventory
           </Title>
         </View>
-        <View style={styles.headerIcons}>
-          <NotificationsBell
-            inventory={inventory}
-            inventoryLoaded={inventoryLoaded}
-            minQuantity={minQuantity}
-            isAdmin={isAdmin}
-            userName={userName}
-            onOpenRecycleDue={onOpenRecycleDue}
-            onOpenBackOrders={onOpenBackOrders}
-            onOpenLateOrders={onOpenLateOrders}
-            onOpenLowStock={onOpenLowStock}
-            onOpenWasteTracking={() => onNavigate("wasteTracking")}
-          />
-          <IconButton
-            icon="cog"
-            size={20}
-            onPress={onOpenSettings}
-            iconColor={theme.colors.primary}
-          />
-          <IconButton
-            icon="refresh"
-            size={20}
-            onPress={onRefresh}
-            disabled={isRefreshing}
-            iconColor={theme.colors.primary}
-          />
-          {isRefreshing && (
-            <ActivityIndicator size="small" color={theme.colors.primary} />
-          )}
-        </View>
-      </View>
+      ) : null}
 
-      <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+      <Text
+        style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}
+      >
         Operations
       </Text>
       <NavButton
@@ -184,15 +135,15 @@ export default function AppSidebar({
           <NavButton
             label="Purchase Orders"
             icon="truck-delivery"
-            active={
-              currentScreen === "orders" && ordersInitialFilter == null
-            }
+            active={currentScreen === "orders" && ordersInitialFilter == null}
             onPress={() => onNavigate("orders", { ordersInitialFilter: null })}
           />
         </>
       )}
 
-      <Text style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}>
+      <Text
+        style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}
+      >
         Tracking
       </Text>
       <NavButton
@@ -217,17 +168,21 @@ export default function AppSidebar({
       )}
 
       <View style={styles.footer}>
-        <Button mode="text" compact onPress={onSwitchUser}>
-          Switch user
-        </Button>
-        <Button mode="text" compact onPress={onToggleDarkMode} icon="theme-light-dark">
-          Theme
-        </Button>
         <Text style={[styles.version, { color: theme.colors.outline }]}>
           v1.{version?.build ?? "?"}
         </Text>
       </View>
     </ScrollView>
+  );
+
+  // Skip FadeIn in the drawer — it made the hamburger menu feel sluggish.
+  if (inDrawer) {
+    return <View style={styles.fadeRoot}>{body}</View>;
+  }
+
+  return (
+    <FadeIn fromY={8} duration={280} style={styles.fadeRoot}>
+      {body}
     </FadeIn>
   );
 }
@@ -235,30 +190,27 @@ export default function AppSidebar({
 const styles = StyleSheet.create({
   fadeRoot: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 24, gap: 6 },
+  scrollContent: { paddingBottom: 24, gap: 4 },
   headerRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  headerTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 4,
+    marginBottom: space[2],
+    paddingHorizontal: space[2],
   },
   title: { fontSize: 20 },
-  headerIcons: { flexDirection: "row", alignItems: "center" },
   sectionLabel: {
     fontSize: 11,
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: space[4],
+    marginBottom: space[1],
+    paddingHorizontal: space[2],
   },
-  navButton: { marginBottom: 4 },
+  navButton: {
+    marginBottom: 2,
+    borderRadius: radius.md,
+  },
   navButtonContent: { justifyContent: "flex-start" },
-  footer: { marginTop: 20, paddingTop: 12 },
-  version: { fontSize: 11, marginTop: 4 },
+  navButtonLabel: { fontWeight: "500" },
+  footer: { marginTop: 20, paddingTop: 12, paddingHorizontal: space[2] },
+  version: { fontSize: 11 },
 });

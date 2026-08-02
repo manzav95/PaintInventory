@@ -38,6 +38,7 @@ import {
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
 import { resolveUnitPrice } from "../utils/pricing";
+import { colors, fontFamily } from "../theme/tokens";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -626,7 +627,7 @@ export default function ItemDetailScreen({
           mode="outlined"
           onPress={() => onDelete(item.id)}
           icon="delete"
-          textColor="#ff6b6b"
+          textColor={colors.semantic.lowStockText}
           style={[
             !isWideDesktop && styles.button,
             !isWideDesktop && styles.deleteButton,
@@ -653,7 +654,11 @@ export default function ItemDetailScreen({
             />
           ) : (
             <ReadOnlyValue
-              style={type === "catalyst" ? { color: "#9a7b00" } : undefined}
+              style={
+                type === "catalyst"
+                  ? { color: colors.materialType.catalyst }
+                  : undefined
+              }
             >
               {typeDisplay}
             </ReadOnlyValue>
@@ -683,7 +688,7 @@ export default function ItemDetailScreen({
                   style={{
                     color:
                       type === "catalyst"
-                        ? "#9a7b00"
+                        ? colors.materialType.catalyst
                         : type
                           ? theme.colors.onSurface
                           : theme.colors.onSurfaceVariant,
@@ -709,7 +714,9 @@ export default function ItemDetailScreen({
           <ReadOnlyValue
             style={[
               { marginBottom: 16 },
-              type === "catalyst" && { color: "#9a7b00" },
+              type === "catalyst" && {
+                color: colors.materialType.catalyst,
+              },
             ]}
           >
             {typeDisplay}
@@ -1287,8 +1294,8 @@ const styles = StyleSheet.create({
   },
   readOnlyValue: {
     fontSize: 15,
-    fontFamily: "monospace",
-    color: "#6f95ab",
+    fontFamily: fontFamily.mono,
+    color: colors.brand.primary,
   },
   recycleBlock: {
     marginBottom: 12,
@@ -1323,7 +1330,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   deleteButton: {
-    borderColor: "#ff6b6b",
+    borderColor: colors.semantic.lowStockText,
   },
   readOnlyNotice: {
     fontSize: 14,

@@ -27,6 +27,7 @@ import NotificationService from "../services/notificationService";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { NOTIFICATION_BADGE_RED } from "../utils/themeColors";
 import { isRecycleDue, getLowStockItems } from "../utils/inventoryAlerts";
+import { colors } from "../theme/tokens";
 import {
   getDismissedIdsToday,
   dismissAlertsForToday,
@@ -141,7 +142,7 @@ export default function NotificationsBell({
         id: "recycle",
         title: "Paint Need to Recycle",
         count: recycleDueCount,
-        color: "#e65100",
+        color: colors.semantic.recycleBannerText,
         detail: "Custom paint or stain at or past recycle due date",
         onPress: () => {
           setVisible(false);
@@ -154,7 +155,7 @@ export default function NotificationsBell({
         id: "back_orders",
         title: "Back Orders",
         count: backOrderCount,
-        color: "#ff9800",
+        color: colors.semantic.lowStockValue,
         detail: "Purchase orders with partial deliveries",
         onPress: () => {
           setVisible(false);
@@ -434,6 +435,7 @@ export default function NotificationsBell({
               </Text>
             ) : (
               <ScrollFrame
+                bordered={false}
                 maxHeight={LIST_MAX_HEIGHT}
                 contentContainerStyle={styles.listContent}
               >
@@ -587,8 +589,12 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
     width: "100%",
+    overflow: "hidden",
     ...(Platform.OS === "web"
-      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      ? {
+          boxSizing: "border-box",
+          boxShadow: "0px 8px 24px rgba(0,0,0,0.28)",
+        }
       : {
           elevation: 8,
           shadowColor: "#000",
@@ -602,6 +608,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 2,
+    marginRight: -4,
   },
   closeBtn: {
     margin: 0,

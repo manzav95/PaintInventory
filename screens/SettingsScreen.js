@@ -26,6 +26,7 @@ import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import InventoryService from "../services/inventoryService";
 import LoginHistoryModal from "../components/LoginHistoryModal";
+import { fontFamily } from "../theme/tokens";
 
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
@@ -271,11 +272,11 @@ export default function SettingsScreen({
                 >
                   Optional ending sequence automatically appended to Paint and
                   Custom Paint IDs (for bucket barcodes). Example:{" "}
-                  <Text style={{ fontFamily: "monospace" }}>-794394</Text> turns
+                  <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text> turns
                   ID{" "}
-                  <Text style={{ fontFamily: "monospace" }}>H66LNL49323</Text>{" "}
+                  <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text>{" "}
                   into external code{" "}
-                  <Text style={{ fontFamily: "monospace" }}>
+                  <Text style={{ fontFamily: fontFamily.mono }}>
                     H66LNL49323-794394
                   </Text>
                   .

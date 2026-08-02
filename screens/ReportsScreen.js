@@ -37,6 +37,7 @@ import {
   getMaterialTypeLabel,
   getMaterialTypeColor,
 } from "../utils/materialTypes";
+import { colors } from "../theme/tokens";
 
 function defaultFromDate() {
   const d = new Date();
@@ -233,7 +234,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
           value: dash
             ? "—"
             : Math.round(periodStats.receivingGallons || 0).toLocaleString(),
-          color: "#64b5f6",
+          color: colors.action.adjust,
         },
         {
           id: "orderQty",
@@ -241,7 +242,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
           value: dash
             ? "—"
             : Math.round(periodStats.orderQuantity || 0).toLocaleString(),
-          color: "#81c784",
+          color: colors.action.checkIn,
         },
         {
           id: "orderVal",
@@ -649,19 +650,19 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                         <SimpleLineChart
                           title="Received (gal)"
                           data={itemTimeline.receivingGallons || []}
-                          color="#64b5f6"
+                          color={colors.action.adjust}
                           {...itemChartProps}
                         />
                         <SimpleLineChart
                           title="Ordered (qty)"
                           data={itemTimeline.orderQuantity || []}
-                          color="#81c784"
+                          color={colors.action.checkIn}
                           {...itemChartProps}
                         />
                         <SimpleLineChart
                           title="Material usage (gal)"
                           data={itemTimeline.usageGallons || []}
-                          color="#ba68c8"
+                          color={colors.action.create}
                           {...itemChartProps}
                         />
                       </View>
@@ -719,7 +720,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                 <SimpleLineChart
                   title="Gallons received"
                   data={summary?.receivingGallons || []}
-                  color="#64b5f6"
+                  color={colors.action.adjust}
                   {...chartProps}
                 />
               </Card.Content>
@@ -729,7 +730,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                 <SimpleLineChart
                   title="Order quantity"
                   data={summary?.orderQuantity || []}
-                  color="#81c784"
+                  color={colors.action.checkIn}
                   {...chartProps}
                 />
               </Card.Content>

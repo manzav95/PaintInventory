@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { TextInput, useTheme } from "react-native-paper";
 
@@ -31,6 +31,10 @@ function formatMdy(value) {
   });
 }
 
+/**
+ * Outlined date field that matches Paper TextInput chrome on every platform.
+ * Web uses a hidden native date input (avoids type=date overflow / missing right border).
+ */
 export default function DateField({
   label,
   value,
@@ -44,79 +48,87 @@ export default function DateField({
   const isWeb = Platform.OS === "web";
   const [show, setShow] = useState(false);
   const theme = useTheme();
+  const hiddenRef = useRef(null);
 
   const nativeDate = useMemo(() => parseYmd(value) || new Date(), [value]);
+  const display = formatMdy(value);
 
-  if (isWeb) {
-    const border = theme.colors?.outline ?? "#ccc";
-    const bg = disabled
-      ? theme.colors?.surfaceDisabled ?? "#f1f1f1"
-      : theme.colors?.surfaceContainerHighest ??
-        theme.colors?.surface ??
-        "#fff";
-    const fg = theme.colors?.onSurface ?? "#111";
-    const labelColor = theme.colors?.onSurfaceVariant ?? fg;
-    return (
-      <View style={[styles.wrap, style]}>
-        <label style={styles.webLabel}>
-          <div style={{ marginBottom: 6, fontSize: 12, color: labelColor }}>
-            {label}
-          </div>
-          <input
-            type="date"
-            value={String(value ?? "")}
-            disabled={disabled}
-            min={min}
-            max={max}
-            onChange={(e) => onChange?.(e.target.value)}
-            style={{
-              display: "block",
-              width: "100%",
-              maxWidth: "100%",
-              minWidth: 0,
-              WebkitMinLogicalWidth: 0,
-              boxSizing: "border-box",
-              padding: 12,
-              fontSize: 16,
-              borderRadius: 4,
-              border: `1px solid ${border}`,
-              background: bg,
-              color: fg,
-              colorScheme: theme.dark ? "dark" : "light",
-            }}
-          />
-        </label>
-      </View>
-    );
-  }
+  const openWebPicker = () => {
+    if (disabled) return;
+    const el = hiddenRef.current;
+    if (!el) return;
+    try {
+      if (typeof el.showPicker === "function") {
+        el.showPicker();
+        return;
+      }
+    } catch (_) {
+      /* fall through */
+    }
+    el.focus();
+    el.click();
+  };
+
+  const openNativePicker = () => {
+    if (!disabled) setShow(true);
+  };
+
+  const open = isWeb ? openWebPicker : openNativePicker;
 
   return (
     <View style={[styles.wrap, style]}>
-      <TextInput
-        label={label}
-        value={formatMdy(value)}
-        mode={mode}
-        editable={false}
+      {isWeb ? (
+        <input
+          ref={hiddenRef}
+          type="date"
+          value={String(value ?? "")}
+          disabled={disabled}
+          min={min}
+          max={max}
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => onChange?.(e.target.value)}
+          style={styles.hiddenNative}
+        />
+      ) : null}
+
+      <Pressable
+        onPress={open}
         disabled={disabled}
-        style={styles.nativeInput}
-        outlineColor={theme.colors?.outline}
-        activeOutlineColor={theme.colors?.primary}
-        textColor={theme.colors?.onSurface}
-        right={<TextInput.Icon icon="calendar" onPress={() => setShow(true)} />}
-        onPressIn={() => !disabled && setShow(true)}
-      />
-      {show && (
+        accessibilityRole="button"
+        accessibilityLabel={label || "Choose date"}
+      >
+        <View pointerEvents="none">
+          <TextInput
+            label={label}
+            value={display}
+            mode={mode}
+            editable={false}
+            disabled={disabled}
+            style={styles.input}
+            outlineColor={theme.colors?.outlineVariant ?? theme.colors?.outline}
+            activeOutlineColor={theme.colors?.primary}
+            textColor={theme.colors?.onSurface}
+            placeholder="MM/DD/YYYY"
+            right={<TextInput.Icon icon="calendar" disabled={disabled} />}
+          />
+        </View>
+      </Pressable>
+
+      {!isWeb && show ? (
         <DateTimePicker
           value={nativeDate}
           mode="date"
           display={Platform.OS === "ios" ? "spinner" : "default"}
           themeVariant={theme.dark ? "dark" : "light"}
+          minimumDate={min ? parseYmd(min) || undefined : undefined}
+          maximumDate={max ? parseYmd(max) || undefined : undefined}
           onChange={(_, selectedDate) => {
             if (Platform.OS !== "ios") setShow(false);
             if (selectedDate) onChange?.(toYmd(selectedDate));
           }}
         />
-      )}
+      ) : null}
     </View>
   );
 }
@@ -126,19 +138,25 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     maxWidth: "100%",
     minWidth: 0,
-    overflow: "hidden",
-    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+    position: "relative",
+    overflow: "visible",
   },
-  webLabel: {
-    display: "block",
-    width: "100%",
-    maxWidth: "100%",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  nativeInput: {
+  input: {
     width: "100%",
     maxWidth: "100%",
     alignSelf: "stretch",
+    backgroundColor: "transparent",
+  },
+  hiddenNative: {
+    position: "absolute",
+    opacity: 0.01,
+    width: 1,
+    height: 1,
+    left: 0,
+    top: 0,
+    zIndex: -1,
+    border: "none",
+    padding: 0,
+    margin: 0,
   },
 });

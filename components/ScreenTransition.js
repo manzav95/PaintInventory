@@ -9,11 +9,11 @@ const useNative = Platform.OS !== "web";
  */
 export default function ScreenTransition({ screenKey, children, style }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(12)).current;
+  const translateY = useRef(new Animated.Value(10)).current;
 
   useEffect(() => {
     opacity.setValue(0);
-    translateY.setValue(12);
+    translateY.setValue(10);
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,

@@ -18,6 +18,8 @@ import {
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
+import { colors, fontFamily } from "../theme/tokens";
+import { AppBadge, AppEmptyState } from "./ui";
 
 const PANEL_WIDTH = 460;
 const PANEL_MAX_HEIGHT = 520;
@@ -61,9 +63,24 @@ function sortLinesForReceive(lines) {
 }
 
 const STATUS_COLORS = {
-  complete: { accent: "#2e7d32", soft: "rgba(46,125,50,0.14)", label: "Complete" },
-  partial: { accent: "#f9a825", soft: "rgba(249,168,37,0.16)", label: "Partial" },
-  pending: { accent: "#6f95ab", soft: "rgba(111,149,171,0.14)", label: "Not received" },
+  complete: {
+    accent: colors.semantic.success,
+    soft: "rgba(46,125,50,0.14)",
+    label: "Complete",
+    badgeTone: "success",
+  },
+  partial: {
+    accent: colors.semantic.partial,
+    soft: "rgba(249,168,37,0.16)",
+    label: "Partial",
+    badgeTone: "warning",
+  },
+  pending: {
+    accent: colors.brand.primary,
+    soft: "rgba(111,149,171,0.14)",
+    label: "Not received",
+    badgeTone: "primary",
+  },
 };
 
 function getOrderExpectedLabel(order) {
@@ -351,14 +368,10 @@ export default function ReceivePoModal({
                   <ActivityIndicator style={{ marginVertical: 24 }} />
                 ) : openOrders.length === 0 ? (
                   <>
-                    <Text
-                      style={{
-                        color: theme.colors.onSurfaceVariant,
-                        marginVertical: 12,
-                      }}
-                    >
-                      No open purchase orders detected.
-                    </Text>
+                    <AppEmptyState
+                      title="No open purchase orders detected."
+                      style={styles.emptyOrders}
+                    />
                     <View style={styles.actions}>
                       <Button
                         mode="outlined"
@@ -371,6 +384,7 @@ export default function ReceivePoModal({
                   </>
                 ) : (
                   <ScrollFrame
+                    bordered={false}
                     maxHeight={listScrollMax}
                     style={{ marginBottom: 8 }}
                   >
@@ -496,6 +510,7 @@ export default function ReceivePoModal({
                 </View>
 
                 <ScrollFrame
+                  bordered={false}
                   key={String(detailResetKey)}
                   maxHeight={detailScrollMax}
                   contentContainerStyle={{ paddingBottom: 12 }}
@@ -538,21 +553,9 @@ export default function ReceivePoModal({
                             >
                               {name}
                             </Text>
-                            <View
-                              style={[
-                                styles.statusPill,
-                                { backgroundColor: statusColors.soft },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statusPillText,
-                                  { color: statusColors.accent },
-                                ]}
-                              >
-                                {statusColors.label}
-                              </Text>
-                            </View>
+                            <AppBadge tone={statusColors.badgeTone}>
+                              {statusColors.label}
+                            </AppBadge>
                           </View>
                           {code ? (
                             <Text
@@ -781,8 +784,12 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 12,
     width: "100%",
+    overflow: "hidden",
     ...(Platform.OS === "web"
-      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      ? {
+          boxSizing: "border-box",
+          boxShadow: "0px 8px 24px rgba(0,0,0,0.28)",
+        }
       : {
           elevation: 8,
           shadowColor: "#000",
@@ -796,6 +803,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 2,
+    marginRight: -4,
   },
   panelTitle: {
     fontSize: 17,
@@ -870,20 +878,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 0,
   },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    flexShrink: 0,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
   lineCode: {
     fontSize: 13,
-    fontFamily: "monospace",
+    fontFamily: fontFamily.mono,
     marginBottom: 4,
+  },
+  emptyOrders: {
+    flex: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
   },
   lineJob: {
     fontSize: 12,

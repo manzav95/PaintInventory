@@ -19,6 +19,7 @@ import {
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
 import ScrollFrame from "../components/ScrollFrame";
+import { colors, fontFamily } from "../theme/tokens";
 
 const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
 
@@ -378,7 +379,7 @@ export default function CheckInOutScreen({
                     onPress={openReceiveModal}
                     style={styles.actionButton}
                     icon="truck-delivery"
-                    buttonColor="#1565c0"
+                    buttonColor={colors.materialType.paint}
                     textColor="#fff"
                   >
                     Receiving Delivery
@@ -393,7 +394,9 @@ export default function CheckInOutScreen({
                       action === "recycle" && styles.selectedButton,
                     ]}
                     icon="recycle"
-                    buttonColor={action === "recycle" ? "#558b2f" : undefined}
+                    buttonColor={
+                      action === "recycle" ? colors.action.receive : undefined
+                    }
                     textColor={action === "recycle" ? "#fff" : undefined}
                   >
                     Recycle
@@ -459,7 +462,7 @@ export default function CheckInOutScreen({
                       style={styles.button}
                       disabled={!quantity || parseFloat(quantity) <= 0}
                       buttonColor={
-                        action === "recycle" ? "#558b2f" : undefined
+                        action === "recycle" ? colors.action.receive : undefined
                       }
                     >
                       {action === "recycle" ? "Confirm Recycle" : "Submit"}
@@ -705,7 +708,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 8,
     textAlign: "center",
-    fontFamily: "monospace",
+    fontFamily: fontFamily.mono,
   },
   currentQty: {
     fontSize: 14,

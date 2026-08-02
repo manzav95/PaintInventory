@@ -44,6 +44,12 @@ import {
   formatMonthDayYear,
   todayPacificIso,
 } from "../utils/wasteDrumConversion";
+import { getMaterialTypeColor } from "../utils/materialTypes";
+import {
+  colors,
+  mutedTextColor,
+} from "../theme/tokens";
+import { AppEmptyState } from "../components/ui";
 
 const STORAGE_KEYS = {
   booth: "@material_usage_booth",
@@ -77,33 +83,27 @@ const USAGE_TYPE_ORDER = [
   {
     key: "paint",
     label: "Paint",
-    color: "#1565c0",
     soft: "rgba(21, 101, 192, 0.12)",
   },
   {
     key: "clear",
     label: "Clear",
-    color: "#e65100",
     soft: "rgba(230, 81, 0, 0.12)",
   },
   {
     key: "primer",
     label: "Primer",
-    colorLight: "#5d4037",
     softLight: "rgba(93, 64, 55, 0.12)",
-    colorDark: "#f5f5dc",
     softDark: "rgba(245, 245, 220, 0.2)",
   },
   {
     key: "stain",
     label: "Stain",
-    color: "#2e7d32",
     soft: "rgba(46, 125, 50, 0.12)",
   },
   {
     key: "dye",
     label: "Dye",
-    color: "#7e57c2",
     soft: "rgba(126, 87, 194, 0.12)",
   },
 ];
@@ -129,11 +129,7 @@ function UsageTypeChips({ totals, theme, compact = false }) {
   return (
     <View style={[styles.typeChipsRow, compact && styles.typeChipsRowCompact]}>
       {USAGE_TYPE_ORDER.map((meta) => {
-        const color = meta.color
-          ? meta.color
-          : theme.dark
-            ? meta.colorDark
-            : meta.colorLight;
+        const color = getMaterialTypeColor(meta.key, theme);
         const soft = meta.soft
           ? meta.soft
           : theme.dark
@@ -298,20 +294,6 @@ function formatMaterialTypeLabel(type) {
     .split(/[\s_]+/)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");
-}
-
-/** Material type colors (match inventory list): paint blue, clear orange, stain green, primer brown, dye purple, catalyst yellow. */
-function getMaterialTypeColor(type, theme) {
-  if (!type || typeof type !== "string")
-    return theme?.colors?.onSurfaceVariant ?? "#666";
-  const t = (type || "").toLowerCase().trim();
-  if (t === "paint" || t === "custom_paint" || t === "precat") return "#1565c0";
-  if (t === "clear") return "#e65100";
-  if (t === "stain" || t === "custom_stain") return "#2e7d32";
-  if (t === "primer") return theme?.dark ? "#f5f5dc" : "#5d4037";
-  if (t === "dye") return "#7e57c2";
-  if (t === "catalyst") return "#9a7b00";
-  return theme?.colors?.onSurfaceVariant ?? "#666";
 }
 
 function formatQtyDisplay(row) {
@@ -869,7 +851,7 @@ export default function MaterialUsageScreen({
         statusBarTranslucent
       >
         <View
-          style={[styles.savingOverlay, { backgroundColor: "rgba(0,0,0,0.4)" }]}
+          style={[styles.savingOverlay, { backgroundColor: colors.semantic.scrimLight }]}
         >
           <View
             style={[
@@ -1023,9 +1005,10 @@ export default function MaterialUsageScreen({
                           </Pressable>
                         ) : null}
                         {materialSuggestions.length === 0 ? (
-                          <Text style={styles.emptyList}>
-                            No inventory matches
-                          </Text>
+                          <AppEmptyState
+                            title="No inventory matches"
+                            style={styles.emptyList}
+                          />
                         ) : null}
                     </ScrollFrame>
                   ) : null}
@@ -1202,14 +1185,18 @@ export default function MaterialUsageScreen({
               {!logsLoaded ? (
                 <SkeletonStack lines={5} style={{ marginTop: 8 }} />
               ) : filteredLogs.length === 0 ? (
-                <Text style={styles.emptyLogs}>No entries</Text>
+                <AppEmptyState title="No entries" style={styles.emptyLogs} />
               ) : (
                 <View style={styles.dayList}>
                   {logsByDay.map((day, dayIndex) => {
                     const open = expandedDays.has(day.date);
                     const isToday = day.date === todayPacificIso();
                     return (
-                      <StaggerItem key={day.date} index={dayIndex}>
+                      <StaggerItem
+                        key={day.date}
+                        index={dayIndex}
+                        disabled={embeddedInShell}
+                      >
                         <View
                           style={[
                             styles.dayCard,
@@ -1285,7 +1272,14 @@ export default function MaterialUsageScreen({
             <Dialog.Title>Catalyst confirmation</Dialog.Title>
             <Dialog.Content>
               <Text>Was this batch catalyzed?</Text>
-              <Text style={styles.catalystDialogSubtext}>4% mixing ratio</Text>
+              <Text
+                style={[
+                  styles.catalystDialogSubtext,
+                  { color: mutedTextColor(theme) },
+                ]}
+              >
+                4% mixing ratio
+              </Text>
             </Dialog.Content>
             <Dialog.Actions>
               <Button
@@ -1425,9 +1419,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   emptyList: {
+    flex: 0,
     padding: 12,
-    color: "#888",
-    fontSize: 14,
+    justifyContent: "flex-start",
+    alignItems: "flex-start",
   },
   catalystDisplay: {
     justifyContent: "center",
@@ -1470,7 +1465,6 @@ const styles = StyleSheet.create({
   catalystDialogSubtext: {
     marginTop: 4,
     fontSize: 13,
-    color: "#666",
   },
   dialogButton: {
     marginLeft: 8,
@@ -1483,12 +1477,11 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: "#888",
+    color: colors.dark.textDim,
   },
   emptyLogs: {
+    flex: 0,
     padding: 24,
-    color: "#888",
-    fontSize: 14,
   },
   logCardList: {
     gap: 12,
@@ -1644,7 +1637,7 @@ const styles = StyleSheet.create({
   },
   logCardLabel: {
     fontSize: 12,
-    color: "#666",
+    color: colors.light.textMuted,
     marginRight: 8,
   },
   logCardValue: {
@@ -1696,8 +1689,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 4,
     borderBottomWidth: 2,
-    borderBottomColor: "rgba(0,0,0,0.12)",
-    backgroundColor: "rgba(0,0,0,0.04)",
+    borderBottomColor: colors.semantic.badgeBorder,
+    backgroundColor: colors.semantic.filterIdle,
   },
   tableHeaderSticky: {
     zIndex: 1,

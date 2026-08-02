@@ -1,7 +1,9 @@
 import React from "react";
 import { View, StyleSheet, Pressable } from "react-native";
-import { Card, Text, Title, useTheme } from "react-native-paper";
+import { Card, useTheme } from "react-native-paper";
 import BumpText from "./BumpText";
+import { AppText } from "./ui";
+import { space, layout, type } from "../theme/tokens";
 
 /**
  * @param {Array<{ id?: string, label: string, value: string|number, color?: string, onPress?: () => void, active?: boolean }>} items
@@ -16,23 +18,23 @@ export default function MetricStrip({ items = [], style }) {
       {items.map((item, index) => {
         const content = (
           <Card.Content style={styles.cardContent}>
-            <Text
-              style={[styles.label, { color: theme.colors.onSurfaceVariant }]}
-            >
+            <AppText variant="label" style={{ color: theme.colors.onSurfaceVariant }}>
               {item.label}
-            </Text>
+            </AppText>
             <BumpText
               value={item.value}
               bumpKey={`${item.id || item.label}:${item.value}`}
             >
-              <Title
+              <AppText
+                variant="metricValue"
+                tone="inherit"
                 style={[
                   styles.value,
                   { color: item.color || theme.colors.primary },
                 ]}
               >
                 {item.value}
-              </Title>
+              </AppText>
             </BumpText>
           </Card.Content>
         );
@@ -78,13 +80,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 12,
+    gap: space[3],
+    marginBottom: space[4],
   },
   cardWrap: {
-    minWidth: 120,
+    minWidth: layout.metricCardMinWidth,
     flex: 1,
-    maxWidth: 220,
+    maxWidth: layout.metricCardMaxWidth,
   },
   card: {
     borderWidth: 1,
@@ -93,19 +95,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   cardContent: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
     minHeight: 72,
   },
-  label: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    marginBottom: 4,
-  },
   value: {
-    fontSize: 22,
-    lineHeight: 28,
-    minHeight: 28,
+    ...type.metricValue,
+    minHeight: type.metricValue.lineHeight,
   },
 });

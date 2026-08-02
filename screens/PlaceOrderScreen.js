@@ -38,9 +38,11 @@ import {
   getMaterialTypeLabel,
   getMaterialTypeColor,
 } from "../utils/materialTypes";
+import { colors, space, radius } from "../theme/tokens";
+import { AppText, AppBadge, AppEmptyState } from "../components/ui";
 
 const PAGE_MAX_WIDTH = 1200;
-const GRID_GAP = 12;
+const GRID_GAP = space[4];
 const SHELL_SIDEBAR_WIDE = 280;
 const SHELL_SIDEBAR_NARROW = 240;
 
@@ -657,14 +659,10 @@ export default function PlaceOrderScreen({
               </Text>
             </View>
             {orderLines.length === 0 ? (
-              <Text
-                style={[
-                  styles.orderCartEmpty,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                No items yet — tap a card below to add.
-              </Text>
+              <AppEmptyState
+                title="No items yet — tap a card below to add."
+                style={styles.orderCartEmpty}
+              />
             ) : (
               <ScrollFrame maxHeight={140}>
                 {orderLines.map((line) => (
@@ -688,16 +686,15 @@ export default function PlaceOrderScreen({
                       >
                         {line.item.name || line.id}
                       </Text>
-                      <Text
-                        style={[
-                          styles.orderLineSub,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
+                      <AppText
+                        variant="mono"
+                        tone="muted"
+                        style={styles.orderLineSub}
                         numberOfLines={1}
                       >
                         {line.id}
                         {line.job ? ` · Job ${line.job}` : ""}
-                      </Text>
+                      </AppText>
                     </View>
                     <Text
                       style={[
@@ -739,8 +736,16 @@ export default function PlaceOrderScreen({
             {(
               [
                 { key: "all", label: "All", accent: theme.colors.primary },
-                { key: "ap", label: "AP", accent: "#e65100" },
-                { key: "mixing", label: "Mixing", accent: "#1565c0" },
+                {
+                  key: "ap",
+                  label: "AP",
+                  accent: colors.semantic.recycleBannerText,
+                },
+                {
+                  key: "mixing",
+                  label: "Mixing",
+                  accent: colors.materialType.paint,
+                },
               ]
             ).map(({ key, label, accent }, i) => {
               const selected = filterTab === key;
@@ -805,11 +810,10 @@ export default function PlaceOrderScreen({
           </Text>
 
           {filteredItems.length === 0 ? (
-            <View style={styles.emptyList}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                No items match this filter/search.
-              </Text>
-            </View>
+            <AppEmptyState
+              title="No items match this filter/search."
+              style={styles.emptyList}
+            />
           ) : (
             groupedBundles.map((bundle, bundleIndex) => (
               <View
@@ -881,7 +885,7 @@ export default function PlaceOrderScreen({
                                   {
                                     backgroundColor:
                                       theme.colors.primaryContainer ||
-                                      "rgba(111,149,171,0.2)",
+                                      colors.brand.primaryContainerLight,
                                   },
                                 ]}
                               >
@@ -891,7 +895,7 @@ export default function PlaceOrderScreen({
                                     {
                                       color:
                                         theme.colors.onPrimaryContainer ||
-                                        theme.colors.primary,
+                                        colors.brand.primary,
                                     },
                                   ]}
                                   numberOfLines={1}
@@ -911,20 +915,14 @@ export default function PlaceOrderScreen({
                                 </Text>
                               </View>
                             </View>
-                            <Text style={styles.compactMeta} numberOfLines={1}>
-                              <Text
-                                style={{
-                                  color: theme.colors.onSurfaceVariant,
-                                  fontFamily:
-                                    Platform.OS === "ios"
-                                      ? "Menlo"
-                                      : "monospace",
-                                  fontSize: 11,
-                                }}
-                              >
-                                ID: {item.id != null ? String(item.id) : "—"}
-                              </Text>
-                            </Text>
+                            <AppText
+                              variant="mono"
+                              tone="muted"
+                              style={styles.compactMeta}
+                              numberOfLines={1}
+                            >
+                              ID: {item.id != null ? String(item.id) : "—"}
+                            </AppText>
                             <View style={styles.cardFooterRow}>
                               {typeLabel ? (
                                 <View
@@ -934,7 +932,7 @@ export default function PlaceOrderScreen({
                                       borderColor: typeColor,
                                       backgroundColor: theme.dark
                                         ? theme.colors.surfaceContainerHighest
-                                        : "rgba(0,0,0,0.03)",
+                                        : colors.semantic.filterIdle,
                                     },
                                   ]}
                                 >
@@ -953,14 +951,9 @@ export default function PlaceOrderScreen({
                                 <View />
                               )}
                               {inOrder ? (
-                                <Text
-                                  style={[
-                                    styles.inOrderBadge,
-                                    { color: theme.colors.primary },
-                                  ]}
-                                >
+                                <AppBadge tone="primary">
                                   Order: {orderQty} gal
-                                </Text>
+                                </AppBadge>
                               ) : null}
                             </View>
                           </Card.Content>
@@ -1033,14 +1026,13 @@ export default function PlaceOrderScreen({
                   >
                     {addModalItem.name || "Unnamed item"}
                   </Text>
-                  <Text
-                    style={[
-                      styles.addModalId,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
+                  <AppText
+                    variant="mono"
+                    tone="muted"
+                    style={styles.addModalId}
                   >
                     ID: {String(addModalItem.id)}
-                  </Text>
+                  </AppText>
                   <TextInput
                     ref={qtyInputRef}
                     mode="outlined"
@@ -1168,9 +1160,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   orderCartEmpty: {
-    fontSize: 13,
-    paddingBottom: 8,
-    fontStyle: "italic",
+    flex: 0,
+    paddingVertical: space[2],
+    paddingHorizontal: 0,
   },
   orderCartScroll: {
     maxHeight: 140,
@@ -1196,7 +1188,6 @@ const styles = StyleSheet.create({
   orderLineSub: {
     fontSize: 11,
     marginTop: 2,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   orderLineQty: {
     fontSize: 14,
@@ -1232,7 +1223,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.2,
   },
-  emptyList: { paddingVertical: 24, alignItems: "center" },
+  emptyList: {
+    flex: 0,
+    paddingVertical: space[9],
+  },
   bundleSection: {},
   bundleSectionSpaced: {
     marginTop: 20,
@@ -1286,9 +1280,9 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   stockBadge: {
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderRadius: radius.md,
+    paddingHorizontal: space[2],
+    paddingVertical: space[1],
     alignItems: "flex-end",
     flexShrink: 0,
   },
@@ -1303,7 +1297,8 @@ const styles = StyleSheet.create({
     textTransform: "lowercase",
   },
   compactMeta: {
-    marginBottom: 6,
+    marginBottom: space[2],
+    fontSize: 11,
   },
   cardFooterRow: {
     flexDirection: "row",
@@ -1314,20 +1309,15 @@ const styles = StyleSheet.create({
   },
   typeBadge: {
     flexShrink: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingHorizontal: space[2],
+    paddingVertical: space[1],
+    borderRadius: radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
     maxWidth: "55%",
   },
   typeBadgeText: {
     fontSize: 11,
     fontWeight: "700",
-  },
-  inOrderBadge: {
-    fontSize: 12,
-    fontWeight: "700",
-    flexShrink: 0,
   },
   footer: {
     padding: 16,
@@ -1344,16 +1334,16 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.semantic.scrim,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: space[9],
   },
   addModalContent: {
     width: "100%",
     maxWidth: 400,
-    borderRadius: 12,
-    padding: 20,
+    borderRadius: radius.lg,
+    padding: space[8],
   },
   addModalTitle: {
     fontSize: 18,
@@ -1366,9 +1356,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   addModalId: {
-    fontSize: 12,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    marginBottom: 16,
+    marginBottom: space[6],
   },
   addModalInput: {
     marginBottom: 12,

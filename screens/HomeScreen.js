@@ -12,7 +12,6 @@ import {
   Card,
   Button,
   Text,
-  Title,
   useTheme,
   IconButton,
   ActivityIndicator,
@@ -24,6 +23,14 @@ import version from "../version";
 import { formatDayHeader } from "../utils/transactionDayUtils";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 import { nestedSurfaceColor } from "../utils/themeColors";
+import {
+  colors,
+  fontFamily,
+  mutedTextColor,
+  dimTextColor,
+} from "../theme/tokens";
+import { AppText, AppEmptyState } from "../components/ui";
+import { getActionColor } from "../utils/actionColors";
 
 function formatAction(action, details) {
   if (action === "update" && details?._actionType === "check_in")
@@ -43,25 +50,6 @@ function formatAction(action, details) {
   if (action === "delete") return "Deleted";
   if (action === "change_id") return "ID Changed";
   return action;
-}
-
-function getActionColor(action, details) {
-  if (action === "update" && details?._actionType === "check_in")
-    return "#81c784";
-  if (action === "update" && details?._actionType === "check_out")
-    return "#e57373";
-  if (action === "check_in") return "#81c784";
-  if (action === "check_out") return "#e57373";
-  if (action === "update" && details?._actionType === "receiving")
-    return "#64b5f6";
-  if (action === "receiving") return "#64b5f6";
-  if (action === "update" && details?._actionType === "recycled")
-    return "#558b2f";
-  if (action === "recycled") return "#558b2f";
-  if (action === "add") return "#64b5f6";
-  if (action === "delete") return "#f44336";
-  if (action === "update") return "#ba68c8";
-  return "#757575";
 }
 
 function getQuantityDisplay(action, details) {
@@ -452,11 +440,14 @@ export default function HomeScreen({
           ))
         ) : transactionLogsByDay.length === 0 ? (
           <>
-            <Text style={styles.emptyLogs}>
-              {isAdmin
-                ? "No transactions in this period"
-                : "No transactions today"}
-            </Text>
+            <AppEmptyState
+              title={
+                isAdmin
+                  ? "No transactions in this period"
+                  : "No transactions today"
+              }
+              style={styles.emptyLogs}
+            />
             {isAdmin && hasMoreHistory ? (
               <Pressable
                 onPress={() => setHistoryWeeksShown((w) => w + 2)}
@@ -483,7 +474,7 @@ export default function HomeScreen({
                   style={[
                     styles.dayDividerText,
                     {
-                      color: theme.dark ? "#c0c4cc" : "#666",
+                      color: mutedTextColor(theme),
                     },
                   ]}
                 >
@@ -524,7 +515,7 @@ export default function HomeScreen({
                       <Text
                         style={[
                           styles.transactionDateTime,
-                          { color: theme.dark ? "#aaa" : "#666" },
+                          { color: mutedTextColor(theme) },
                         ]}
                         numberOfLines={1}
                       >
@@ -536,7 +527,7 @@ export default function HomeScreen({
                             style={[
                               styles.transactionUser,
                               styles.clickableText,
-                              { color: theme.dark ? "#999" : "#888" },
+                              { color: dimTextColor(theme) },
                             ]}
                             numberOfLines={1}
                           >
@@ -547,7 +538,7 @@ export default function HomeScreen({
                         <Text
                           style={[
                             styles.transactionUser,
-                            { color: theme.dark ? "#999" : "#888" },
+                            { color: dimTextColor(theme) },
                           ]}
                           numberOfLines={1}
                         >
@@ -726,7 +717,9 @@ export default function HomeScreen({
     >
       {!isWeb && (
         <View style={styles.headerBar}>
-          <Title style={styles.title}>Paint Inventory</Title>
+          <AppText variant="pageTitleLg" style={styles.title}>
+            Paint Inventory
+          </AppText>
           <View style={styles.headerButtons}>
             <NotificationsBell
               inventory={inventory}
@@ -775,7 +768,7 @@ export default function HomeScreen({
       )}
       {isWeb && (
         <View style={styles.webHeader}>
-          <Title style={styles.webTitle}>Paint Inventory</Title>
+          <AppText variant="pageTitle">Paint Inventory</AppText>
           <View style={styles.webHeaderButtons}>
             <NotificationsBell
               inventory={inventory}
@@ -902,13 +895,11 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "bold",
     marginBottom: 10,
   },
   subtitle: {
     fontSize: 16,
-    color: "#666",
+    color: colors.light.textMuted,
     textAlign: "center",
   },
   content: {
@@ -935,11 +926,11 @@ const styles = StyleSheet.create({
   },
   statLoadingText: {
     fontSize: 14,
-    color: "#888",
+    color: colors.dark.textDim,
   },
   statLabel: {
     fontSize: 14,
-    color: "#666",
+    color: colors.light.textMuted,
     textAlign: "center",
     marginBottom: 10,
     fontWeight: "600",
@@ -949,11 +940,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginTop: 10,
-    color: "#6f95ab",
+    color: colors.brand.primary,
   },
   statHint: {
     fontSize: 12,
-    color: "#888",
+    color: colors.dark.textDim,
     textAlign: "center",
     marginTop: 4,
   },
@@ -968,13 +959,13 @@ const styles = StyleSheet.create({
   lowStockName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#ff6b6b",
+    color: colors.semantic.lowStockText,
     flex: 1,
   },
   lowStockQty: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#ff6b6b",
+    color: colors.semantic.lowStockText,
   },
   actionButtonsWrapMobile: {
     paddingTop: 15,
@@ -984,7 +975,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   warning: {
-    color: "#ff6b6b",
+    color: colors.semantic.lowStockText,
     textAlign: "center",
     marginBottom: 15,
     fontSize: 12,
@@ -994,12 +985,12 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   footerText: {
-    color: "#666",
+    color: colors.light.textMuted,
     marginBottom: 4,
   },
   footerVersion: {
     fontSize: 12,
-    color: "#666",
+    color: colors.light.textMuted,
     opacity: 0.85,
   },
   toggleRow: {
@@ -1010,11 +1001,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   toggleLabel: {
-    color: "#666",
+    color: colors.light.textMuted,
     fontWeight: "600",
   },
   mono: {
-    fontFamily: "monospace",
+    fontFamily: fontFamily.mono,
   },
   sectionTitle: {
     fontSize: 18,
@@ -1065,10 +1056,8 @@ const styles = StyleSheet.create({
     borderRadius: 1,
   },
   emptyLogs: {
-    fontSize: 14,
-    color: "#999",
-    textAlign: "center",
     paddingVertical: 16,
+    paddingHorizontal: 0,
   },
   placeholderText: {
     color: "transparent",
@@ -1155,10 +1144,6 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: "transparent",
-  },
-  webTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
   },
   webHeaderButtons: {
     flexDirection: "row",

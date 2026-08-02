@@ -19,6 +19,7 @@ import SimpleLineChart from "./SimpleLineChart";
 import ScrollFrame from "./ScrollFrame";
 import ReportService from "../services/reportService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { colors } from "../theme/tokens";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -31,11 +32,14 @@ function defaultFromDate() {
 }
 
 const TYPE_META = [
-  { key: "paint", label: "Paint", color: "#1565c0" },
-  { key: "primer", label: "Primer", color: "#5d4037" },
-  { key: "clear", label: "Clear", color: "#e65100" },
-  { key: "stain", label: "Stain", color: "#2e7d32" },
+  { key: "paint", label: "Paint", color: colors.materialType.paint },
+  { key: "primer", label: "Primer", color: colors.materialType.primerLight },
+  { key: "clear", label: "Clear", color: colors.materialType.clear },
+  { key: "stain", label: "Stain", color: colors.materialType.stain },
 ];
+
+/** Soft purple used for total material-usage chart series (unchanged hue). */
+const USAGE_TOTAL_COLOR = "#ce93d8";
 
 function usageForBucket(summary, index) {
   if (!summary || index == null || index < 0) return null;
@@ -127,7 +131,7 @@ export default function MaterialUsageReportModal({
       {
         label: "Total (gal)",
         value: `${Math.round(periodUsage.gallons * 10) / 10}`,
-        color: "#ce93d8",
+        color: USAGE_TOTAL_COLOR,
       },
       ...TYPE_META.map((t) => ({
         label: t.label,
@@ -294,7 +298,7 @@ export default function MaterialUsageReportModal({
                         title={`Material usage per ${groupBy}`}
                         data={report.materialUsageGallons || []}
                         labels={report.buckets || []}
-                        color="#ce93d8"
+                        color={USAGE_TOTAL_COLOR}
                         height={240}
                         interactive
                         selectedIndex={selectedBucketIndex}

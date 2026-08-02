@@ -44,6 +44,8 @@ import {
   formatTotalsBreakdown,
   formatMonthLabel,
 } from "../utils/wasteDrumConversion";
+import { colors } from "../theme/tokens";
+import { AppEmptyState } from "../components/ui";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -649,10 +651,10 @@ export default function WasteTrackingScreen({
             style={[
               styles.card,
               {
-                backgroundColor: theme.dark
-                  ? "rgba(255, 152, 0, 0.12)"
-                  : "rgba(255, 152, 0, 0.1)",
-                borderColor: theme.dark ? "#ffb74d" : "#ef6c00",
+                backgroundColor: colors.semantic.recycleBannerBg,
+                borderColor: theme.dark
+                  ? colors.semantic.warning
+                  : colors.semantic.recycleBannerText,
               },
             ]}
             mode="outlined"
@@ -699,9 +701,10 @@ export default function WasteTrackingScreen({
           {loading && records.length === 0 ? (
             <SkeletonStack lines={4} style={{ marginTop: 8 }} />
           ) : weeks.length === 0 ? (
-            <Text style={{ color: theme.colors.onSurfaceVariant }}>
-              No records yet.
-            </Text>
+            <AppEmptyState
+              title="No records yet."
+              style={styles.emptyRecords}
+            />
           ) : (
             weeks.map((week, wIdx) => {
               const open = expandedWeeks.has(week.monday);
@@ -1047,6 +1050,12 @@ const styles = StyleSheet.create({
     gap: 10,
     width: "100%",
     maxWidth: "100%",
+  },
+  emptyRecords: {
+    flex: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
+    alignItems: "flex-start",
   },
   weekCard: {
     marginBottom: 4,

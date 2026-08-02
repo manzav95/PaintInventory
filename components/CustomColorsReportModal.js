@@ -28,6 +28,7 @@ import {
   resolveCustomColorsRange,
   todayReportIso,
 } from "../utils/reportBuckets";
+import { colors } from "../theme/tokens";
 
 function todayIso() {
   return todayReportIso();
@@ -476,7 +477,7 @@ export default function CustomColorsReportModal({
                             title={`Ordered per ${groupByChartLabel(groupBy)}`}
                             data={colorTimeline.ordered}
                             labels={colorTimeline.buckets}
-                            color="#7e57c2"
+                            color={colors.materialType.dye}
                             height={200}
                             interactive
                             selectedIndex={selectedColorBucketIndex}
@@ -496,7 +497,7 @@ export default function CustomColorsReportModal({
                             title={`Material used per ${groupByChartLabel(groupBy)}`}
                             data={colorTimeline.usage}
                             labels={colorTimeline.buckets}
-                            color="#ba68c8"
+                            color={colors.action.create}
                             height={200}
                             interactive
                             selectedIndex={selectedColorBucketIndex}
@@ -604,7 +605,7 @@ export default function CustomColorsReportModal({
                           title={`Custom colors ordered per ${groupByChartLabel(groupBy)}`}
                           data={report.bucketTotals || []}
                           labels={report.buckets || []}
-                          color="#7e57c2"
+                          color={colors.materialType.dye}
                           height={220}
                           interactive
                           selectedIndex={selectedBucketIndex}
@@ -624,7 +625,7 @@ export default function CustomColorsReportModal({
                           title={`Material used per ${groupByChartLabel(groupBy)}`}
                           data={report.bucketUsageTotals || []}
                           labels={report.buckets || []}
-                          color="#ba68c8"
+                          color={colors.action.create}
                           height={220}
                           interactive
                           selectedIndex={selectedBucketIndex}

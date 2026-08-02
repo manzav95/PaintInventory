@@ -1,3 +1,5 @@
+import { colors } from "../theme/tokens";
+
 export const MATERIAL_TYPE_LABELS = {
   paint: "Paint",
   primer: "Primer",
@@ -42,11 +44,12 @@ export function getMaterialTypeLabel(type) {
 
 export function getMaterialTypeColor(type, theme) {
   const t = String(type || "").toLowerCase();
-  if (t === "paint" || t === "custom_paint" || t === "precat") return "#1565c0";
-  if (t === "clear") return "#e65100";
-  if (t === "stain" || t === "custom_stain") return "#2e7d32";
-  if (t === "primer") return theme?.dark ? "#f5f5dc" : "#5d4037";
-  if (t === "dye") return "#7e57c2";
-  if (t === "catalyst") return "#9a7b00";
-  return theme?.dark ? "#fff" : "#666";
+  const mt = colors.materialType;
+  if (t === "paint" || t === "custom_paint" || t === "precat") return mt.paint;
+  if (t === "clear") return mt.clear;
+  if (t === "stain" || t === "custom_stain") return mt.stain;
+  if (t === "primer") return theme?.dark ? mt.primerDark : mt.primerLight;
+  if (t === "dye") return mt.dye;
+  if (t === "catalyst") return mt.catalyst;
+  return theme?.dark ? "#fff" : colors.light.textMuted;
 }

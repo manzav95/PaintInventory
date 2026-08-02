@@ -1,12 +1,12 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   View,
   StyleSheet,
   ScrollView,
-  RefreshControl,
   Platform,
   Pressable,
   Modal,
+  useWindowDimensions,
 } from "react-native";
 import {
   Card,
@@ -18,14 +18,53 @@ import {
   DataTable,
   Chip,
   ActivityIndicator,
+  Icon,
+  IconButton,
+  Divider,
 } from "react-native-paper";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import DashboardGreeting from "../components/DashboardGreeting";
 import ScrollFrame from "../components/ScrollFrame";
 import { getDayKey, formatDayHeader } from "../utils/transactionDayUtils";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
+import { useAppLayout } from "../utils/layout";
+import {
+  colors,
+  fontFamily,
+  mutedTextColor,
+  space,
+  radius,
+} from "../theme/tokens";
+import { AppBadge, AppEmptyState } from "../components/ui";
+import { getActionColor } from "../utils/actionColors";
+import { getLowStockItems } from "../utils/inventoryAlerts";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+
+function resolveActionType(log) {
+  if (log?.action === "update" && log?.details?._actionType) {
+    return log.details._actionType;
+  }
+  return log?.action;
+}
+
+function logQtyAbs(log) {
+  const d = log?.details || {};
+  const q = d.quantityChange ?? d._quantityChange;
+  return typeof q === "number" ? Math.abs(q) : 0;
+}
+
+function logBelongsToUser(log, userName) {
+  const target = String(userName || "")
+    .trim()
+    .toLowerCase();
+  if (!target || target === "admin123") return false;
+  const u = String(log?.userName || "")
+    .trim()
+    .toLowerCase();
+  return u === target;
+}
+
 function isRecycleDue(item) {
   const t = (item.type || "").toLowerCase();
   if (!CUSTOM_TYPES.includes(t)) return false;
@@ -54,9 +93,16 @@ export default function DashboardScreen({
   embeddedInShell = false,
   onOpenRecycleDue,
   onItemSelect,
+  onOpenInventory,
+  onOpenMaterialUsage,
+  onOpenWasteTracking,
+  onOpenCheckInOut,
+  showCheckInOutNav = true,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
+  const { showPersistentSidebar } = useAppLayout();
+  const isMobileLayout = !showPersistentSidebar;
   const surfaceCardStyle = {
     backgroundColor: theme.colors.surfaceContainerHighest,
     borderColor: theme.colors.outlineVariant,
@@ -77,6 +123,33 @@ export default function DashboardScreen({
   const [shiftFilter, setShiftFilter] = useState(null);
   /** Admin transaction history: start with ~2 weeks; "Show more" adds another 2. */
   const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
+  /** Standard-user needs-attention popup */
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [attentionKind, setAttentionKind] = useState("lowStock"); // 'lowStock' | 'recycle'
+  const [attentionPanelPos, setAttentionPanelPos] = useState({
+    top: 80,
+    left: 12,
+    caretLeft: 24,
+    placement: "below",
+    maxHeight: 320,
+  });
+  /** My activity today popup */
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityKind, setActivityKind] = useState("checkedOut"); // 'checkedOut' | 'checkedIn' | 'actions'
+  const [activityPanelPos, setActivityPanelPos] = useState({
+    top: 80,
+    left: 12,
+    caretLeft: 24,
+    placement: "below",
+    maxHeight: 320,
+  });
+  const lowStockChipRef = useRef(null);
+  const recycleChipRef = useRef(null);
+  const checkedOutCardRef = useRef(null);
+  const checkedInCardRef = useRef(null);
+  const actionsCardRef = useRef(null);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const ATTENTION_PANEL_WIDTH = Math.min(340, windowWidth - 24);
 
   // Current week (Sun–Sat) and current month date ranges + labels
   const periodRange = useMemo(() => {
@@ -293,10 +366,102 @@ export default function DashboardScreen({
       );
   }, [auditLogs, thisMonthRange, inventory]);
 
-  const recycleDueCount = useMemo(
-    () => inventory.filter((item) => isRecycleDue(item)).length,
+  const lowStockItems = useMemo(
+    () => getLowStockItems(inventory, minQuantity),
+    [inventory, minQuantity],
+  );
+
+  const lowStockCount = lowStockItems.length;
+
+  const recycleDueItems = useMemo(
+    () => inventory.filter((item) => isRecycleDue(item)),
     [inventory],
   );
+
+  const recycleDueCount = recycleDueItems.length;
+
+  /** Personal ops snapshot for standard users. */
+  const myActivityToday = useMemo(() => {
+    if (isAdmin || !userName) return null;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    let checkedOut = 0;
+    let checkedIn = 0;
+    let actions = 0;
+    let lastAt = null;
+    const checkOutLogs = [];
+    const checkInLogs = [];
+    const actionLogs = [];
+    for (const log of auditLogs) {
+      if (!logBelongsToUser(log, userName)) continue;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (!t || t < startMs) continue;
+      actions += 1;
+      actionLogs.push(log);
+      if (!lastAt || t > lastAt) lastAt = t;
+      const type = resolveActionType(log);
+      const qty = logQtyAbs(log);
+      if (type === "check_out") {
+        checkedOut += qty;
+        checkOutLogs.push(log);
+      }
+      if (type === "check_in") {
+        checkedIn += qty;
+        checkInLogs.push(log);
+      }
+    }
+    const byNewest = (a, b) =>
+      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
+      (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    checkOutLogs.sort(byNewest);
+    checkInLogs.sort(byNewest);
+    actionLogs.sort(byNewest);
+    const lastLabel = lastAt
+      ? new Date(lastAt).toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    return {
+      checkedOut,
+      checkedIn,
+      actions,
+      lastLabel,
+      checkOutLogs,
+      checkInLogs,
+      actionLogs,
+    };
+  }, [auditLogs, userName, isAdmin]);
+
+  const myRecentColors = useMemo(() => {
+    if (isAdmin || !userName) return [];
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const totals = new Map();
+    for (const log of auditLogs) {
+      if (!logBelongsToUser(log, userName)) continue;
+      if (resolveActionType(log) !== "check_out") continue;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      if (t < weekAgo) continue;
+      const id = String(log.itemId || "");
+      if (!id) continue;
+      const qty = logQtyAbs(log);
+      if (qty <= 0) continue;
+      totals.set(id, (totals.get(id) || 0) + qty);
+    }
+    return [...totals.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([itemId, gal]) => {
+        const item = inventory.find((i) => String(i.id) === itemId);
+        return {
+          itemId,
+          name: item?.name || itemId,
+          gal,
+          hex: item?.hex_color || item?.hex || null,
+        };
+      });
+  }, [auditLogs, inventory, userName, isAdmin]);
 
   const totalValue = useMemo(() => {
     return inventory.reduce((sum, item) => {
@@ -494,42 +659,6 @@ export default function DashboardScreen({
     if (item) onItemSelect(item);
   };
 
-  const getActionColor = (action, details) => {
-    // Handle old records with _actionType in details (for backward compatibility)
-    if (action === "update" && details && details._actionType) {
-      if (details._actionType === "check_in") {
-        return "#81c784"; // Subtle green
-      } else if (details._actionType === "check_out") {
-        return "#e57373"; // Subtle red
-      } else if (details._actionType === "receiving") {
-        return "#64b5f6"; // Blue for receiving
-      } else if (details._actionType === "recycled") {
-        return "#558b2f";
-      }
-    }
-
-    switch (action) {
-      case "check_in":
-        return "#81c784"; // Subtle green
-      case "check_out":
-        return "#e57373"; // Subtle red
-      case "receiving":
-        return "#64b5f6"; // Blue for receiving
-      case "recycled":
-        return "#558b2f";
-      case "add":
-        return "#64b5f6"; // Subtle blue
-      case "delete":
-        return "#f44336";
-      case "update":
-        return "#ba68c8"; // Subtle purple
-      case "change_id":
-        return "#ff5722";
-      default:
-        return "#757575";
-    }
-  };
-
   const formatAction = (action, details, itemId) => {
     // Check if this is an old record with _actionType in details (for backward compatibility)
     if (action === "update" && details && details._actionType) {
@@ -538,7 +667,7 @@ export default function DashboardScreen({
       } else if (details._actionType === "check_out") {
         return "Checked Out";
       } else if (details._actionType === "receiving") {
-        return "Receiving";
+        return "Received";
       } else if (details._actionType === "recycled") {
         return "Recycled";
       }
@@ -552,7 +681,7 @@ export default function DashboardScreen({
     } else if (action === "check_out") {
       return "Checked Out";
     } else if (action === "receiving") {
-      return "Receiving";
+      return "Received";
     } else if (action === "recycled") {
       return "Recycled";
     } else if (action === "update") {
@@ -568,6 +697,35 @@ export default function DashboardScreen({
     }
     return action;
   };
+
+  /** Short verb for brief lists / popups: "check out", "received", … */
+  const formatBriefVerb = (log) => {
+    const type = resolveActionType(log);
+    if (type === "check_out") return "check out";
+    if (type === "check_in") return "check in";
+    if (type === "receiving") return "received";
+    if (type === "recycled") return "recycled";
+    if (type === "add") return "added";
+    if (type === "delete") return "deleted";
+    return formatAction(log.action, log.details, log.itemId).toLowerCase();
+  };
+
+  const formatBriefSummary = (log) => {
+    const actionLabel = formatBriefVerb(log);
+    const qty = getQuantity(log.action, log.details, log.itemId);
+    const colorName = getItemName(log.itemId);
+    const qtyPart =
+      qty !== "-" && qty != null && qty !== "" ? `${qty} gal ` : "";
+    return `${actionLabel} ${qtyPart}${colorName}`.replace(/\s+/g, " ").trim();
+  };
+
+  const briefRecentLogs = useMemo(
+    () => (Array.isArray(filteredLogs) ? filteredLogs.slice(0, 10) : []),
+    [filteredLogs],
+  );
+
+  const showFullHistoryTable = showTransactionTable && !(isMobileLayout && !isAdmin);
+  const showBriefRecent = showTransactionTable && isMobileLayout && !isAdmin;
 
   const getQuantity = (action, details, itemId) => {
     // Return the amount of gallons that were manipulated (changed)
@@ -655,13 +813,526 @@ export default function DashboardScreen({
     return "-";
   };
 
+  const placeAnchoredPanel = (x, y, w, h) => {
+    const caretSize = 10;
+    const margin = 12;
+    const gap = 8;
+    const minNeeded = 200;
+    const spaceBelow = windowHeight - (y + h) - margin;
+    const spaceAbove = y - margin;
+    const placement =
+      spaceBelow < minNeeded && spaceAbove > spaceBelow ? "above" : "below";
+    const available = placement === "above" ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(160, Math.min(420, available - gap));
+    const preferredLeft = x + w / 2 - ATTENTION_PANEL_WIDTH / 2;
+    const left = Math.max(
+      margin,
+      Math.min(preferredLeft, windowWidth - ATTENTION_PANEL_WIDTH - margin),
+    );
+    const centerX = x + w / 2;
+    const rawCaret = centerX - left - caretSize;
+    const caretLeft = Math.max(
+      14,
+      Math.min(rawCaret, ATTENTION_PANEL_WIDTH - caretSize * 2 - 14),
+    );
+    if (placement === "above") {
+      return {
+        placement,
+        top: undefined,
+        bottom: Math.max(margin, windowHeight - y + gap),
+        left,
+        caretLeft,
+        maxHeight,
+      };
+    }
+    return {
+      placement,
+      top: Math.max(margin, y + h + gap),
+      bottom: undefined,
+      left,
+      caretLeft,
+      maxHeight,
+    };
+  };
+
+  const openAttentionPanel = (kind, chipRef) => {
+    const node = chipRef?.current;
+    setAttentionKind(kind);
+    const fallback = () => {
+      setAttentionPanelPos({
+        placement: "below",
+        top: 80,
+        bottom: undefined,
+        left: 12,
+        caretLeft: 24,
+        maxHeight: 320,
+      });
+      setAttentionOpen(true);
+    };
+    if (node && typeof node.measureInWindow === "function") {
+      node.measureInWindow((x, y, w, h) => {
+        setAttentionPanelPos(placeAnchoredPanel(x, y, w, h));
+        setAttentionOpen(true);
+      });
+    } else {
+      fallback();
+    }
+  };
+
+  const openActivityPanel = (kind, cardRef) => {
+    const node = cardRef?.current;
+    setActivityKind(kind);
+    const fallback = () => {
+      setActivityPanelPos({
+        placement: "below",
+        top: 80,
+        bottom: undefined,
+        left: 12,
+        caretLeft: 24,
+        maxHeight: 320,
+      });
+      setActivityOpen(true);
+    };
+    if (node && typeof node.measureInWindow === "function") {
+      node.measureInWindow((x, y, w, h) => {
+        setActivityPanelPos(placeAnchoredPanel(x, y, w, h));
+        setActivityOpen(true);
+      });
+    } else {
+      fallback();
+    }
+  };
+
+  const activityPopupConfig = useMemo(() => {
+    if (!myActivityToday) return null;
+    if (activityKind === "checkedOut") {
+      return {
+        title: "Checked out today",
+        hint: "Gallons you checked out today.",
+        accent: colors.action.checkOut,
+        logs: myActivityToday.checkOutLogs || [],
+        empty: "No check-outs yet today.",
+      };
+    }
+    if (activityKind === "checkedIn") {
+      return {
+        title: "Checked in today",
+        hint: "Gallons you checked in today.",
+        accent: colors.action.checkIn,
+        logs: myActivityToday.checkInLogs || [],
+        empty: "No check-ins yet today.",
+      };
+    }
+    return {
+      title: "Actions today",
+      hint: "Your inventory actions today.",
+      accent: theme.colors.primary,
+      logs: myActivityToday.actionLogs || [],
+      empty: "No activity yet today.",
+    };
+  }, [activityKind, myActivityToday, theme.colors.primary]);
+
   const content = (
     <View
       style={[
         styles.dashboardContainer,
-        isWeb && showTransactionTable && styles.dashboardContainerWeb,
+        showFullHistoryTable && styles.dashboardContainerWeb,
       ]}
     >
+      {/* Needs attention — notification-style anchored popup */}
+      <Modal
+        visible={attentionOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAttentionOpen(false)}
+      >
+        <View style={styles.attentionPopupRoot}>
+          <Pressable
+            style={styles.attentionPopupBackdrop}
+            onPress={() => setAttentionOpen(false)}
+            accessibilityLabel="Dismiss"
+          />
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.attentionPopupAnchor,
+              {
+                left: attentionPanelPos.left,
+                width: ATTENTION_PANEL_WIDTH,
+                ...(attentionPanelPos.placement === "above"
+                  ? { bottom: attentionPanelPos.bottom }
+                  : { top: attentionPanelPos.top }),
+              },
+            ]}
+          >
+            {attentionPanelPos.placement !== "above" ? (
+              <>
+                <View
+                  style={[
+                    styles.attentionPopupCaret,
+                    {
+                      left: attentionPanelPos.caretLeft,
+                      borderBottomColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.attentionPopupCaretInner,
+                    {
+                      left: attentionPanelPos.caretLeft + 1,
+                      borderBottomColor: theme.colors.surfaceContainerHighest,
+                    },
+                  ]}
+                />
+              </>
+            ) : null}
+            <View
+              style={[
+                styles.attentionPopupPanel,
+                {
+                  maxHeight: attentionPanelPos.maxHeight || 320,
+                  backgroundColor: theme.colors.surfaceContainerHighest,
+                  borderColor: theme.colors.outlineVariant,
+                },
+              ]}
+            >
+              <View style={styles.attentionPopupHeader}>
+                <Text
+                  style={[
+                    styles.attentionPopupTitle,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {attentionKind === "recycle"
+                    ? "Paint needing recycle"
+                    : "Low stock items"}
+                </Text>
+                <IconButton
+                  icon="close"
+                  size={18}
+                  onPress={() => setAttentionOpen(false)}
+                  style={styles.attentionPopupClose}
+                  accessibilityLabel="Close"
+                />
+              </View>
+              <Text
+                style={[
+                  styles.attentionPopupHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {attentionKind === "recycle"
+                  ? "Custom colors past their recycle date with stock remaining."
+                  : `Below minimum quantity (default ${minQuantity} gal).`}
+              </Text>
+              <ScrollFrame
+                bordered={false}
+                maxHeight={Math.max(
+                  120,
+                  (attentionPanelPos.maxHeight || 320) - 110,
+                )}
+                contentContainerStyle={styles.attentionPopupList}
+              >
+                {(attentionKind === "recycle"
+                  ? recycleDueItems
+                  : lowStockItems
+                ).length === 0 ? (
+                  <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                    None.
+                  </Text>
+                ) : (
+                  (attentionKind === "recycle"
+                    ? recycleDueItems
+                    : lowStockItems
+                  ).map((it, index) => {
+                    const minQ = it.minQuantity ?? minQuantity;
+                    return (
+                      <React.Fragment key={String(it.id)}>
+                        {index > 0 ? (
+                          <Divider style={styles.attentionPopupDivider} />
+                        ) : null}
+                        <View style={styles.attentionPopupRow}>
+                          <View
+                            style={[
+                              styles.attentionPopupPill,
+                              {
+                                backgroundColor:
+                                  attentionKind === "recycle"
+                                    ? colors.semantic.recycleBannerText
+                                    : colors.semantic.lowStockValue,
+                              },
+                            ]}
+                          >
+                            <Text style={styles.attentionPopupPillText}>
+                              {attentionKind === "recycle"
+                                ? it.recycle_date
+                                  ? String(it.recycle_date).slice(5, 10)
+                                  : "Due"
+                                : `${it.quantity ?? 0}`}
+                            </Text>
+                          </View>
+                          <View style={styles.attentionPopupRowText}>
+                            <Text
+                              style={[
+                                styles.attentionPopupRowTitle,
+                                { color: theme.colors.onSurface },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {it.name || it.id}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.attentionPopupRowDetail,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {attentionKind === "recycle"
+                                ? `${it.quantity ?? 0} gal · ${it.type || "—"}`
+                                : `${it.quantity ?? 0} / ${minQ} gal · ${it.id}`}
+                            </Text>
+                          </View>
+                        </View>
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </ScrollFrame>
+              <View style={styles.attentionPopupActions}>
+                <Button
+                  mode="text"
+                  compact
+                  onPress={() => setAttentionOpen(false)}
+                >
+                  Close
+                </Button>
+              </View>
+            </View>
+            {attentionPanelPos.placement === "above" ? (
+              <>
+                <View
+                  style={[
+                    styles.attentionPopupCaretDownInner,
+                    {
+                      left: attentionPanelPos.caretLeft + 1,
+                      borderTopColor: theme.colors.surfaceContainerHighest,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.attentionPopupCaretDown,
+                    {
+                      left: attentionPanelPos.caretLeft,
+                      borderTopColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                />
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* My activity today — anchored popup */}
+      <Modal
+        visible={activityOpen && activityPopupConfig != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActivityOpen(false)}
+      >
+        <View style={styles.attentionPopupRoot}>
+          <Pressable
+            style={styles.attentionPopupBackdrop}
+            onPress={() => setActivityOpen(false)}
+            accessibilityLabel="Dismiss"
+          />
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.attentionPopupAnchor,
+              {
+                left: activityPanelPos.left,
+                width: ATTENTION_PANEL_WIDTH,
+                ...(activityPanelPos.placement === "above"
+                  ? { bottom: activityPanelPos.bottom }
+                  : { top: activityPanelPos.top }),
+              },
+            ]}
+          >
+            {activityPanelPos.placement !== "above" ? (
+              <>
+                <View
+                  style={[
+                    styles.attentionPopupCaret,
+                    {
+                      left: activityPanelPos.caretLeft,
+                      borderBottomColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.attentionPopupCaretInner,
+                    {
+                      left: activityPanelPos.caretLeft + 1,
+                      borderBottomColor: theme.colors.surfaceContainerHighest,
+                    },
+                  ]}
+                />
+              </>
+            ) : null}
+            <View
+              style={[
+                styles.attentionPopupPanel,
+                {
+                  maxHeight: activityPanelPos.maxHeight || 320,
+                  backgroundColor: theme.colors.surfaceContainerHighest,
+                  borderColor: theme.colors.outlineVariant,
+                  borderTopWidth: 3,
+                  borderTopColor: activityPopupConfig?.accent,
+                },
+              ]}
+            >
+              <View style={styles.attentionPopupHeader}>
+                <Text
+                  style={[
+                    styles.attentionPopupTitle,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {activityPopupConfig?.title}
+                </Text>
+                <IconButton
+                  icon="close"
+                  size={18}
+                  onPress={() => setActivityOpen(false)}
+                  style={styles.attentionPopupClose}
+                  accessibilityLabel="Close"
+                />
+              </View>
+              <Text
+                style={[
+                  styles.attentionPopupHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {activityPopupConfig?.hint}
+              </Text>
+              <ScrollFrame
+                bordered={false}
+                maxHeight={Math.max(
+                  120,
+                  (activityPanelPos.maxHeight || 320) - 110,
+                )}
+                contentContainerStyle={styles.attentionPopupList}
+              >
+                {(activityPopupConfig?.logs || []).length === 0 ? (
+                  <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                    {activityPopupConfig?.empty}
+                  </Text>
+                ) : (
+                  (activityPopupConfig?.logs || []).map((log, index) => {
+                    const accent = getActionColor(log.action, log.details);
+                    const time = log.timestamp
+                      ? new Date(log.timestamp).toLocaleTimeString("en-US", {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "—";
+                    const qty = logQtyAbs(log);
+                    const name = getItemName(log.itemId);
+                    const verb = formatBriefVerb(log);
+                    const showVerb = activityKind === "actions";
+                    return (
+                      <React.Fragment
+                        key={`${log.timestamp}-${log.itemId}-${index}`}
+                      >
+                        {index > 0 ? (
+                          <Divider style={styles.attentionPopupDivider} />
+                        ) : null}
+                        <View style={styles.attentionPopupRow}>
+                          <View
+                            style={[
+                              styles.attentionPopupPill,
+                              { backgroundColor: accent },
+                            ]}
+                          >
+                            <Text style={styles.attentionPopupPillText}>
+                              {qty > 0 ? qty : "·"}
+                            </Text>
+                          </View>
+                          <View style={styles.attentionPopupRowText}>
+                            <Text
+                              style={[
+                                styles.attentionPopupRowTitle,
+                                { color: theme.colors.onSurface },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {showVerb ? (
+                                <Text style={{ color: accent, fontWeight: "700" }}>
+                                  {verb}
+                                </Text>
+                              ) : null}
+                              {showVerb && qty > 0 ? " " : null}
+                              {qty > 0 ? `${qty} gal ` : showVerb ? " " : ""}
+                              <Text style={{ fontWeight: "700" }}>{name}</Text>
+                            </Text>
+                            <Text
+                              style={[
+                                styles.attentionPopupRowDetail,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {time}
+                            </Text>
+                          </View>
+                        </View>
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </ScrollFrame>
+              <View style={styles.attentionPopupActions}>
+                <Button
+                  mode="text"
+                  compact
+                  onPress={() => setActivityOpen(false)}
+                >
+                  Close
+                </Button>
+              </View>
+            </View>
+            {activityPanelPos.placement === "above" ? (
+              <>
+                <View
+                  style={[
+                    styles.attentionPopupCaretDownInner,
+                    {
+                      left: activityPanelPos.caretLeft + 1,
+                      borderTopColor: theme.colors.surfaceContainerHighest,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.attentionPopupCaretDown,
+                    {
+                      left: activityPanelPos.caretLeft,
+                      borderTopColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                />
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* Not scanned list modal */}
       <Modal
         visible={staleListOpen}
@@ -709,33 +1380,17 @@ export default function DashboardScreen({
                           {it.id}
                         </Text>
                       </View>
-                      <View
-                        style={[
-                          styles.modalBadge,
-                          {
-                            backgroundColor: theme.dark
-                              ? "rgba(198,40,40,0.22)"
-                              : "rgba(198,40,40,0.12)",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.modalBadgeText,
-                            { color: theme.dark ? "#ffb4ab" : "#c62828" },
-                          ]}
-                        >
-                          {it.lastScanned
-                            ? `${Math.max(
-                                0,
-                                Math.floor(
-                                  (Date.now() - (it.lastScannedMs || 0)) /
-                                    (24 * 60 * 60 * 1000),
-                                ),
-                              )} days`
-                            : "Never"}
-                        </Text>
-                      </View>
+                      <AppBadge tone="late">
+                        {it.lastScanned
+                          ? `${Math.max(
+                              0,
+                              Math.floor(
+                                (Date.now() - (it.lastScannedMs || 0)) /
+                                  (24 * 60 * 60 * 1000),
+                              ),
+                            )} days`
+                          : "Never"}
+                      </AppBadge>
                     </View>
                     <View style={styles.modalRowBottom}>
                       <Text
@@ -830,29 +1485,13 @@ export default function DashboardScreen({
                           {it.id}
                         </Text>
                       </View>
-                      <View
-                        style={[
-                          styles.modalBadge,
-                          {
-                            backgroundColor: theme.dark
-                              ? "rgba(25,118,210,0.22)"
-                              : "rgba(25,118,210,0.12)",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.modalBadgeText,
-                            { color: theme.dark ? "#b3d5ff" : "#1976d2" },
-                          ]}
-                        >
-                          $
-                          {it.value.toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
-                        </Text>
-                      </View>
+                      <AppBadge tone="info">
+                        $
+                        {it.value.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </AppBadge>
                     </View>
                     <View style={styles.modalRowBottom}>
                       <Text
@@ -949,25 +1588,7 @@ export default function DashboardScreen({
                           {it.itemId}
                         </Text>
                       </View>
-                      <View
-                        style={[
-                          styles.modalBadge,
-                          {
-                            backgroundColor: theme.dark
-                              ? "rgba(46,125,50,0.22)"
-                              : "rgba(46,125,50,0.12)",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.modalBadgeText,
-                            { color: theme.dark ? "#b9f6ca" : "#2e7d32" },
-                          ]}
-                        >
-                          {it.qty} gal
-                        </Text>
-                      </View>
+                      <AppBadge tone="success">{it.qty} gal</AppBadge>
                     </View>
                   </View>
                 ))
@@ -981,7 +1602,553 @@ export default function DashboardScreen({
         <DashboardGreeting isAdmin={isAdmin} userName={userName} />
       )}
 
-      {/* Stats Cards */}
+      {/* Quick actions — mobile only (sidebar covers this on desktop) */}
+      {isMobileLayout &&
+        (onOpenInventory ||
+        onOpenMaterialUsage ||
+        onOpenWasteTracking ||
+        onOpenCheckInOut) && (
+        <View style={styles.quickActionsBlock}>
+          <Text
+            style={[
+              styles.sectionEyebrow,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Quick actions
+          </Text>
+          <View style={styles.quickActionsRow}>
+            {showCheckInOutNav && onOpenCheckInOut ? (
+              <Pressable
+                onPress={onOpenCheckInOut}
+                style={[styles.quickAction, surfaceCardStyle]}
+                accessibilityRole="button"
+                accessibilityLabel="Check in or out"
+              >
+                <Icon
+                  source="keyboard"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  In/Out
+                </Text>
+              </Pressable>
+            ) : null}
+            {onOpenInventory ? (
+              <Pressable
+                onPress={onOpenInventory}
+                style={[styles.quickAction, surfaceCardStyle]}
+                accessibilityRole="button"
+                accessibilityLabel="Inventory"
+              >
+                <Icon
+                  source="format-list-bulleted"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Inventory
+                </Text>
+              </Pressable>
+            ) : null}
+            {onOpenMaterialUsage ? (
+              <Pressable
+                onPress={onOpenMaterialUsage}
+                style={[styles.quickAction, surfaceCardStyle]}
+                accessibilityRole="button"
+                accessibilityLabel="Material usage"
+              >
+                <Icon
+                  source="chart-box"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Usage
+                </Text>
+              </Pressable>
+            ) : null}
+            {onOpenWasteTracking ? (
+              <Pressable
+                onPress={onOpenWasteTracking}
+                style={[styles.quickAction, surfaceCardStyle]}
+                accessibilityRole="button"
+                accessibilityLabel="Waste tracking"
+              >
+                <Icon
+                  source="delete-variant"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Waste
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      )}
+
+      {!isAdmin && myActivityToday ? (
+        <View style={styles.myActivityBlock}>
+          <Text
+            style={[
+              styles.sectionEyebrow,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            My activity today
+          </Text>
+          {isMobileLayout ? (
+            <View style={styles.myActivityGrid}>
+              <View style={styles.myActivityTopRow}>
+                <View
+                  ref={checkedOutCardRef}
+                  collapsable={false}
+                  style={styles.statCardWrap}
+                >
+                  <Pressable
+                    onPress={() =>
+                      openActivityPanel("checkedOut", checkedOutCardRef)
+                    }
+                  >
+                    <Card
+                      style={[
+                        styles.statCard,
+                        styles.statCardCompact,
+                        surfaceCardStyle,
+                      ]}
+                      mode="outlined"
+                    >
+                      <Card.Content style={styles.statCardContent}>
+                        <Text
+                          style={[
+                            styles.statLabel,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Checked out
+                        </Text>
+                        <Title
+                          style={[
+                            styles.statValue,
+                            { color: colors.action.checkOut },
+                          ]}
+                        >
+                          {myActivityToday.checkedOut}
+                          <Text
+                            style={[
+                              styles.statValueUnit,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {" "}
+                            gal
+                          </Text>
+                        </Title>
+                      </Card.Content>
+                    </Card>
+                  </Pressable>
+                </View>
+                <View
+                  ref={checkedInCardRef}
+                  collapsable={false}
+                  style={styles.statCardWrap}
+                >
+                  <Pressable
+                    onPress={() =>
+                      openActivityPanel("checkedIn", checkedInCardRef)
+                    }
+                  >
+                    <Card
+                      style={[
+                        styles.statCard,
+                        styles.statCardCompact,
+                        surfaceCardStyle,
+                      ]}
+                      mode="outlined"
+                    >
+                      <Card.Content style={styles.statCardContent}>
+                        <Text
+                          style={[
+                            styles.statLabel,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Checked in
+                        </Text>
+                        <Title
+                          style={[
+                            styles.statValue,
+                            { color: colors.action.checkIn },
+                          ]}
+                        >
+                          {myActivityToday.checkedIn}
+                          <Text
+                            style={[
+                              styles.statValueUnit,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            {" "}
+                            gal
+                          </Text>
+                        </Title>
+                      </Card.Content>
+                    </Card>
+                  </Pressable>
+                </View>
+              </View>
+              <View
+                ref={actionsCardRef}
+                collapsable={false}
+                style={styles.myActivityActionsWrap}
+              >
+                <Pressable
+                  onPress={() => openActivityPanel("actions", actionsCardRef)}
+                >
+                  <Card
+                    style={[
+                      styles.statCard,
+                      styles.statCardCompact,
+                      surfaceCardStyle,
+                    ]}
+                    mode="outlined"
+                  >
+                    <Card.Content style={styles.statCardContent}>
+                      <Text
+                        style={[
+                          styles.statLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Actions
+                      </Text>
+                      <Title
+                        style={[
+                          styles.statValue,
+                          { color: theme.colors.primary },
+                        ]}
+                      >
+                        {myActivityToday.actions}
+                      </Title>
+                      {myActivityToday.lastLabel ? (
+                        <Text
+                          style={[
+                            styles.statSubtext,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Last at {myActivityToday.lastLabel}
+                        </Text>
+                      ) : (
+                        <Text
+                          style={[
+                            styles.statSubtext,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          No activity yet
+                        </Text>
+                      )}
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.statsRow}>
+              <View
+                ref={checkedOutCardRef}
+                collapsable={false}
+                style={styles.statCardWrap}
+              >
+                <Pressable
+                  onPress={() =>
+                    openActivityPanel("checkedOut", checkedOutCardRef)
+                  }
+                >
+                  <Card
+                    style={[styles.statCard, surfaceCardStyle]}
+                    mode="outlined"
+                  >
+                    <Card.Content style={styles.statCardContent}>
+                      <Text
+                        style={[
+                          styles.statLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Checked out
+                      </Text>
+                      <Title
+                        style={[
+                          styles.statValue,
+                          { color: colors.action.checkOut },
+                        ]}
+                      >
+                        {myActivityToday.checkedOut}
+                        <Text
+                          style={[
+                            styles.statValueUnit,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          {" "}
+                          gal
+                        </Text>
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              </View>
+              <View
+                ref={checkedInCardRef}
+                collapsable={false}
+                style={styles.statCardWrap}
+              >
+                <Pressable
+                  onPress={() =>
+                    openActivityPanel("checkedIn", checkedInCardRef)
+                  }
+                >
+                  <Card
+                    style={[styles.statCard, surfaceCardStyle]}
+                    mode="outlined"
+                  >
+                    <Card.Content style={styles.statCardContent}>
+                      <Text
+                        style={[
+                          styles.statLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Checked in
+                      </Text>
+                      <Title
+                        style={[
+                          styles.statValue,
+                          { color: colors.action.checkIn },
+                        ]}
+                      >
+                        {myActivityToday.checkedIn}
+                        <Text
+                          style={[
+                            styles.statValueUnit,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          {" "}
+                          gal
+                        </Text>
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              </View>
+              <View
+                ref={actionsCardRef}
+                collapsable={false}
+                style={styles.statCardWrap}
+              >
+                <Pressable
+                  onPress={() => openActivityPanel("actions", actionsCardRef)}
+                >
+                  <Card
+                    style={[styles.statCard, surfaceCardStyle]}
+                    mode="outlined"
+                  >
+                    <Card.Content style={styles.statCardContent}>
+                      <Text
+                        style={[
+                          styles.statLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Actions
+                      </Text>
+                      <Title
+                        style={[
+                          styles.statValue,
+                          { color: theme.colors.primary },
+                        ]}
+                      >
+                        {myActivityToday.actions}
+                      </Title>
+                      {myActivityToday.lastLabel ? (
+                        <Text
+                          style={[
+                            styles.statSubtext,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          Last at {myActivityToday.lastLabel}
+                        </Text>
+                      ) : (
+                        <Text
+                          style={[
+                            styles.statSubtext,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          No activity yet
+                        </Text>
+                      )}
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              </View>
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {!isAdmin && (lowStockCount > 0 || recycleDueCount > 0) ? (
+        <View style={styles.attentionBlock}>
+          <Text
+            style={[
+              styles.sectionEyebrow,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Needs attention
+          </Text>
+          <View style={styles.attentionRow}>
+            {lowStockCount > 0 ? (
+              <View ref={lowStockChipRef} collapsable={false} style={{ flexGrow: 1 }}>
+                <Pressable
+                  onPress={() =>
+                    openAttentionPanel("lowStock", lowStockChipRef)
+                  }
+                  style={[styles.attentionChip, surfaceCardStyle]}
+                >
+                  <Text
+                    style={[
+                      styles.attentionValue,
+                      { color: colors.semantic.lowStockValue },
+                    ]}
+                  >
+                    {lowStockCount}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.attentionLabel,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    Low stock
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+            {recycleDueCount > 0 ? (
+              <View ref={recycleChipRef} collapsable={false} style={{ flexGrow: 1 }}>
+                <Pressable
+                  onPress={() =>
+                    openAttentionPanel("recycle", recycleChipRef)
+                  }
+                  style={[styles.attentionChip, surfaceCardStyle]}
+                >
+                  <Text
+                    style={[
+                      styles.attentionValue,
+                      { color: colors.semantic.recycleBannerText },
+                    ]}
+                  >
+                    {recycleDueCount}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.attentionLabel,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    Recycle due
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {!isAdmin && myRecentColors.length > 0 ? (
+        <View style={styles.recentColorsBlock}>
+          <Text
+            style={[
+              styles.sectionEyebrow,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Colors you used (7 days)
+          </Text>
+          <View style={styles.recentColorsRow}>
+            {myRecentColors.map((c) => (
+              <View
+                key={c.itemId}
+                style={[styles.recentColorChip, surfaceCardStyle]}
+              >
+                <View
+                  style={[
+                    styles.recentSwatch,
+                    {
+                      backgroundColor: c.hex || theme.colors.outlineVariant,
+                      borderColor: theme.colors.outlineVariant,
+                    },
+                  ]}
+                />
+                <View style={styles.recentColorText}>
+                  <Text
+                    style={[
+                      styles.recentColorName,
+                      { color: theme.colors.onSurface },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {c.name}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.recentColorGal,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {c.gal} gal
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Stats Cards — desktop / wide only */}
+      {!isMobileLayout ? (
       <View style={styles.statsRow}>
         {isAdmin && (
           <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
@@ -1204,7 +2371,7 @@ export default function DashboardScreen({
               >
                 Paint Need to Recycle
               </Text>
-              <Title style={[styles.statValue, { color: "#e65100" }]}>
+              <Title style={[styles.statValue, { color: colors.semantic.recycleBannerText }]}>
                 {recycleDueCount}
               </Title>
               <Text
@@ -1272,14 +2439,115 @@ export default function DashboardScreen({
           </Card>
         )}
       </View>
+      ) : null}
 
-      {showTransactionTable && (
+      {showBriefRecent ? (
+        <View style={styles.briefHistoryBlock}>
+          <Text
+            style={[
+              styles.sectionEyebrow,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Recent activity
+          </Text>
+          {!auditLogsLoaded ? (
+            <View style={styles.statLoadingRow}>
+              <ActivityIndicator size="small" />
+              <Text style={styles.statLoadingLabel}>Loading…</Text>
+            </View>
+          ) : briefRecentLogs.length === 0 ? (
+            <Text
+              style={[
+                styles.briefHistoryEmpty,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              No recent transactions.
+            </Text>
+          ) : (
+            <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
+              {briefRecentLogs.map((log, index) => {
+                const accent = getActionColor(log.action, log.details);
+                const time = log.timestamp
+                  ? new Date(log.timestamp).toLocaleString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "—";
+                const user = getDisplayUserName(log);
+                const actionLabel = formatBriefVerb(log);
+                const qty = logQtyAbs(log);
+                const colorName = getItemName(log.itemId);
+                return (
+                  <View
+                    key={`${log.timestamp}-${log.itemId}-${index}`}
+                    style={[
+                      styles.briefHistoryRow,
+                      index > 0 && {
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.briefHistoryAccent,
+                        { backgroundColor: accent },
+                      ]}
+                    />
+                    <View style={styles.briefHistoryBody}>
+                      <View style={styles.briefHistoryTop}>
+                        <Text
+                          style={[
+                            styles.briefHistoryTime,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {time}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.briefHistoryUser,
+                            { color: theme.colors.onSurface },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {user}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.briefHistorySummary,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        <Text style={{ color: accent, fontWeight: "700" }}>
+                          {actionLabel}
+                        </Text>
+                        {qty > 0 ? ` ${qty} gal ` : " "}
+                        <Text style={{ fontWeight: "700" }}>{colorName}</Text>
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {showFullHistoryTable ? (
         <>
           {/* Transaction History */}
           <Card
             style={[
               styles.historyCard,
-              isWeb && styles.historyCardWeb,
+              styles.historyCardWeb,
               surfaceCardStyle,
             ]}
             mode="outlined"
@@ -1287,7 +2555,7 @@ export default function DashboardScreen({
             <Card.Content
               style={[
                 styles.historyCardContent,
-                isWeb && styles.historyCardContentWeb,
+                styles.historyCardContentWeb,
               ]}
             >
               <View style={styles.historyHeader}>
@@ -1379,8 +2647,8 @@ export default function DashboardScreen({
                   </Text>
                 </View>
               ) : visibleHistoryLogs.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No transactions found</Text>
+                <View>
+                  <AppEmptyState title="No transactions found" />
                   {isAdmin && hasMoreHistory ? (
                     <Pressable
                       onPress={() => setHistoryWeeksShown((w) => w + 2)}
@@ -1400,10 +2668,10 @@ export default function DashboardScreen({
                 </View>
               ) : (
                 <ScrollFrame
-                  fill={!!isWeb}
-                  maxHeight={isWeb ? undefined : 520}
+                  fill
+                  maxHeight={undefined}
                   contentContainerStyle={styles.tableScrollOuterContent}
-                  style={isWeb ? styles.tableScrollOuterWeb : undefined}
+                  style={styles.tableScrollOuterWeb}
                 >
                   <ScrollView
                     horizontal
@@ -1505,7 +2773,9 @@ export default function DashboardScreen({
                                         styles.userText,
                                         styles.clickableText,
                                         {
-                                          color: theme.dark ? "#fff" : "#666",
+                                          color: theme.dark
+                                            ? "#fff"
+                                            : mutedTextColor(theme),
                                         },
                                       ]}
                                     >
@@ -1516,7 +2786,11 @@ export default function DashboardScreen({
                                   <Text
                                     style={[
                                       styles.userText,
-                                      { color: theme.dark ? "#fff" : "#666" },
+                                      {
+                                        color: theme.dark
+                                          ? "#fff"
+                                          : mutedTextColor(theme),
+                                      },
                                     ]}
                                   >
                                     {getDisplayUserName(log)}
@@ -1537,8 +2811,10 @@ export default function DashboardScreen({
                                 <Chip
                                   style={{
                                     backgroundColor:
-                                      getActionColor(log.action, log.details) +
-                                      "20",
+                                      getActionColor(
+                                        log.action,
+                                        log.details,
+                                      ) + "20",
                                   }}
                                   textStyle={{
                                     color: getActionColor(
@@ -1622,12 +2898,12 @@ export default function DashboardScreen({
             </Card.Content>
           </Card>
         </>
-      )}
+      ) : null}
     </View>
   );
 
   if (isWeb) {
-    if (!showTransactionTable) {
+    if (!showFullHistoryTable) {
       return (
         <ScrollView
           style={[
@@ -1655,20 +2931,13 @@ export default function DashboardScreen({
     );
   }
 
+  // Native mobile: non-scrolling shell layout (history scrolls inside)
   return (
-    <ScrollView
+    <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
-      contentContainerStyle={styles.scrollContent}
-      refreshControl={
-        <RefreshControl
-          refreshing={isRefreshing}
-          onRefresh={onRefresh}
-          tintColor={theme.colors.primary}
-        />
-      }
     >
-      {content}
-    </ScrollView>
+      <View style={styles.scrollContent}>{content}</View>
+    </View>
   );
 }
 
@@ -1706,10 +2975,283 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
+  myActivityStatsRow: {
+    flexWrap: "nowrap",
+    gap: 8,
+    alignItems: "stretch",
+  },
+  myActivityGrid: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  myActivityTopRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 8,
+  },
+  myActivityActionsWrap: {
+    width: "100%",
+  },
+  sectionEyebrow: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: space[2],
+  },
+  quickActionsBlock: {
+    marginBottom: space[4],
+  },
+  quickActionsRow: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    gap: space[1],
+    alignItems: "stretch",
+  },
+  quickAction: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  quickActionLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  myActivityBlock: {
+    marginBottom: space[2],
+  },
+  attentionBlock: {
+    marginBottom: space[5],
+  },
+  attentionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: space[2],
+  },
+  attentionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[2],
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    minWidth: 140,
+  },
+  attentionPopupRoot: {
+    flex: 1,
+  },
+  attentionPopupBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.28)",
+  },
+  attentionPopupAnchor: {
+    position: "absolute",
+  },
+  attentionPopupCaret: {
+    position: "absolute",
+    top: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderBottomWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 2,
+  },
+  attentionPopupCaretInner: {
+    position: "absolute",
+    top: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  attentionPopupCaretDown: {
+    position: "absolute",
+    bottom: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderTopWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 2,
+  },
+  attentionPopupCaretDownInner: {
+    position: "absolute",
+    bottom: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  attentionPopupPanel: {
+    borderRadius: 10,
+    borderWidth: 1,
+    width: "100%",
+    overflow: "hidden",
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    ...(Platform.OS === "web"
+      ? {
+          boxSizing: "border-box",
+          boxShadow: "0px 8px 24px rgba(0,0,0,0.28)",
+        }
+      : {
+          elevation: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+        }),
+  },
+  attentionPopupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+    marginRight: -4,
+  },
+  attentionPopupClose: {
+    margin: 0,
+  },
+  attentionPopupTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    flex: 1,
+    paddingRight: 8,
+  },
+  attentionPopupHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 10,
+    paddingRight: 8,
+  },
+  attentionPopupList: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+  },
+  attentionPopupDivider: {
+    marginVertical: 2,
+    marginHorizontal: 6,
+  },
+  attentionPopupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  attentionPopupPill: {
+    minWidth: 32,
+    height: 32,
+    paddingHorizontal: 6,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  attentionPopupPillText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  attentionPopupRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  attentionPopupRowTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  attentionPopupRowDetail: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  attentionPopupActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 12,
+  },
+  attentionValue: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+  attentionLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  recentColorsBlock: {
+    marginBottom: space[5],
+  },
+  recentColorsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: space[2],
+  },
+  recentColorChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[2],
+    paddingVertical: space[2],
+    paddingHorizontal: space[3],
+    borderRadius: radius.md,
+    borderWidth: 1,
+    maxWidth: 220,
+    minWidth: 140,
+    flexGrow: 1,
+  },
+  recentSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  recentColorText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recentColorName: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  recentColorGal: {
+    fontSize: 11,
+  },
   statCard: {
     flex: 1,
     minWidth: 180,
     borderRadius: 12,
+  },
+  statCardCompact: {
+    minWidth: 0,
+    width: "100%",
+  },
+  statCardWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   statCardContent: {
     paddingVertical: 10,
@@ -1728,7 +3270,7 @@ const styles = StyleSheet.create({
   },
   statLoadingLabel: {
     fontSize: 14,
-    color: "#888",
+    color: colors.dark.textDim,
   },
   statValue: {
     fontSize: 24,
@@ -1802,7 +3344,7 @@ const styles = StyleSheet.create({
   },
   modalRowMeta: {
     fontSize: 12,
-    fontFamily: Platform.OS === "web" ? "monospace" : "monospace",
+    fontFamily: fontFamily.mono,
     marginTop: 2,
   },
   modalRowBottom: {
@@ -1819,22 +3361,63 @@ const styles = StyleSheet.create({
   modalRowSubStrong: {
     fontWeight: "800",
   },
-  modalBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    flexShrink: 0,
-  },
-  modalBadgeText: {
-    fontSize: 12,
-    fontWeight: "800",
-  },
   staleDaysInline: {
     fontSize: 16,
     fontWeight: "bold",
   },
   historyCard: {
     borderRadius: 12,
+  },
+  briefHistoryBlock: {
+    marginBottom: space[5],
+  },
+  briefHistoryEmpty: {
+    fontSize: 13,
+    paddingVertical: space[2],
+  },
+  briefHistoryCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  briefHistoryRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    paddingVertical: 12,
+    paddingRight: 14,
+    paddingLeft: 0,
+    gap: 0,
+  },
+  briefHistoryAccent: {
+    width: 4,
+    marginRight: 12,
+    borderRadius: 2,
+    alignSelf: "stretch",
+  },
+  briefHistoryBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  briefHistoryTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  briefHistoryTime: {
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  briefHistoryUser: {
+    fontSize: 12,
+    fontWeight: "700",
+    flexShrink: 0,
+  },
+  briefHistorySummary: {
+    fontSize: 14,
+    fontWeight: "500",
+    lineHeight: 20,
   },
   showMoreHistoryLink: {
     paddingVertical: 14,
@@ -1889,15 +3472,11 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: "center",
   },
-  emptyText: {
-    color: "#999",
-    fontSize: 14,
-  },
   transactionsLoadingSpinner: {
     marginBottom: 8,
   },
   transactionsLoadingText: {
-    color: "#888",
+    color: colors.dark.textDim,
     fontSize: 14,
   },
   tableScrollOuterWeb: {
@@ -1943,7 +3522,7 @@ const styles = StyleSheet.create({
   dayDividerText: {
     fontSize: 13,
     fontWeight: "800",
-    color: "#c0c4cc",
+    color: colors.dark.textDim,
     marginRight: 12,
   },
   dayDividerLine: {
@@ -1987,7 +3566,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 12,
-    color: "#666",
+    color: colors.light.textMuted,
   },
   itemNameText: {
     fontSize: 13,

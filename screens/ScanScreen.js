@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, StyleSheet, ActivityIndicator } from "react-native";
 import { Text, Button, Card, useTheme } from "react-native-paper";
 import NFCService from "../services/nfcService";
+import { colors, space } from "../theme/tokens";
 
 export default function ScanScreen({ onScanResult, onCancel }) {
   const theme = useTheme();
@@ -47,13 +48,15 @@ export default function ScanScreen({ onScanResult, onCancel }) {
         <Card.Content style={styles.content}>
           <View style={styles.iconContainer}>
             {scanning ? (
-              <ActivityIndicator size="large" color="#6f95ab" />
+              <ActivityIndicator size="large" color={colors.brand.primary} />
             ) : (
               <Text style={styles.icon}>📱</Text>
             )}
           </View>
 
-          <Text style={styles.message}>{message}</Text>
+          <Text style={[styles.message, { color: theme.colors.onSurface }]}>
+            {message}
+          </Text>
 
           {!scanning && (
             <Button
@@ -78,15 +81,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: "center",
-    padding: 20,
-    backgroundColor: "#f5f5f5",
+    padding: space[8],
+    backgroundColor: colors.light.background,
   },
   card: {
     elevation: 4,
   },
   content: {
     alignItems: "center",
-    paddingVertical: 40,
+    paddingVertical: space[10],
   },
   iconContainer: {
     marginBottom: 30,
@@ -101,7 +104,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: "center",
     marginBottom: 30,
-    color: "#333",
   },
   button: {
     marginTop: 10,

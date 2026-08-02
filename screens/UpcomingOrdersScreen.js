@@ -39,6 +39,27 @@ import {
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
 import ScrollFrame from "../components/ScrollFrame";
+import { colors, space, radius } from "../theme/tokens";
+import { AppBadge, AppEmptyState } from "../components/ui";
+
+const LINE_RECEIVE_HIGHLIGHT = {
+  complete: {
+    soft: "rgba(46,125,50,0.14)",
+    accent: colors.semantic.success,
+  },
+  partial: {
+    soft: "rgba(249,168,37,0.16)",
+    accent: colors.semantic.partial,
+  },
+};
+
+function lineReceiveHighlight(line) {
+  const ordered = lineGallonQty(line, "ordered");
+  const received = lineGallonQty(line, "received");
+  if (ordered > 0 && received >= ordered) return LINE_RECEIVE_HIGHLIGHT.complete;
+  if (received > 0 && received < ordered) return LINE_RECEIVE_HIGHLIGHT.partial;
+  return null;
+}
 
 function lineGallonQty(line, field = "ordered") {
   const raw =
@@ -59,11 +80,17 @@ function isCustomColorInventoryItem(invItem) {
 // Filter button colors (match order badge colors)
 const FILTER_COLORS = {
   all: null,
-  existing: "#1976d2",
-  back_orders: "#e65100",
-  late_orders: "#c62828",
-  completed: "#2e7d32",
+  existing: colors.semantic.open,
+  back_orders: colors.semantic.recycleBannerText,
+  late_orders: colors.semantic.recycleDueDate,
+  completed: colors.semantic.success,
 };
+
+function categoryBadgeTone(label) {
+  if (label === "AP") return "warning";
+  if (label === "MIXING") return "info";
+  return "default";
+}
 
 /** PO card labels use per-item AP / mixing flags (Item Details), with legacy fallback to material type. */
 function getOrderCategoryLabel(order, inventory) {
@@ -197,12 +224,19 @@ function isExistingOrder(order) {
   return lines.every((l) => lineGallonQty(l, "received") === 0);
 }
 
-/** ETA = placed_at + lead_time_days. Used for sorting (earliest first). */
-function getExpectedTime(order) {
+/** Placed date ms for sorting (most recent first). */
+function getPlacedTime(order) {
   const placed = placedAtToDate(order.placed_at);
   if (!placed || Number.isNaN(placed.getTime())) return null;
-  const expected = expectedDate(order.placed_at, order.lead_time_days);
-  return expected ? expected.getTime() : null;
+  return placed.getTime();
+}
+
+/** Compare POs: most recently placed first; higher id wins ties. */
+function compareOrdersMostRecentFirst(a, b) {
+  const placedA = getPlacedTime(a) ?? 0;
+  const placedB = getPlacedTime(b) ?? 0;
+  if (placedB !== placedA) return placedB - placedA;
+  return (Number(b.id) || 0) - (Number(a.id) || 0);
 }
 
 /**
@@ -633,17 +667,13 @@ export default function UpcomingOrdersScreen({
     return `${poPart} · ${formatTotalsByType(totalsByType)}`;
   };
 
-  /** All POs sorted by ETA ascending: earliest ETA at top, latest at bottom. Search filter applied. */
+  /** All POs sorted most recent placed_at first. Search filter applied. */
   const ordersSortedByEta = useMemo(() => {
     const list = dateViewMode != null ? orders || [] : filteredOrders;
     const afterSearch = list.filter((o) =>
       orderMatchesSearch(o, poSearchQuery, inventory),
     );
-    return [...afterSearch].sort((a, b) => {
-      const etaA = getExpectedTime(a) ?? Number.MAX_SAFE_INTEGER;
-      const etaB = getExpectedTime(b) ?? Number.MAX_SAFE_INTEGER;
-      return etaA - etaB;
-    });
+    return [...afterSearch].sort(compareOrdersMostRecentFirst);
   }, [dateViewMode, orders, filteredOrders, poSearchQuery, inventory]);
 
   const groupedByWeek = useMemo(() => {
@@ -663,9 +693,7 @@ export default function UpcomingOrdersScreen({
       .map(([_, v]) => v)
       .sort((a, b) => b.weekStart.getTime() - a.weekStart.getTime());
     arr.forEach((g) => {
-      g.orders.sort(
-        (a, b) => (getExpectedTime(a) ?? 0) - (getExpectedTime(b) ?? 0),
-      );
+      g.orders.sort(compareOrdersMostRecentFirst);
       g.totalsByType = getTotalsByType(g.orders);
     });
     return arr;
@@ -690,9 +718,7 @@ export default function UpcomingOrdersScreen({
       .map(([_, v]) => v)
       .sort((a, b) => b.monthStart.getTime() - a.monthStart.getTime());
     arr.forEach((g) => {
-      g.orders.sort(
-        (a, b) => (getExpectedTime(a) ?? 0) - (getExpectedTime(b) ?? 0),
-      );
+      g.orders.sort(compareOrdersMostRecentFirst);
       g.totalsByType = getTotalsByType(g.orders);
     });
     return arr;
@@ -740,24 +766,9 @@ export default function UpcomingOrdersScreen({
                     : "No PO Yet"}
                 </Text>
                 {categoryLabel != null && (
-                  <View
-                    style={[
-                      styles.categoryBadge,
-                      {
-                        backgroundColor:
-                          theme.colors.surfaceContainerHighest,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.categoryBadgeText,
-                        { color: theme.colors.onSurfaceVariant || "#555" },
-                      ]}
-                    >
-                      {categoryLabel}
-                    </Text>
-                  </View>
+                  <AppBadge tone={categoryBadgeTone(categoryLabel)}>
+                    {categoryLabel}
+                  </AppBadge>
                 )}
               </View>
               <View style={styles.orderMetaBlock}>
@@ -796,33 +807,13 @@ export default function UpcomingOrdersScreen({
             </View>
             <View style={styles.orderBadgeRow}>
               {!isOpen ? (
-                <View style={styles.orderBadge}>
-                  <Text style={[styles.badgeText, { color: "#2e7d32" }]}>
-                    Received
-                  </Text>
-                </View>
+                <AppBadge tone="success">Received</AppBadge>
               ) : (
                 <>
-                  <View style={styles.orderBadge}>
-                    <Text style={[styles.badgeText, { color: "#1976d2" }]}>
-                      Open
-                    </Text>
-                  </View>
-                  {orderIsLate && (
-                    <View style={[styles.orderBadge, styles.orderBadgeLate]}>
-                      <Text style={[styles.badgeText, { color: "#c62828" }]}>
-                        Late
-                      </Text>
-                    </View>
-                  )}
+                  <AppBadge tone="primary">Open</AppBadge>
+                  {orderIsLate && <AppBadge tone="late">Late</AppBadge>}
                   {orderIsBackOrder && (
-                    <View
-                      style={[styles.orderBadge, styles.orderBadgeBackOrder]}
-                    >
-                      <Text style={[styles.badgeText, { color: "#e65100" }]}>
-                        Back ordered
-                      </Text>
-                    </View>
+                    <AppBadge tone="backOrder">Back ordered</AppBadge>
                   )}
                 </>
               )}
@@ -833,6 +824,7 @@ export default function UpcomingOrdersScreen({
               {(order.lines || []).map((line, idx) => {
                 const received = lineGallonQty(line, "received");
                 const ordered = lineGallonQty(line, "ordered");
+                const highlight = lineReceiveHighlight(line);
                 const lineReceivedDate = formatReceivedDate(line);
                 const showLineDate = !singleReceivedDate && lineReceivedDate;
                 return (
@@ -841,8 +833,16 @@ export default function UpcomingOrdersScreen({
                     style={[
                       styles.lineItem,
                       {
-                        backgroundColor: nestedSurfaceColor(theme),
-                        borderColor: theme.colors.outlineVariant,
+                        backgroundColor: highlight
+                          ? highlight.soft
+                          : nestedSurfaceColor(theme),
+                        borderColor: highlight
+                          ? highlight.accent
+                          : theme.colors.outlineVariant,
+                        borderLeftWidth: highlight ? 3 : 1,
+                        borderLeftColor: highlight
+                          ? highlight.accent
+                          : theme.colors.outlineVariant,
                       },
                     ]}
                   >
@@ -883,7 +883,12 @@ export default function UpcomingOrdersScreen({
                     <Text
                       style={[
                         styles.lineItemQty,
-                        { color: theme.colors.onSurfaceVariant },
+                        {
+                          color: highlight
+                            ? highlight.accent
+                            : theme.colors.onSurfaceVariant,
+                          fontWeight: highlight ? "700" : "400",
+                        },
                       ]}
                     >
                       {received > 0 ? `${received}/${ordered}` : ordered} gal
@@ -1067,7 +1072,7 @@ export default function UpcomingOrdersScreen({
   };
 
   const bgColor = theme?.colors?.background ?? "#fff";
-  const primaryColor = theme?.colors?.primary ?? "#6f95ab";
+  const primaryColor = theme?.colors?.primary ?? colors.brand.primary;
 
   const dateViewLocksFilters =
     dateViewMode === "week" || dateViewMode === "month";
@@ -1306,14 +1311,10 @@ export default function UpcomingOrdersScreen({
                           >
                               {getFilteredInventory(line.searchQuery).length ===
                               0 ? (
-                                <Text
-                                  style={[
-                                    styles.dropdownItem,
-                                    { color: theme.colors.onSurfaceVariant },
-                                  ]}
-                                >
-                                  No matches
-                                </Text>
+                                <AppEmptyState
+                                  title="No matches"
+                                  style={styles.dropdownEmpty}
+                                />
                               ) : (
                                 getFilteredInventory(line.searchQuery).map(
                                   (invItem) => (
@@ -1453,47 +1454,23 @@ export default function UpcomingOrdersScreen({
               const isEmpty = emptyCount === 0;
               const hasSearchFilter = (poSearchQuery || "").trim() !== "";
               if (isEmpty) {
+                let emptyTitle = "No POs on order";
+                if (hasSearchFilter) {
+                  emptyTitle = "No POs match your search.";
+                } else if (dateViewMode === null) {
+                  if (orderFilter === "existing") emptyTitle = "No open POs";
+                  else if (orderFilter === "back_orders")
+                    emptyTitle = "No back orders (partial deliveries).";
+                  else if (orderFilter === "late_orders")
+                    emptyTitle = "No late orders";
+                  else if (orderFilter === "completed")
+                    emptyTitle = "No completed POs yet";
+                }
                 return (
-                  <Card
-                    style={[
-                      styles.card,
-                      { backgroundColor: theme.colors.surface },
-                    ]}
-                  >
-                    <Card.Content>
-                      <Text
-                        style={[
-                          styles.emptyText,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {hasSearchFilter && "No POs match your search."}
-                        {!hasSearchFilter &&
-                          dateViewMode != null &&
-                          "No POs on order"}
-                        {!hasSearchFilter &&
-                          dateViewMode === null &&
-                          orderFilter === "all" &&
-                          "No POs on order"}
-                        {!hasSearchFilter &&
-                          dateViewMode === null &&
-                          orderFilter === "existing" &&
-                          "No open POs"}
-                        {!hasSearchFilter &&
-                          dateViewMode === null &&
-                          orderFilter === "back_orders" &&
-                          "No back orders (partial deliveries)."}
-                        {!hasSearchFilter &&
-                          dateViewMode === null &&
-                          orderFilter === "late_orders" &&
-                          "No late orders"}
-                        {!hasSearchFilter &&
-                          dateViewMode === null &&
-                          orderFilter === "completed" &&
-                          "No completed POs yet"}
-                      </Text>
-                    </Card.Content>
-                  </Card>
+                  <AppEmptyState
+                    title={emptyTitle}
+                    style={styles.emptyState}
+                  />
                 );
               }
               if (dateViewMode === "week") {
@@ -1869,10 +1846,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
   },
-  emptyText: {
-    textAlign: "center",
-    fontSize: 15,
-    lineHeight: 22,
+  emptyState: {
+    flex: 0,
+    paddingVertical: space[10],
+  },
+  dropdownEmpty: {
+    flex: 0,
+    paddingVertical: space[4],
+    paddingHorizontal: space[4],
   },
   dateViewLabel: {
     fontSize: 13,
@@ -1896,12 +1877,12 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   dateGroupHeader: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 8,
+    paddingVertical: space[4],
+    paddingHorizontal: space[6],
+    marginBottom: space[4],
+    borderRadius: radius.md,
     borderLeftWidth: 4,
-    borderLeftColor: "#1976d2",
+    borderLeftColor: colors.semantic.open,
   },
   dateGroupTitle: {
     fontSize: 16,
@@ -1957,15 +1938,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
   },
-  categoryBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  categoryBadgeText: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
   orderMetaBlock: {
     marginBottom: 4,
   },
@@ -1983,22 +1955,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flexShrink: 0,
     justifyContent: "flex-end",
-  },
-  orderBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    backgroundColor: "rgba(0,0,0,0.06)",
-  },
-  orderBadgeLate: {
-    backgroundColor: "rgba(198, 40, 40, 0.12)",
-  },
-  orderBadgeBackOrder: {
-    backgroundColor: "rgba(230, 81, 0, 0.12)",
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: "600",
   },
   linesList: {
     marginBottom: 12,
@@ -2038,15 +1994,15 @@ const styles = StyleSheet.create({
   },
   receivedModalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.semantic.scrim,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: space[9],
   },
   receivedModalBox: {
     width: "100%",
     maxWidth: 420,
-    borderRadius: 12,
+    borderRadius: radius.lg,
     padding: 20,
     maxHeight: "85%",
   },

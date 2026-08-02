@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Platform } from "react-native";
+import { Animated, Platform, View } from "react-native";
 
 const useNative = Platform.OS !== "web";
 
@@ -44,7 +44,7 @@ export default function FadeIn({
   }, [disabled, delay, duration, fromY, opacity, translateY]);
 
   if (disabled) {
-    return children;
+    return style ? <View style={style}>{children}</View> : children;
   }
 
   return (

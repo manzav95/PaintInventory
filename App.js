@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, MD3LightTheme, MD3DarkTheme, ActivityIndicator, Text, Button } from 'react-native-paper';
+import { Provider as PaperProvider, ActivityIndicator, Text, Button } from 'react-native-paper';
 import {
   normalizeItemIdQuery,
   resolveBestInventoryMatch,
@@ -10,7 +10,9 @@ import {
 import showAlert from './utils/showAlert';
 import showToast from './utils/showToast';
 import { injectWebMotionStyles } from './utils/injectWebMotionStyles';
+import { injectWebFonts } from './utils/injectWebFonts';
 import ScreenTransition from './components/ScreenTransition';
+import KeepAlivePane from './components/KeepAlivePane';
 import FadeOverlay from './components/FadeOverlay';
 import FadeIn from './components/FadeIn';
 import ToastHost from './components/ToastHost';
@@ -22,7 +24,6 @@ import { enqueueQuantityAction, syncPendingQuantity } from './utils/offlineQueue
 import OrderService from './services/orderService';
 import MaterialUsageService from './services/materialUsageService';
 import config from './config';
-import HomeScreen from './screens/HomeScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import QRScanScreen from './screens/QRScanScreen';
@@ -40,12 +41,10 @@ import WasteTrackingScreen from './screens/WasteTrackingScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import AppShell from './components/AppShell';
 import AppSidebar from './components/AppSidebar';
-import { useAppLayout, shouldUseShell } from './utils/layout';
-import {
-  DARK_SITE_BACKGROUND,
-  DARK_SURFACE_ELEVATED,
-  DARK_BORDER,
-} from './utils/themeColors';
+import NotificationsBell from './components/NotificationsBell';
+import { useAppLayout, shouldUseShell, getScreenTitle } from './utils/layout';
+import { lightTheme, darkTheme } from './theme/createAppTheme';
+import { colors } from './theme/tokens';
 import {
   recordUserActivity,
   getLastUserActivity,
@@ -56,69 +55,8 @@ import {
 import useIdleLogout from './utils/useIdleLogout';
 import LoginLogService from './services/loginLogService';
 
-const NEUTRAL_LIGHT = {
-  bg: '#f0f0f0',
-  elevated: '#fafafa',
-  elevatedHigh: '#ffffff',
-  border: '#d0d0d0',
-};
-
-const lightTheme = {
-  ...MD3LightTheme,
-  // MD3 Button radius = roundness * 5 (default 4 → 20 pill). Soft rectangular corners.
-  roundness: 2,
-  colors: {
-    ...MD3LightTheme.colors,
-    primary: '#6f95ab',
-    primaryContainer: '#d4e3eb',
-    onPrimaryContainer: '#1a3a4a',
-    background: NEUTRAL_LIGHT.bg,
-    surface: NEUTRAL_LIGHT.bg,
-    surfaceVariant: NEUTRAL_LIGHT.elevated,
-    surfaceContainer: NEUTRAL_LIGHT.elevated,
-    surfaceContainerHigh: NEUTRAL_LIGHT.elevated,
-    surfaceContainerHighest: NEUTRAL_LIGHT.elevatedHigh,
-    outlineVariant: NEUTRAL_LIGHT.border,
-    elevation: {
-      level0: NEUTRAL_LIGHT.bg,
-      level1: NEUTRAL_LIGHT.elevated,
-      level2: NEUTRAL_LIGHT.elevated,
-      level3: NEUTRAL_LIGHT.elevatedHigh,
-      level4: NEUTRAL_LIGHT.elevatedHigh,
-      level5: NEUTRAL_LIGHT.elevatedHigh,
-    },
-  },
-};
-
-const darkTheme = {
-  ...MD3DarkTheme,
-  roundness: 2,
-  colors: {
-    ...MD3DarkTheme.colors,
-    primary: '#6f95ab',
-    primaryContainer: '#3d5058',
-    onPrimaryContainer: '#d0e4ed',
-    secondaryContainer: DARK_SURFACE_ELEVATED,
-    onSecondaryContainer: '#e8e8e8',
-    background: DARK_SITE_BACKGROUND,
-    surface: DARK_SITE_BACKGROUND,
-    surfaceVariant: DARK_SURFACE_ELEVATED,
-    surfaceContainer: DARK_SURFACE_ELEVATED,
-    surfaceContainerHigh: DARK_SURFACE_ELEVATED,
-    surfaceContainerHighest: DARK_SURFACE_ELEVATED,
-    surfaceDisabled: DARK_SURFACE_ELEVATED,
-    outline: DARK_BORDER,
-    outlineVariant: DARK_BORDER,
-    elevation: {
-      level0: DARK_SITE_BACKGROUND,
-      level1: DARK_SURFACE_ELEVATED,
-      level2: DARK_SURFACE_ELEVATED,
-      level3: DARK_SURFACE_ELEVATED,
-      level4: DARK_SURFACE_ELEVATED,
-      level5: DARK_SURFACE_ELEVATED,
-    },
-  },
-};
+const AUDIT_LOGS_CACHE_KEY = '@paint_inventory_audit_logs_v1';
+const AUDIT_LOGS_FETCH_LIMIT = 750;
 
 export default function App() {
   const isWeb = Platform.OS === 'web';
@@ -165,12 +103,28 @@ export default function App() {
     bookFilter: 'standard', // 'standard' | 'custom'
     scrollOffset: 0,
   });
+  const [materialUsageVisited, setMaterialUsageVisited] = useState(false);
+  const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
-  const embeddedInShell = shouldUseShell(currentScreen, showPersistentSidebar);
+  const embeddedInShell = shouldUseShell(currentScreen);
+
+  useEffect(() => {
+    if (currentScreen === 'materialUsage') {
+      setMaterialUsageVisited(true);
+    }
+  }, [currentScreen]);
+
+  useEffect(() => {
+    if (showPersistentSidebar) setNavDrawerOpen(false);
+  }, [showPersistentSidebar]);
 
   const navigateTo = (screen, options = {}) => {
+    setNavDrawerOpen(false);
     if (screen === 'reports' && !isAdmin) {
       return;
+    }
+    if (screen === 'materialUsage') {
+      setMaterialUsageVisited(true);
     }
     if (Object.prototype.hasOwnProperty.call(options, 'ordersInitialFilter')) {
       setOrdersInitialFilter(options.ordersInitialFilter);
@@ -178,11 +132,23 @@ export default function App() {
       setOrdersInitialFilter(null);
     }
     if (screen === 'materialUsage' && isWeb && typeof window !== 'undefined') {
-      window.location.hash = '#/material-usage';
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}#/material-usage`,
+      );
     } else if (screen === 'wasteTracking' && isWeb && typeof window !== 'undefined') {
-      window.location.hash = '#/waste-tracking';
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}#/waste-tracking`,
+      );
     } else if (screen === 'reports' && isWeb && typeof window !== 'undefined') {
-      window.location.hash = '#/reports';
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}#/reports`,
+      );
     } else if (
       (screen === 'home' || screen === 'list') &&
       isWeb &&
@@ -219,6 +185,7 @@ export default function App() {
     loadUser();
     loadThemePreference();
     if (Platform.OS === 'web') {
+      injectWebFonts();
       injectWebMotionStyles();
     }
   }, []);
@@ -252,6 +219,7 @@ export default function App() {
       const hash = (window.location.hash || '').replace(/^#/, '') || '/';
       const path = hash.startsWith('/') ? hash : `/${hash}`;
       if (path === '/material-usage' && userName != null) {
+        setMaterialUsageVisited(true);
         setCurrentScreen('materialUsage');
       } else if (path === '/waste-tracking' && userName != null) {
         setCurrentScreen('wasteTracking');
@@ -264,6 +232,7 @@ export default function App() {
       const h = (window.location.hash || '').replace(/^#/, '') || '/';
       const p = h.startsWith('/') ? h : `/${h}`;
       if (p === '/material-usage' && userName != null) {
+        setMaterialUsageVisited(true);
         setCurrentScreen('materialUsage');
       } else if (p === '/waste-tracking' && userName != null) {
         setCurrentScreen('wasteTracking');
@@ -374,6 +343,7 @@ export default function App() {
     setUserName(null);
     setSelectedItem(null);
     setPreviousScreen('home');
+    setMaterialUsageVisited(false);
     setCurrentScreen('login');
   };
 
@@ -385,6 +355,7 @@ export default function App() {
     setUserName(null);
     setSelectedItem(null);
     setPreviousScreen('home');
+    setMaterialUsageVisited(false);
     setCurrentScreen('login');
     Alert.alert(
       'Session ended',
@@ -438,8 +409,12 @@ export default function App() {
     if (!force && auditLogsCache !== null) return;
     setAuditLogsLoading(true);
     try {
-      const logs = await AuditService.list(1000);
-      setAuditLogsCache(Array.isArray(logs) ? logs : []);
+      const logs = await AuditService.list(AUDIT_LOGS_FETCH_LIMIT);
+      const next = Array.isArray(logs) ? logs : [];
+      setAuditLogsCache(next);
+      AsyncStorage.setItem(AUDIT_LOGS_CACHE_KEY, JSON.stringify(next)).catch(
+        () => {},
+      );
     } catch (e) {
       console.error('Error prefetching audit logs:', e);
       if (force) {
@@ -449,6 +424,32 @@ export default function App() {
       setAuditLogsLoading(false);
     }
   }, [auditLogsCache, auditLogsLoading]);
+
+  // Hydrate audit cache from disk, then refresh from network in background.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(AUDIT_LOGS_CACHE_KEY);
+        if (!cancelled && raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) {
+            setAuditLogsCache((prev) => (prev == null ? parsed : prev));
+          }
+        }
+      } catch (_) {
+        /* ignore corrupt cache */
+      }
+      if (!cancelled) {
+        refreshAuditLogs(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally once on mount — refreshAuditLogs identity changes; we force-refresh once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Background prefetch for logged-in session (no-op if caches already warm).
   useEffect(() => {
@@ -1158,100 +1159,8 @@ export default function App() {
       case 'login':
         return <LoginScreen onLogin={handleLogin} isDarkMode={isDarkMode} onToggleDarkMode={toggleDarkMode} />;
       case 'home':
-        if (embeddedInShell) {
-          return (
-            <DashboardScreen
-              inventory={inventory}
-              inventoryLoaded={inventoryLoaded}
-              minQuantity={30}
-              auditLogs={auditLogsCache ?? []}
-              auditLogsLoaded={auditLogsCache !== null}
-              onRefresh={handleRefresh}
-              isRefreshing={isRefreshing}
-              showTransactionTable={!isNarrowDesktop}
-              isAdmin={isAdmin}
-              userName={userName}
-              embeddedInShell={embeddedInShell}
-              onOpenRecycleDue={() => {
-                setRecycleDueFilter(true);
-                navigateTo('list');
-              }}
-              onItemSelect={
-                isAdmin
-                  ? (item) => {
-                      setPreviousScreen('home');
-                      setSelectedItem(item);
-                      setShowAdminItemDialog(true);
-                    }
-                  : undefined
-              }
-            />
-          );
-        }
-        return (
-          <HomeScreen
-            onScanQR={handleScanQR}
-            onAddManual={handleAddManual}
-            onViewInventory={() => setCurrentScreen('list')}
-            onOpenRecycleDue={() => {
-              setRecycleDueFilter(true);
-              setCurrentScreen('list');
-            }}
-            inventory={inventory}
-            inventoryLoaded={inventoryLoaded}
-            minQuantity={30}
-            nfcEnabled={nfcStatus.isEnabled}
-            userName={userName}
-            isAdmin={isAdmin}
-            onSwitchUser={handleSwitchUser}
-            isDarkMode={isDarkMode}
-            onRefresh={handleRefresh}
-            isRefreshing={isRefreshing}
-            onToggleDarkMode={toggleDarkMode}
-            onOpenSettings={() => {
-              setPreviousScreen('home');
-              setCurrentScreen('settings');
-            }}
-            onOpenPlaceOrder={isAdmin ? () => {
-              setPreviousScreen('home');
-              setCurrentScreen('placeOrder');
-            } : undefined}
-            onOpenUpcomingOrders={isAdmin ? () => {
-              setOrdersInitialFilter(null);
-              setPreviousScreen('home');
-              setCurrentScreen('orders');
-            } : undefined}
-            onOpenBackOrders={isAdmin ? () => {
-              setOrdersInitialFilter('back_orders');
-              setPreviousScreen('home');
-              setCurrentScreen('orders');
-            } : undefined}
-            onOpenLateOrders={isAdmin ? () => {
-              setOrdersInitialFilter('late_orders');
-              setPreviousScreen('home');
-              setCurrentScreen('orders');
-            } : undefined}
-            onOpenMaterialUsage={() => navigateTo('materialUsage')}
-            onOpenWasteTracking={() => navigateTo('wasteTracking')}
-            onOpenReports={isAdmin ? () => navigateTo('reports') : undefined}
-            onItemSelect={
-              isAdmin
-                ? (item) => {
-                    setPreviousScreen('home');
-                    setSelectedItem(item);
-                    setShowAdminItemDialog(true);
-                  }
-                : undefined
-            }
-            onOpenLowStock={() => {
-              setLowStockFilter(true);
-              setCurrentScreen('list');
-            }}
-            auditLogs={auditLogsCache ?? []}
-            auditLogsLoaded={auditLogsCache !== null}
-            onRefreshAuditLogs={() => refreshAuditLogs(true)}
-          />
-        );
+        // Dashboard stays mounted separately for instant return visits.
+        return null;
       case 'reports':
         if (!isAdmin) {
           return null;
@@ -1420,16 +1329,8 @@ export default function App() {
           />
         );
       case 'materialUsage':
-        return (
-          <MaterialUsageScreen
-            inventory={inventory}
-            userName={actorName}
-            isAdmin={isAdmin}
-            materialUsageOvertime={materialUsageOvertime}
-            embeddedInShell={embeddedInShell}
-            onBack={() => navigateTo('home')}
-          />
-        );
+        // Kept mounted separately for instant navigation.
+        return null;
       case 'wasteTracking':
         return (
           <WasteTrackingScreen
@@ -1460,24 +1361,127 @@ export default function App() {
     }
   };
 
+  const isHomeScreen = currentScreen === 'home';
+  const isMaterialUsageScreen = currentScreen === 'materialUsage';
+  const dashboardKeepAlive =
+    userName && embeddedInShell ? (
+      <KeepAlivePane active={isHomeScreen}>
+        <DashboardScreen
+          inventory={inventory}
+          inventoryLoaded={inventoryLoaded}
+          minQuantity={30}
+          auditLogs={auditLogsCache ?? []}
+          auditLogsLoaded={auditLogsCache !== null}
+          onRefresh={handleRefresh}
+          isRefreshing={isRefreshing}
+          showTransactionTable={true}
+          isAdmin={isAdmin}
+          userName={userName}
+          embeddedInShell={embeddedInShell}
+          showCheckInOutNav={showCheckInOutNav}
+          onOpenRecycleDue={() => {
+            setRecycleDueFilter(true);
+            navigateTo('list');
+          }}
+          onOpenInventory={() => navigateTo('list')}
+          onOpenMaterialUsage={() => navigateTo('materialUsage')}
+          onOpenWasteTracking={() => navigateTo('wasteTracking')}
+          onOpenCheckInOut={() => navigateTo('qrscan')}
+          onItemSelect={
+            isAdmin
+              ? (item) => {
+                  setPreviousScreen('home');
+                  setSelectedItem(item);
+                  setShowAdminItemDialog(true);
+                }
+              : undefined
+          }
+        />
+      </KeepAlivePane>
+    ) : null;
+
+  const materialUsageKeepAlive =
+    userName && materialUsageVisited ? (
+      <KeepAlivePane active={isMaterialUsageScreen}>
+        <MaterialUsageScreen
+          inventory={inventory}
+          userName={actorName}
+          isAdmin={isAdmin}
+          materialUsageOvertime={materialUsageOvertime}
+          embeddedInShell
+          onBack={() => navigateTo('home')}
+        />
+      </KeepAlivePane>
+    ) : null;
+
   const mainContent = (
-    <ScreenTransition screenKey={`${userName ? 'in' : 'out'}:${currentScreen}`}>
-      {renderScreen()}
-    </ScreenTransition>
+    <View style={styles.mainStack}>
+      {dashboardKeepAlive}
+      {materialUsageKeepAlive}
+      {(!isHomeScreen || !dashboardKeepAlive) &&
+      (!isMaterialUsageScreen || !materialUsageKeepAlive) ? (
+        <ScreenTransition
+          screenKey={`${userName ? 'in' : 'out'}:${currentScreen}`}
+        >
+          {renderScreen()}
+        </ScreenTransition>
+      ) : null}
+    </View>
   );
   const shellWrapped =
     embeddedInShell && userName ? (
       <AppShell
         isNarrowDesktop={isNarrowDesktop}
+        showPersistentSidebar={showPersistentSidebar}
+        title={getScreenTitle(currentScreen)}
+        userName={userName}
+        drawerOpen={navDrawerOpen}
+        onOpenDrawer={() => setNavDrawerOpen(true)}
+        onCloseDrawer={() => setNavDrawerOpen(false)}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+        onOpenSettings={() => navigateTo('settings')}
+        onSignOut={handleSwitchUser}
+        notifications={
+          <NotificationsBell
+            inventory={inventory}
+            inventoryLoaded={inventoryLoaded}
+            minQuantity={30}
+            isAdmin={isAdmin}
+            userName={userName}
+            onOpenRecycleDue={() => {
+              setRecycleDueFilter(true);
+              navigateTo('list');
+            }}
+            onOpenBackOrders={
+              isAdmin
+                ? () =>
+                    navigateTo('orders', {
+                      ordersInitialFilter: 'back_orders',
+                    })
+                : undefined
+            }
+            onOpenLateOrders={
+              isAdmin
+                ? () =>
+                    navigateTo('orders', {
+                      ordersInitialFilter: 'late_orders',
+                    })
+                : undefined
+            }
+            onOpenLowStock={() => {
+              setLowStockFilter(true);
+              navigateTo('list');
+            }}
+            onOpenWasteTracking={() => navigateTo('wasteTracking')}
+          />
+        }
         sidebar={
           <AppSidebar
             currentScreen={currentScreen}
             ordersInitialFilter={ordersInitialFilter}
             isAdmin={isAdmin}
-            userName={userName}
-            inventory={inventory}
-            inventoryLoaded={inventoryLoaded}
-            isRefreshing={isRefreshing}
+            inDrawer={!showPersistentSidebar}
             onNavigate={navigateTo}
             onAddManual={
               isAdmin
@@ -1487,29 +1491,6 @@ export default function App() {
                   }
                 : undefined
             }
-            onRefresh={handleRefresh}
-            onOpenSettings={() => navigateTo('settings')}
-            onToggleDarkMode={toggleDarkMode}
-            onSwitchUser={handleSwitchUser}
-            minQuantity={30}
-            onOpenRecycleDue={() => {
-              setRecycleDueFilter(true);
-              navigateTo('list');
-            }}
-            onOpenBackOrders={
-              isAdmin
-                ? () => navigateTo('orders', { ordersInitialFilter: 'back_orders' })
-                : undefined
-            }
-            onOpenLateOrders={
-              isAdmin
-                ? () => navigateTo('orders', { ordersInitialFilter: 'late_orders' })
-                : undefined
-            }
-            onOpenLowStock={() => {
-              setLowStockFilter(true);
-              navigateTo('list');
-            }}
             showCheckInOutNav={showCheckInOutNav}
           />
         }
@@ -1613,6 +1594,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     paddingTop: 8,
   },
+  mainStack: {
+    flex: 1,
+    width: '100%',
+  },
+  dashboardKeepAliveVisible: {
+    flex: 1,
+    width: '100%',
+  },
+  dashboardKeepAliveHidden: {
+    display: 'none',
+  },
   containerWeb: {
     width: '100%',
     minHeight: '100vh',
@@ -1661,7 +1653,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     paddingHorizontal: 32,
     borderRadius: 12,
-    backgroundColor: DARK_SURFACE_ELEVATED,
+    backgroundColor: colors.dark.elevated,
     opacity: 0.95,
   },
   loadingText: {

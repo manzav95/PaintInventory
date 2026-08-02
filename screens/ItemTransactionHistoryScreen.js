@@ -10,13 +10,14 @@ import {
 import {
   Card,
   Text,
-  Title,
   Button,
   useTheme,
   IconButton,
   ActivityIndicator,
 } from "react-native-paper";
 import AuditService from "../services/auditService";
+import { AppText, AppEmptyState } from "../components/ui";
+import { getActionColor } from "../utils/actionColors";
 
 const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000;
 
@@ -37,26 +38,6 @@ function formatDayHeader(ts) {
   const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
   const md = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
   return `${weekday} ${md}`;
-}
-
-function getActionColor(action, details) {
-  if (action === "update" && details?._actionType) {
-    if (details._actionType === "check_in") return "#81c784";
-    if (details._actionType === "check_out") return "#e57373";
-    if (details._actionType === "receiving") return "#64b5f6";
-    if (details._actionType === "recycled") return "#558b2f";
-  }
-  switch (action) {
-    case "check_in": return "#81c784";
-    case "check_out": return "#e57373";
-    case "receiving": return "#64b5f6";
-    case "recycled": return "#558b2f";
-    case "add": return "#64b5f6";
-    case "delete": return "#f44336";
-    case "update": return "#ba68c8";
-    case "change_id": return "#ff5722";
-    default: return "#757575";
-  }
 }
 
 function formatAction(action, details) {
@@ -193,7 +174,9 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
           onPress={onBack}
           iconColor={theme.colors.primary}
         />
-        <Title style={styles.title}>Item Transaction History</Title>
+        <AppText variant="sectionTitle" style={styles.title}>
+          Item Transaction History
+        </AppText>
         <View style={styles.placeholder} />
       </View>
       <View
@@ -236,9 +219,10 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
           >
             <Card.Content style={styles.cardContent}>
               {logs.length === 0 ? (
-                <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
-                  No transactions in the last 3 months
-                </Text>
+                <AppEmptyState
+                  title="No transactions in the last 3 months"
+                  style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
+                />
               ) : (
                 logs.map((log, index) => {
                   const showDayDividers = isAdmin && isDesktop;
@@ -381,8 +365,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   title: {
-    fontSize: 20,
-    fontWeight: "bold",
+    flex: 1,
+    textAlign: "center",
   },
   placeholder: {
     width: 40,
@@ -417,11 +401,6 @@ const styles = StyleSheet.create({
   },
   cardContent: {
     paddingVertical: 8,
-  },
-  empty: {
-    textAlign: "center",
-    paddingVertical: 24,
-    fontSize: 15,
   },
   row: {
     flexDirection: "row",

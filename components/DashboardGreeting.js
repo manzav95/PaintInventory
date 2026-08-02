@@ -16,7 +16,13 @@ export default function DashboardGreeting({ isAdmin, userName, style }) {
   const greetingPhrase = getTimeGreeting();
 
   return (
-    <FadeIn fromY={8} duration={300} delay={60} style={[styles.block, style]}>
+    <FadeIn
+      fromY={8}
+      duration={300}
+      delay={60}
+      style={[styles.block, style]}
+      disabled
+    >
       <Text style={styles.greeting}>
         <Text style={{ color: theme.colors.onSurfaceVariant }}>
           {greetingPhrase},{" "}
