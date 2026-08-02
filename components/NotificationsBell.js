@@ -49,7 +49,7 @@ export default function NotificationsBell({
   onOpenLateOrders,
   onOpenLowStock,
   onOpenWasteTracking,
-  iconSize = 20,
+  iconSize = 22,
 }) {
   const theme = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -317,6 +317,7 @@ export default function NotificationsBell({
           onPress={openPanel}
           iconColor={theme.colors.primary}
           accessibilityLabel="Notifications"
+          style={styles.bellBtn}
         />
         {inventoryLoaded && badgeCount > 0 && (
           <View
@@ -530,6 +531,13 @@ export default function NotificationsBell({
 const styles = StyleSheet.create({
   bellWrap: {
     position: "relative",
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBtn: {
+    margin: 0,
   },
   badge: {
     position: "absolute",

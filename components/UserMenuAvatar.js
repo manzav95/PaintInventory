@@ -16,7 +16,7 @@ export default function UserMenuAvatar({
   userName,
   onOpenSettings,
   onSignOut,
-  size = 32,
+  size = 28,
 }) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
@@ -57,12 +57,15 @@ export default function UserMenuAvatar({
       : 12;
 
   return (
-    <View ref={btnRef} collapsable={false}>
+    <View ref={btnRef} collapsable={false} style={styles.avatarWrap}>
       <Pressable
         onPress={measureAndOpen}
         accessibilityLabel="User menu"
         accessibilityRole="button"
-        style={({ pressed }) => [pressed && { opacity: 0.85 }]}
+        style={({ pressed }) => [
+          styles.avatarPressable,
+          pressed && { opacity: 0.85 },
+        ]}
       >
         <Avatar.Text
           size={size}
@@ -184,6 +187,18 @@ export default function UserMenuAvatar({
 }
 
 const styles = StyleSheet.create({
+  avatarWrap: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarPressable: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   scrim: {
     flex: 1,
   },

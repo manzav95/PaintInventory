@@ -130,23 +130,32 @@ export default function AppShell({
 
   const topActions = (
     <View style={styles.topActions}>
-      <IconButton
-        icon="refresh"
-        size={22}
-        onPress={onRefresh}
-        disabled={isRefreshing}
-        iconColor={iconColor}
-        accessibilityLabel="Refresh"
-      />
-      {isRefreshing ? (
-        <ActivityIndicator size="small" color={theme.colors.primary} />
-      ) : null}
-      {notifications}
-      <UserMenuAvatar
-        userName={userName}
-        onOpenSettings={onOpenSettings}
-        onSignOut={onSignOut}
-      />
+      <View style={styles.topActionSlot}>
+        <IconButton
+          icon="refresh"
+          size={22}
+          onPress={onRefresh}
+          disabled={isRefreshing}
+          iconColor={iconColor}
+          accessibilityLabel="Refresh"
+          style={styles.topActionBtn}
+        />
+        {isRefreshing ? (
+          <ActivityIndicator
+            size="small"
+            color={theme.colors.primary}
+            style={styles.refreshSpinner}
+          />
+        ) : null}
+      </View>
+      <View style={styles.topActionSlot}>{notifications}</View>
+      <View style={styles.topActionSlot}>
+        <UserMenuAvatar
+          userName={userName}
+          onOpenSettings={onOpenSettings}
+          onSignOut={onSignOut}
+        />
+      </View>
     </View>
   );
 
@@ -393,7 +402,24 @@ const styles = StyleSheet.create({
   topActions: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 2,
     paddingRight: space[2],
+  },
+  topActionSlot: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topActionBtn: {
+    margin: 0,
+  },
+  refreshSpinner: {
+    position: "absolute",
+    right: -2,
+    top: -2,
+    transform: [{ scale: 0.75 }],
   },
   webMain: {
     flex: 1,
