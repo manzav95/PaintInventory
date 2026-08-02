@@ -23,6 +23,7 @@ import NotificationsBell from "../components/NotificationsBell";
 import version from "../version";
 import { formatDayHeader } from "../utils/transactionDayUtils";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
+import { nestedSurfaceColor } from "../utils/themeColors";
 
 function formatAction(action, details) {
   if (action === "update" && details?._actionType === "check_in")
@@ -411,7 +412,10 @@ export default function HomeScreen({
               key={`placeholder-${i}`}
               style={[
                 styles.transactionRow,
-                i < 3 && styles.transactionRowBorder,
+                {
+                  backgroundColor: nestedSurfaceColor(theme),
+                  borderColor: theme.colors.outlineVariant,
+                },
               ]}
             >
               <View style={styles.transactionLeftCol}>
@@ -510,8 +514,10 @@ export default function HomeScreen({
                     key={`${log.timestamp}-${log.itemId}-${index}`}
                     style={[
                       styles.transactionRow,
-                      index < dayGroup.logs.length - 1 &&
-                        styles.transactionRowBorder,
+                      {
+                        backgroundColor: nestedSurfaceColor(theme),
+                        borderColor: theme.colors.outlineVariant,
+                      },
                     ]}
                   >
                     <View style={styles.transactionLeftCol}>
@@ -1076,13 +1082,12 @@ const styles = StyleSheet.create({
   transactionRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    paddingVertical: 8,
-    paddingHorizontal: 0,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     gap: 16,
-  },
-  transactionRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.06)",
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
   },
   transactionLeftCol: {
     width: 88,

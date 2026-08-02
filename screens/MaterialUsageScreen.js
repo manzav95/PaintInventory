@@ -28,9 +28,11 @@ import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import StaggerItem from "../components/StaggerItem";
 import { SkeletonStack } from "../components/SkeletonBlock";
+import ScrollFrame from "../components/ScrollFrame";
 import showToast from "../utils/showToast";
 import { MATERIAL_USAGE_FORM_HELP } from "../constants/formHelpContent";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
   BOOTH_OPTIONS,
@@ -792,20 +794,10 @@ export default function MaterialUsageScreen({
                     }
                   />
                   {showMaterialSuggestions ? (
-                    <View
-                      style={[
-                        styles.suggestBox,
-                        {
-                          backgroundColor: theme.colors.surface,
-                          borderColor: theme.colors.outlineVariant,
-                        },
-                      ]}
+                    <ScrollFrame
+                      maxHeight={200}
+                      style={styles.suggestBox}
                     >
-                      <ScrollView
-                        keyboardShouldPersistTaps="handled"
-                        nestedScrollEnabled
-                        style={styles.suggestScroll}
-                      >
                         {materialSuggestions.map((item) => (
                           <Pressable
                             key={item.id}
@@ -854,8 +846,7 @@ export default function MaterialUsageScreen({
                             No inventory matches
                           </Text>
                         ) : null}
-                      </ScrollView>
-                    </View>
+                    </ScrollFrame>
                   ) : null}
                 </View>
                 <View style={styles.row}>
@@ -1108,11 +1099,7 @@ export default function MaterialUsageScreen({
                       <Text style={[styles.th, styles.thCat]}>Cat (oz)</Text>
                       <Text style={[styles.th, styles.thBooth]}>Booth</Text>
                     </View>
-                    <ScrollView
-                      style={styles.tableWrap}
-                      showsVerticalScrollIndicator
-                      nestedScrollEnabled
-                    >
+                    <ScrollFrame maxHeight={520}>
                       <View style={styles.table}>
                         {logsByDay.map(({ date, rows, totals }) => {
                           const dayKey = `day-${date}`;
@@ -1255,7 +1242,7 @@ export default function MaterialUsageScreen({
                           );
                         })}
                       </View>
-                    </ScrollView>
+                    </ScrollFrame>
                   </View>
                 </ScrollView>
               ) : (
@@ -1360,6 +1347,8 @@ export default function MaterialUsageScreen({
                                   style={[
                                     styles.logCard,
                                     {
+                                      backgroundColor: nestedSurfaceColor(theme),
+                                      borderColor: theme.colors.outlineVariant,
                                       borderLeftWidth: 4,
                                       borderLeftColor: getMaterialTypeColor(
                                         getResolvedMaterialType(row, inventory),
@@ -1624,13 +1613,7 @@ const styles = StyleSheet.create({
   },
   suggestBox: {
     marginTop: 6,
-    borderWidth: 1,
-    borderRadius: 8,
-    overflow: "hidden",
     maxWidth: "100%",
-  },
-  suggestScroll: {
-    maxHeight: 200,
   },
   colorRow: {
     paddingVertical: 10,
@@ -1721,8 +1704,6 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    backgroundColor: "rgba(0,0,0,0.02)",
     elevation: 2,
     ...(Platform.OS === "web"
       ? { boxShadow: "0px 1px 6px rgba(0,0,0,0.06)" }
@@ -1907,9 +1888,6 @@ const styles = StyleSheet.create({
   tableContainer: {
     minWidth: 720,
     flex: 1,
-  },
-  tableWrap: {
-    maxHeight: 520,
   },
   table: {
     minWidth: 720,

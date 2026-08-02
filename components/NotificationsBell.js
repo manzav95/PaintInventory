@@ -1,10 +1,22 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { View, StyleSheet, Pressable, ScrollView, Alert } from "react-native";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  Alert,
+  Modal,
+  useWindowDimensions,
+  Platform,
+} from "react-native";
 import {
   IconButton,
   Text,
-  Modal,
-  Portal,
   Button,
   Divider,
   useTheme,
@@ -14,14 +26,16 @@ import OrderService from "../services/orderService";
 import NotificationService from "../services/notificationService";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { NOTIFICATION_BADGE_RED } from "../utils/themeColors";
-import {
-  isRecycleDue,
-  getLowStockItems,
-} from "../utils/inventoryAlerts";
+import { isRecycleDue, getLowStockItems } from "../utils/inventoryAlerts";
 import {
   getDismissedIdsToday,
   dismissAlertsForToday,
 } from "../utils/notificationDismissals";
+import ScrollFrame from "./ScrollFrame";
+
+const PANEL_WIDTH = 340;
+const PANEL_MAX_HEIGHT = 420;
+const LIST_MAX_HEIGHT = 260;
 
 export default function NotificationsBell({
   inventory = [],
@@ -37,7 +51,14 @@ export default function NotificationsBell({
   iconSize = 20,
 }) {
   const theme = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const bellRef = useRef(null);
   const [visible, setVisible] = useState(false);
+  const [panelPos, setPanelPos] = useState({
+    top: 56,
+    left: 12,
+    caretLeft: PANEL_WIDTH - 28,
+  });
   const [dismissedIds, setDismissedIds] = useState([]);
   const [backOrderCount, setBackOrderCount] = useState(0);
   const [lateOrderCount, setLateOrderCount] = useState(0);
@@ -84,7 +105,8 @@ export default function NotificationsBell({
   }, [isAdmin, visible]);
 
   const recycleDueCount = useMemo(
-    () => (Array.isArray(inventory) ? inventory : []).filter(isRecycleDue).length,
+    () =>
+      (Array.isArray(inventory) ? inventory : []).filter(isRecycleDue).length,
     [inventory],
   );
 
@@ -199,6 +221,48 @@ export default function NotificationsBell({
   const allVisibleDismissed =
     hasUnderlyingAlerts && activeNotifications.length === 0;
 
+  const panelWidth = Math.min(PANEL_WIDTH, Math.max(260, windowWidth - 16));
+
+  const openPanel = () => {
+    const node = bellRef.current;
+    const place = (x, y, width, height) => {
+      const gap = 8;
+      const caretSize = 10;
+      const margin = 8;
+      const top = Math.max(
+        margin,
+        Math.min(y + height + gap, windowHeight - 140),
+      );
+      // Center under bell, then clamp fully on-screen
+      const preferredLeft = x + width / 2 - panelWidth / 2;
+      const left = Math.max(
+        margin,
+        Math.min(preferredLeft, windowWidth - panelWidth - margin),
+      );
+      const bellCenterX = x + width / 2;
+      const rawCaret = bellCenterX - left - caretSize;
+      const caretLeft = Math.max(
+        14,
+        Math.min(rawCaret, panelWidth - caretSize * 2 - 14),
+      );
+      setPanelPos({ top, left, caretLeft });
+      setVisible(true);
+    };
+
+    if (node && typeof node.measureInWindow === "function") {
+      node.measureInWindow((x, y, width, height) => {
+        place(x, y, width, height);
+      });
+      return;
+    }
+    setPanelPos({
+      top: 56,
+      left: Math.max(8, windowWidth - panelWidth - 8),
+      caretLeft: panelWidth - 28,
+    });
+    setVisible(true);
+  };
+
   const handleDismissToday = async () => {
     const ids = allNotifications.map((n) => n.id);
     if (ids.includes("waste")) {
@@ -245,11 +309,11 @@ export default function NotificationsBell({
 
   return (
     <>
-      <View style={styles.bellWrap}>
+      <View ref={bellRef} collapsable={false} style={styles.bellWrap}>
         <IconButton
           icon="bell-outline"
           size={iconSize}
-          onPress={() => setVisible(true)}
+          onPress={openPanel}
           iconColor={theme.colors.primary}
           accessibilityLabel="Notifications"
         />
@@ -262,99 +326,171 @@ export default function NotificationsBell({
         )}
       </View>
 
-      <Portal>
-        <Modal
-          visible={visible}
-          onDismiss={() => setVisible(false)}
-          contentContainerStyle={[
-            styles.modal,
-            { backgroundColor: theme.colors.surfaceContainerHighest },
-          ]}
-        >
-          <Text style={[styles.modalTitle, { color: theme.colors.onSurface }]}>
-            Notifications
-          </Text>
-          <Text
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVisible(false)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setVisible(false)}
+            accessibilityLabel="Dismiss notifications"
+          />
+          <View
+            pointerEvents="box-none"
             style={[
-              styles.modalSubtitle,
-              { color: theme.colors.onSurfaceVariant },
+              styles.panelAnchor,
+              {
+                top: panelPos.top,
+                left: panelPos.left,
+                width: panelWidth,
+              },
             ]}
           >
-            {isAdmin
-              ? "Clears your admin alerts for today on this device only."
-              : "Clears your alerts for today on this device. Admin alerts are not affected."}
-          </Text>
-
-          {!inventoryLoaded || (isAdmin && orderCountsLoading) ? (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator size="small" />
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                Loading…
+            <View
+              style={[
+                styles.caret,
+                {
+                  left: panelPos.caretLeft,
+                  borderBottomColor: theme.colors.outlineVariant,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.caretInner,
+                {
+                  left: panelPos.caretLeft + 1,
+                  borderBottomColor: theme.colors.surfaceContainerHighest,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.panel,
+                {
+                  maxHeight: Math.min(
+                    PANEL_MAX_HEIGHT,
+                    windowHeight - panelPos.top - 12,
+                  ),
+                  backgroundColor: theme.colors.surfaceContainerHighest,
+                  borderColor: theme.colors.outlineVariant,
+                },
+              ]}
+            >
+            <View style={styles.panelHeader}>
+              <Text
+                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+              >
+                Notifications
               </Text>
+              <IconButton
+                icon="close"
+                size={18}
+                onPress={() => setVisible(false)}
+                style={styles.closeBtn}
+                accessibilityLabel="Close notifications"
+              />
             </View>
-          ) : allVisibleDismissed ? (
             <Text
               style={[
-                styles.clearedMsg,
+                styles.modalSubtitle,
                 { color: theme.colors.onSurfaceVariant },
               ]}
             >
-              Cleared for today. Open again tomorrow if issues remain.
+              {isAdmin
+                ? "Clears your admin alerts for today on this device only."
+                : "Clears your alerts for today on this device. Admin alerts are not affected."}
             </Text>
-          ) : activeNotifications.length === 0 ? (
-            <Text
-              style={[
-                styles.emptyMsg,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              {hasUnderlyingAlerts
-                ? "No active alerts."
-                : "Nothing needs attention right now."}
-            </Text>
-          ) : (
-            <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-              {activeNotifications.map((n, index) => (
-                <React.Fragment key={n.id}>
-                  {index > 0 && <Divider style={styles.divider} />}
-                  <View style={styles.row}>
-                    <View
-                      style={[styles.countPill, { backgroundColor: n.color }]}
+
+            {!inventoryLoaded || (isAdmin && orderCountsLoading) ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" />
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                  Loading…
+                </Text>
+              </View>
+            ) : allVisibleDismissed ? (
+              <Text
+                style={[
+                  styles.clearedMsg,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Cleared for today. Open again tomorrow if issues remain.
+              </Text>
+            ) : activeNotifications.length === 0 ? (
+              <Text
+                style={[
+                  styles.emptyMsg,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {hasUnderlyingAlerts
+                  ? "No active alerts."
+                  : "Nothing needs attention right now."}
+              </Text>
+            ) : (
+              <ScrollFrame
+                maxHeight={LIST_MAX_HEIGHT}
+                contentContainerStyle={styles.listContent}
+              >
+                {activeNotifications.map((n, index) => (
+                  <React.Fragment key={n.id}>
+                    {index > 0 && <Divider style={styles.divider} />}
+                    <Pressable
+                      onPress={n.onPress}
+                      disabled={!n.onPress}
+                      style={({ pressed }) => [
+                        styles.row,
+                        pressed && {
+                          backgroundColor: theme.dark
+                            ? "rgba(255,255,255,0.06)"
+                            : "rgba(0,0,0,0.04)",
+                        },
+                      ]}
                     >
-                      <Text style={styles.countPillText}>{n.count}</Text>
-                    </View>
-                    <View style={styles.rowText}>
-                      <Text
+                      <View
                         style={[
-                          styles.rowTitle,
-                          { color: theme.colors.onSurface },
+                          styles.countPill,
+                          { backgroundColor: n.color },
                         ]}
                       >
-                        {n.title}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.rowDetail,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {n.detail}
-                      </Text>
-                      {n.showEmailAction ? (
-                        <Button
-                          mode="contained"
-                          compact
-                          icon="email-outline"
-                          loading={emailSending}
-                          disabled={emailSending}
-                          onPress={handleEmailLowStock}
-                          style={styles.emailBtn}
+                        <Text style={styles.countPillText}>{n.count}</Text>
+                      </View>
+                      <View style={styles.rowText}>
+                        <Text
+                          style={[
+                            styles.rowTitle,
+                            { color: theme.colors.onSurface },
+                          ]}
                         >
-                          Email low stock list
-                        </Button>
-                      ) : null}
-                      {n.onPress ? (
-                        <Pressable onPress={n.onPress}>
+                          {n.title}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.rowDetail,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          {n.detail}
+                        </Text>
+                        {n.showEmailAction ? (
+                          <Button
+                            mode="contained"
+                            compact
+                            icon="email-outline"
+                            loading={emailSending}
+                            disabled={emailSending}
+                            onPress={handleEmailLowStock}
+                            style={styles.emailBtn}
+                          >
+                            Email low stock list
+                          </Button>
+                        ) : null}
+                        {n.onPress ? (
                           <Text
                             style={[
                               styles.rowAction,
@@ -363,27 +499,28 @@ export default function NotificationsBell({
                           >
                             Tap to view
                           </Text>
-                        </Pressable>
-                      ) : null}
-                    </View>
-                  </View>
-                </React.Fragment>
-              ))}
-            </ScrollView>
-          )}
-
-          <View style={styles.modalActions}>
-            {hasUnderlyingAlerts && activeNotifications.length > 0 && (
-              <Button mode="outlined" onPress={handleDismissToday} compact>
-                Clear for today
-              </Button>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  </React.Fragment>
+                ))}
+              </ScrollFrame>
             )}
-            <Button mode="text" onPress={() => setVisible(false)} compact>
-              Close
-            </Button>
+
+            <View style={styles.modalActions}>
+              {hasUnderlyingAlerts && activeNotifications.length > 0 && (
+                <Button mode="outlined" onPress={handleDismissToday} compact>
+                  Clear for today
+                </Button>
+              )}
+              <Button mode="text" onPress={() => setVisible(false)} compact>
+                Close
+              </Button>
+            </View>
           </View>
-        </Modal>
-      </Portal>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -402,91 +539,148 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
+    zIndex: 1,
   },
   badgeText: {
     color: "#fff",
     fontSize: 10,
     fontWeight: "700",
   },
-  modal: {
-    marginHorizontal: 20,
-    maxWidth: 420,
-    width: "92%",
-    alignSelf: "center",
-    borderRadius: 12,
-    padding: 20,
-    maxHeight: "80%",
+  modalRoot: {
+    flex: 1,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.28)",
+  },
+  panelAnchor: {
+    position: "absolute",
+  },
+  caret: {
+    position: "absolute",
+    top: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderBottomWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 2,
+  },
+  caretInner: {
+    position: "absolute",
+    top: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  panel: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    width: "100%",
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      : {
+          elevation: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+        }),
+  },
+  panelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  closeBtn: {
+    margin: 0,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: "700",
-    marginBottom: 4,
+    flex: 1,
   },
   modalSubtitle: {
-    fontSize: 13,
-    marginBottom: 16,
-    lineHeight: 18,
+    fontSize: 12,
+    marginBottom: 12,
+    lineHeight: 16,
+    paddingRight: 8,
   },
   loadingRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingVertical: 24,
+    paddingVertical: 20,
   },
   clearedMsg: {
-    fontSize: 14,
-    paddingVertical: 20,
-    lineHeight: 20,
+    fontSize: 13,
+    paddingVertical: 16,
+    lineHeight: 18,
   },
   emptyMsg: {
-    fontSize: 14,
-    paddingVertical: 20,
+    fontSize: 13,
+    paddingVertical: 16,
   },
-  list: {
-    maxHeight: 320,
+  listContent: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
   },
   divider: {
-    marginVertical: 4,
+    marginVertical: 2,
+    marginHorizontal: 6,
   },
   row: {
     flexDirection: "row",
     alignItems: "flex-start",
-    paddingVertical: 12,
-    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    gap: 10,
   },
   countPill: {
-    minWidth: 36,
-    height: 36,
-    borderRadius: 18,
+    minWidth: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
   },
   countPillText: {
     color: "#fff",
     fontWeight: "700",
-    fontSize: 15,
+    fontSize: 14,
   },
   rowText: {
     flex: 1,
     minWidth: 0,
   },
   rowTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
     marginBottom: 2,
   },
   rowDetail: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
   },
   rowAction: {
-    fontSize: 12,
-    marginTop: 6,
+    fontSize: 11,
+    marginTop: 4,
     fontWeight: "600",
   },
   emailBtn: {
-    marginTop: 10,
+    marginTop: 8,
     alignSelf: "flex-start",
   },
   modalActions: {
@@ -494,7 +688,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     alignItems: "center",
     gap: 8,
-    marginTop: 16,
+    marginTop: 12,
     flexWrap: "wrap",
   },
 });

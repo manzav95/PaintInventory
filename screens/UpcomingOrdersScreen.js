@@ -26,6 +26,7 @@ import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
 import OrderService from "../services/orderService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
@@ -37,6 +38,7 @@ import {
   sanitizeGallonInput,
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
+import ScrollFrame from "../components/ScrollFrame";
 
 function lineGallonQty(line, field = "ordered") {
   const raw =
@@ -834,7 +836,16 @@ export default function UpcomingOrdersScreen({
                 const lineReceivedDate = formatReceivedDate(line);
                 const showLineDate = !singleReceivedDate && lineReceivedDate;
                 return (
-                  <View key={idx} style={styles.lineItem}>
+                  <View
+                    key={idx}
+                    style={[
+                      styles.lineItem,
+                      {
+                        backgroundColor: nestedSurfaceColor(theme),
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  >
                     <View style={styles.lineItemLeft}>
                       <Text
                         style={[
@@ -1281,22 +1292,18 @@ export default function UpcomingOrdersScreen({
                           right={<TextInput.Icon icon="menu-down" />}
                         />
                         {focusedLineIndex === index && (
-                          <View
+                          <ScrollFrame
+                            maxHeight={200}
                             style={[
                               styles.dropdown,
                               {
                                 backgroundColor:
                                   theme.colors.surfaceContainerHighest,
-                                borderColor: theme.colors.outlineVariant,
                               },
                             ]}
-                            collapsable={false}
+                            nested={false}
+                            fadeColor={theme.colors.surfaceContainerHighest}
                           >
-                            <ScrollView
-                              keyboardShouldPersistTaps="handled"
-                              nestedScrollEnabled
-                              style={styles.dropdownScroll}
-                            >
                               {getFilteredInventory(line.searchQuery).length ===
                               0 ? (
                                 <Text
@@ -1350,8 +1357,7 @@ export default function UpcomingOrdersScreen({
                                   ),
                                 )
                               )}
-                            </ScrollView>
-                          </View>
+                          </ScrollFrame>
                         )}
                       </View>
                       <TextInput
@@ -1648,10 +1654,7 @@ export default function UpcomingOrdersScreen({
               Reduce received to bring items back to expecting. Save reopens the
               PO if any line has remaining.
             </Text>
-            <ScrollView
-              style={styles.receivedModalScroll}
-              keyboardShouldPersistTaps="handled"
-            >
+            <ScrollFrame maxHeight={320}>
               {editingReceivedOrder &&
                 (editingReceivedOrder.lines || []).map((line, idx) => {
                   const itemId = String(line.itemId);
@@ -1698,7 +1701,7 @@ export default function UpcomingOrdersScreen({
                     </View>
                   );
                 })}
-            </ScrollView>
+            </ScrollFrame>
             <View style={styles.receivedModalActions}>
               <Button
                 mode="outlined"
@@ -1814,9 +1817,6 @@ const styles = StyleSheet.create({
     right: 0,
     top: "100%",
     marginTop: 2,
-    borderWidth: 1,
-    borderRadius: 8,
-    maxHeight: 200,
     zIndex: 10001,
     elevation: 10001,
     ...(Platform.OS === "web"
@@ -1827,10 +1827,6 @@ const styles = StyleSheet.create({
           shadowOpacity: 0.2,
           shadowRadius: 4,
         }),
-    overflow: "hidden",
-  },
-  dropdownScroll: {
-    maxHeight: 196,
   },
   dropdownItemWrap: {
     paddingVertical: 10,
@@ -2006,13 +2002,16 @@ const styles = StyleSheet.create({
   },
   linesList: {
     marginBottom: 12,
-    paddingLeft: 4,
+    gap: 8,
   },
   lineItem: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    paddingVertical: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
   },
   lineItemLeft: {
     flex: 1,

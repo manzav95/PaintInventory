@@ -1,12 +1,12 @@
-import React, { useState, useEffect, memo } from "react";
+import React, { useState, useEffect, memo, useCallback } from "react";
 import {
   View,
   StyleSheet,
-  ScrollView,
   Platform,
   Modal,
   Pressable,
   TextInput as NativeTextInput,
+  useWindowDimensions,
 } from "react-native";
 import {
   Text,
@@ -16,6 +16,11 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
+import { nestedSurfaceColor } from "../utils/themeColors";
+import ScrollFrame from "./ScrollFrame";
+
+const PANEL_WIDTH = 460;
+const PANEL_MAX_HEIGHT = 520;
 
 function lineOrderedQty(line) {
   const q = line?.quantity ?? line?.qty;
@@ -33,6 +38,33 @@ function lineReceivedQty(line) {
 function lineRemainingQty(line) {
   return Math.max(0, lineOrderedQty(line) - lineReceivedQty(line));
 }
+
+/** pending | partial | complete */
+function lineReceiveStatus(line) {
+  const ordered = lineOrderedQty(line);
+  const received = lineReceivedQty(line);
+  const remaining = lineRemainingQty(line);
+  if (ordered > 0 && remaining <= 0) return "complete";
+  if (received > 0 && remaining > 0) return "partial";
+  return "pending";
+}
+
+function sortLinesForReceive(lines) {
+  const rank = { pending: 0, partial: 1, complete: 2 };
+  return [...(lines || [])].sort((a, b) => {
+    const diff = rank[lineReceiveStatus(a)] - rank[lineReceiveStatus(b)];
+    if (diff !== 0) return diff;
+    const aId = String(a?.itemId ?? a?.item_id ?? "");
+    const bId = String(b?.itemId ?? b?.item_id ?? "");
+    return aId.localeCompare(bId);
+  });
+}
+
+const STATUS_COLORS = {
+  complete: { accent: "#2e7d32", soft: "rgba(46,125,50,0.14)", label: "Complete" },
+  partial: { accent: "#f9a825", soft: "rgba(249,168,37,0.16)", label: "Partial" },
+  pending: { accent: "#6f95ab", soft: "rgba(111,149,171,0.14)", label: "Not received" },
+};
 
 function getOrderExpectedLabel(order) {
   const placed = order?.placed_at;
@@ -129,8 +161,78 @@ export default function ReceivePoModal({
   getItemCodeForOrder,
   getItemTypeForOrder,
   formatOrderColorsPreview,
+  anchorRef,
 }) {
   const theme = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const margin = 8;
+  const panelWidth = Math.min(PANEL_WIDTH, Math.max(200, windowWidth - margin * 2));
+  const [panelPos, setPanelPos] = useState({
+    top: 56,
+    right: margin,
+    caretLeft: panelWidth - 28,
+  });
+
+  const placePanel = useCallback(
+    (x, y, width, height) => {
+      const gap = 8;
+      const caretSize = 10;
+      const top = Math.max(
+        margin,
+        Math.min(y + height + gap, windowHeight - 160),
+      );
+      // Receive PO sits on the right — align panel to the button's right edge,
+      // then clamp so the panel never leaves the viewport.
+      const buttonRight = x + width;
+      let right = windowWidth - buttonRight;
+      const maxRight = Math.max(margin, windowWidth - panelWidth - margin);
+      right = Math.max(margin, Math.min(right, maxRight));
+      const left = windowWidth - right - panelWidth;
+      const anchorCenterX = x + width / 2;
+      const rawCaret = anchorCenterX - left - caretSize;
+      const caretLeft = Math.max(
+        14,
+        Math.min(rawCaret, panelWidth - caretSize * 2 - 14),
+      );
+      setPanelPos({ top, right, caretLeft });
+    },
+    [margin, panelWidth, windowHeight, windowWidth],
+  );
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    const node = anchorRef?.current;
+
+    const runMeasure = () => {
+      if (node && typeof node.measureInWindow === "function") {
+        node.measureInWindow((x, y, width, height) => {
+          if (width > 0 && height > 0) {
+            placePanel(x, y, width, height);
+            return;
+          }
+          setPanelPos({
+            top: 56,
+            right: margin,
+            caretLeft: panelWidth - 28,
+          });
+        });
+        return;
+      }
+      setPanelPos({
+        top: 56,
+        right: margin,
+        caretLeft: panelWidth - 28,
+      });
+    };
+
+    runMeasure();
+    // Web layouts (sidebar / centered shell) can settle a frame later.
+    const t =
+      Platform.OS === "web" ? requestAnimationFrame(runMeasure) : null;
+    return () => {
+      if (t != null) cancelAnimationFrame(t);
+    };
+  }, [visible, step, placePanel, anchorRef, panelWidth, margin]);
 
   if (!actorName) return null;
 
@@ -147,6 +249,13 @@ export default function ReceivePoModal({
     lineReceiveQtysRef.current[itemId] = cleaned;
   };
 
+  const panelMaxHeight = Math.min(
+    PANEL_MAX_HEIGHT,
+    Math.max(220, windowHeight - panelPos.top - 12),
+  );
+  const listScrollMax = Math.min(280, Math.max(140, panelMaxHeight - 160));
+  const detailScrollMax = Math.min(320, Math.max(140, panelMaxHeight - 140));
+
   return (
     <Modal
       visible={visible}
@@ -156,7 +265,7 @@ export default function ReceivePoModal({
       presentationStyle="overFullScreen"
       onRequestClose={() => !receiveSubmitting && onClose()}
     >
-      <View style={styles.root}>
+      <View style={styles.modalRoot}>
         <Pressable
           style={styles.backdrop}
           onPress={() => !receiveSubmitting && onClose()}
@@ -164,31 +273,62 @@ export default function ReceivePoModal({
           accessibilityLabel="Close"
         />
         <View
-          style={[
-            styles.centerWrap,
-            step === "detail" && styles.centerWrapDetail,
-          ]}
           pointerEvents="box-none"
+          style={[
+            styles.panelAnchor,
+            {
+              top: panelPos.top,
+              right: panelPos.right,
+              width: panelWidth,
+            },
+          ]}
         >
           <View
-            style={[styles.box, { backgroundColor: theme.colors.surface }]}
+            style={[
+              styles.caret,
+              {
+                left: panelPos.caretLeft,
+                borderBottomColor: theme.colors.outlineVariant,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.caretInner,
+              {
+                left: panelPos.caretLeft + 1,
+                borderBottomColor: theme.colors.surfaceContainerHighest,
+              },
+            ]}
+          />
+          <View
+            style={[
+              styles.panel,
+              {
+                maxHeight: panelMaxHeight,
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
           >
-            <IconButton
-              icon="close"
-              size={20}
-              onPress={onClose}
-              disabled={receiveSubmitting}
-              style={styles.closeBtn}
-            />
+            <View style={styles.panelHeader}>
+              <Text
+                style={[styles.panelTitle, { color: theme.colors.onSurface }]}
+              >
+                {step === "detail" ? "Receive lines" : "Receive from PO"}
+              </Text>
+              <IconButton
+                icon="close"
+                size={18}
+                onPress={onClose}
+                disabled={receiveSubmitting}
+                style={styles.closeBtn}
+                accessibilityLabel="Close receive PO"
+              />
+            </View>
 
             {step === "list" && (
               <>
-                <Text
-                  variant="titleMedium"
-                  style={[styles.title, { color: theme.colors.onSurface }]}
-                >
-                  Receive from PO
-                </Text>
                 <Text
                   style={[
                     styles.help,
@@ -230,11 +370,9 @@ export default function ReceivePoModal({
                     </View>
                   </>
                 ) : (
-                  <ScrollView
-                    style={styles.listScroll}
-                    keyboardShouldPersistTaps="handled"
-                    nestedScrollEnabled
-                    showsVerticalScrollIndicator
+                  <ScrollFrame
+                    maxHeight={listScrollMax}
+                    style={{ marginBottom: 8 }}
                   >
                     {openOrders.map((order) => {
                       const placed = order.placed_at
@@ -255,10 +393,10 @@ export default function ReceivePoModal({
                           style={({ pressed }) => [
                             styles.orderRow,
                             {
-                              borderColor: theme.colors.outline,
+                              borderColor: theme.colors.outlineVariant,
                               backgroundColor: pressed
-                                ? theme.colors.surfaceContainerHighest
-                                : theme.colors.surface,
+                                ? theme.colors.surface
+                                : nestedSurfaceColor(theme),
                             },
                           ]}
                         >
@@ -317,7 +455,7 @@ export default function ReceivePoModal({
                         </Pressable>
                       );
                     })}
-                  </ScrollView>
+                  </ScrollFrame>
                 )}
               </>
             )}
@@ -330,14 +468,15 @@ export default function ReceivePoModal({
                     size={22}
                     onPress={onBackToList}
                     disabled={receiveSubmitting}
+                    style={styles.backBtn}
                   />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text
-                      variant="titleMedium"
                       style={[
-                        styles.title,
-                        { color: theme.colors.onSurface, marginBottom: 0 },
+                        styles.detailPo,
+                        { color: theme.colors.onSurface },
                       ]}
+                      numberOfLines={1}
                     >
                       PO{" "}
                       {selectedReceiveOrder.po_number || selectedReceiveOrder.id}
@@ -347,7 +486,7 @@ export default function ReceivePoModal({
                         style={{
                           color: theme.colors.onSurfaceVariant,
                           fontSize: 12,
-                          marginTop: 4,
+                          marginTop: 2,
                         }}
                       >
                         Expected ~{expLabel}
@@ -356,94 +495,223 @@ export default function ReceivePoModal({
                   </View>
                 </View>
 
-                <ScrollView
+                <ScrollFrame
                   key={String(detailResetKey)}
-                  style={styles.detailScroll}
-                  keyboardShouldPersistTaps="handled"
-                  keyboardDismissMode="on-drag"
-                  nestedScrollEnabled
-                  contentContainerStyle={{ paddingBottom: 24 }}
-                  showsVerticalScrollIndicator
+                  maxHeight={detailScrollMax}
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                  scrollProps={{ keyboardDismissMode: "on-drag" }}
                 >
-                  {(selectedReceiveOrder.lines || []).map((line, idx) => {
-                    const itemId = String(
-                      line.itemId ?? line.item_id ?? "",
-                    ).trim();
-                    const ordered = lineOrderedQty(line);
-                    const received = lineReceivedQty(line);
-                    const remaining = lineRemainingQty(line);
-                    const name = getItemNameForOrder(itemId);
-                    const code = getItemCodeForOrder
-                      ? getItemCodeForOrder(itemId)
-                      : itemId;
-                    return (
-                      <View
-                        key={`${detailResetKey}-${itemId}-${idx}`}
-                        style={[
-                          styles.lineCard,
-                          { borderColor: theme.colors.outline },
-                        ]}
-                      >
-                        <Text
+                  {sortLinesForReceive(selectedReceiveOrder.lines).map(
+                    (line, idx) => {
+                      const itemId = String(
+                        line.itemId ?? line.item_id ?? "",
+                      ).trim();
+                      const ordered = lineOrderedQty(line);
+                      const received = lineReceivedQty(line);
+                      const remaining = lineRemainingQty(line);
+                      const status = lineReceiveStatus(line);
+                      const statusColors = STATUS_COLORS[status];
+                      const name = getItemNameForOrder(itemId);
+                      const code = getItemCodeForOrder
+                        ? getItemCodeForOrder(itemId)
+                        : itemId;
+                      return (
+                        <View
+                          key={`${detailResetKey}-${itemId}-${idx}`}
                           style={[
-                            styles.lineName,
-                            { color: theme.colors.onSurface },
+                            styles.lineCard,
+                            {
+                              borderColor: statusColors.accent,
+                              backgroundColor: nestedSurfaceColor(theme),
+                              borderLeftWidth: 4,
+                              borderLeftColor: statusColors.accent,
+                            },
                           ]}
-                          numberOfLines={2}
                         >
-                          {name}
-                        </Text>
-                        {code ? (
-                          <Text
-                            style={[
-                              styles.lineCode,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {code}
-                          </Text>
-                        ) : null}
-                        <Text
-                          style={{
-                            fontSize: 12,
-                            color: theme.colors.onSurfaceVariant,
-                            marginBottom: 8,
-                          }}
-                        >
-                          Ordered {ordered} gal · Received {received} gal
-                          {remaining > 0
-                            ? ` · ${remaining} remaining`
-                            : " · Complete"}
-                        </Text>
-                        {(line.job_name || "").trim() ? (
-                          <Text
-                            style={{
-                              fontSize: 12,
-                              color: theme.colors.onSurfaceVariant,
-                              marginBottom: 8,
-                            }}
-                          >
-                            Job: {(line.job_name || "").trim()}
-                          </Text>
-                        ) : null}
-                        {remaining > 0 ? (
-                          <ReceiveLineQtyInput
-                            itemId={itemId}
-                            initialQty={String(
-                              lineReceiveQtysRef.current[itemId] ?? remaining,
-                            )}
-                            remaining={remaining}
-                            allowHalf={allowsHalfGallon(
-                              getItemTypeForOrder?.(itemId),
-                            )}
-                            onQtyChange={handleQtyChange}
-                          />
-                        ) : null}
-                      </View>
-                    );
-                  })}
-                </ScrollView>
+                          <View style={styles.lineTitleRow}>
+                            <Text
+                              style={[
+                                styles.lineName,
+                                { color: theme.colors.onSurface, flex: 1 },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {name}
+                            </Text>
+                            <View
+                              style={[
+                                styles.statusPill,
+                                { backgroundColor: statusColors.soft },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.statusPillText,
+                                  { color: statusColors.accent },
+                                ]}
+                              >
+                                {statusColors.label}
+                              </Text>
+                            </View>
+                          </View>
+                          {code ? (
+                            <Text
+                              style={[
+                                styles.lineCode,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {code}
+                            </Text>
+                          ) : null}
+                          {(line.job_name || "").trim() ? (
+                            <Text
+                              style={[
+                                styles.lineJob,
+                                { color: theme.colors.onSurfaceVariant },
+                              ]}
+                            >
+                              Job: {(line.job_name || "").trim()}
+                            </Text>
+                          ) : null}
+                          <View style={styles.qtyStrip}>
+                            <View
+                              style={[
+                                styles.qtyStat,
+                                {
+                                  backgroundColor: theme.dark
+                                    ? "rgba(255,255,255,0.06)"
+                                    : "rgba(0,0,0,0.04)",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.qtyStatLabel,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Ordered
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatValue,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                {ordered}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatUnit,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                gal
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.qtyStat,
+                                { backgroundColor: statusColors.soft },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.qtyStatLabel,
+                                  { color: statusColors.accent },
+                                ]}
+                              >
+                                Received
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatValue,
+                                  { color: statusColors.accent },
+                                ]}
+                              >
+                                {received}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatUnit,
+                                  { color: statusColors.accent },
+                                ]}
+                              >
+                                gal
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.qtyStat,
+                                {
+                                  backgroundColor:
+                                    remaining > 0
+                                      ? STATUS_COLORS.partial.soft
+                                      : STATUS_COLORS.complete.soft,
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.qtyStatLabel,
+                                  {
+                                    color:
+                                      remaining > 0
+                                        ? STATUS_COLORS.partial.accent
+                                        : STATUS_COLORS.complete.accent,
+                                  },
+                                ]}
+                              >
+                                Remaining
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatValue,
+                                  {
+                                    color:
+                                      remaining > 0
+                                        ? STATUS_COLORS.partial.accent
+                                        : STATUS_COLORS.complete.accent,
+                                  },
+                                ]}
+                              >
+                                {remaining}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyStatUnit,
+                                  {
+                                    color:
+                                      remaining > 0
+                                        ? STATUS_COLORS.partial.accent
+                                        : STATUS_COLORS.complete.accent,
+                                  },
+                                ]}
+                              >
+                                gal
+                              </Text>
+                            </View>
+                          </View>
+                          {remaining > 0 ? (
+                            <ReceiveLineQtyInput
+                              itemId={itemId}
+                              initialQty={String(
+                                lineReceiveQtysRef.current[itemId] ?? remaining,
+                              )}
+                              remaining={remaining}
+                              allowHalf={allowsHalfGallon(
+                                getItemTypeForOrder?.(itemId),
+                              )}
+                              onQtyChange={handleQtyChange}
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    },
+                  )}
+                </ScrollFrame>
 
                 <View style={styles.actions}>
                   <Button
@@ -472,67 +740,93 @@ export default function ReceivePoModal({
 }
 
 const styles = StyleSheet.create({
-  root: {
+  modalRoot: {
     flex: 1,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.28)",
   },
-  centerWrap: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 16,
-  },
-  centerWrapDetail: {
-    justifyContent: "flex-start",
-    paddingTop: 32,
-    paddingBottom: 24,
-  },
-  box: {
-    width: "100%",
-    maxWidth: 440,
-    maxHeight: "88%",
-    borderRadius: 12,
-    padding: 18,
-    elevation: 8,
-    zIndex: 1,
-  },
-  closeBtn: {
+  panelAnchor: {
     position: "absolute",
-    right: 6,
-    top: 6,
+  },
+  caret: {
+    position: "absolute",
+    top: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderBottomWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
     zIndex: 2,
   },
-  title: {
-    fontWeight: "600",
-    marginBottom: 8,
+  caretInner: {
+    position: "absolute",
+    top: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  panel: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 12,
+    width: "100%",
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      : {
+          elevation: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+        }),
+  },
+  panelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  panelTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    flex: 1,
+    paddingRight: 8,
+  },
+  closeBtn: {
+    margin: 0,
   },
   help: {
-    fontSize: 14,
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  listScroll: {
-    maxHeight: 320,
-    marginBottom: 8,
+    fontSize: 13,
+    marginBottom: 10,
+    lineHeight: 18,
+    paddingRight: 4,
   },
   orderRow: {
     borderWidth: 1,
     borderRadius: 8,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginBottom: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
   },
   orderPo: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
     marginBottom: 4,
   },
   orderMeta: {
     fontSize: 12,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   orderPreview: {
     fontSize: 13,
@@ -549,27 +843,82 @@ const styles = StyleSheet.create({
   detailHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 12,
+    marginBottom: 10,
+    marginLeft: -8,
   },
-  detailScroll: {
-    maxHeight: 360,
-    marginBottom: 8,
+  backBtn: {
+    margin: 0,
+  },
+  detailPo: {
+    fontSize: 15,
+    fontWeight: "600",
   },
   lineCard: {
     borderWidth: 1,
     borderRadius: 8,
     padding: 12,
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  lineTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 2,
   },
   lineName: {
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 2,
+    marginBottom: 0,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    flexShrink: 0,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
   lineCode: {
     fontSize: 13,
     fontFamily: "monospace",
+    marginBottom: 4,
+  },
+  lineJob: {
+    fontSize: 12,
     marginBottom: 8,
+  },
+  qtyStrip: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  qtyStat: {
+    flexGrow: 1,
+    flexBasis: "28%",
+    minWidth: 88,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  qtyStatLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  qtyStatValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  qtyStatUnit: {
+    fontSize: 11,
+    marginTop: 1,
   },
   receiveQtyWrap: {
     marginTop: 2,

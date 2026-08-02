@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   StyleSheet,
-  ScrollView,
   Modal,
   Pressable,
   useWindowDimensions,
@@ -17,6 +16,7 @@ import {
 } from "react-native-paper";
 import DateField from "./DateField";
 import SimpleLineChart from "./SimpleLineChart";
+import ScrollFrame from "./ScrollFrame";
 import ReportService from "../services/reportService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 
@@ -214,10 +214,10 @@ export default function MaterialUsageReportModal({
             </View>
           </View>
 
-          <ScrollView
+          <ScrollFrame
+            fill
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
           >
             {loading && !report ? (
               <ActivityIndicator style={styles.loader} />
@@ -344,7 +344,7 @@ export default function MaterialUsageReportModal({
                 </Card>
               </>
             )}
-          </ScrollView>
+          </ScrollFrame>
         </Pressable>
       </Pressable>
     </Modal>

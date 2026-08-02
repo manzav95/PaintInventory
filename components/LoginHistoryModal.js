@@ -4,7 +4,6 @@ import {
   StyleSheet,
   Modal,
   Pressable,
-  ScrollView,
   useWindowDimensions,
 } from "react-native";
 import {
@@ -16,6 +15,7 @@ import {
 } from "react-native-paper";
 import LoginLogService from "../services/loginLogService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import ScrollFrame from "./ScrollFrame";
 
 function formatLoginTime(iso) {
   if (!iso) return "—";
@@ -124,7 +124,7 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
               No logins recorded yet.
             </Text>
           ) : (
-            <ScrollView style={styles.scroll} showsVerticalScrollIndicator>
+            <ScrollFrame maxHeight={420}>
               {logs.map((row) => (
                 <View
                   key={row.id}
@@ -148,7 +148,7 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
                   </Text>
                 </View>
               ))}
-            </ScrollView>
+            </ScrollFrame>
           )}
 
           <Button mode="outlined" onPress={onDismiss} style={styles.closeBtn}>

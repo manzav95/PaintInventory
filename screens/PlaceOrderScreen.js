@@ -21,12 +21,14 @@ import {
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import OrderService from "../services/orderService";
 import { openEmailWithOrderSpreadsheet } from "../utils/orderSpreadsheet";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
 } from "../utils/poItemLabels";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT, useAppLayout } from "../utils/layout";
+import ScrollFrame from "../components/ScrollFrame";
 import {
   allowsHalfGallon,
   parseGallonQuantity,
@@ -664,17 +666,16 @@ export default function PlaceOrderScreen({
                 No items yet — tap a card below to add.
               </Text>
             ) : (
-              <ScrollView
-                style={styles.orderCartScroll}
-                nestedScrollEnabled
-                keyboardShouldPersistTaps="handled"
-              >
+              <ScrollFrame maxHeight={140}>
                 {orderLines.map((line) => (
                   <View
                     key={line.id}
                     style={[
                       styles.orderLineRow,
-                      { borderTopColor: theme.colors.outlineVariant },
+                      {
+                        backgroundColor: nestedSurfaceColor(theme),
+                        borderColor: theme.colors.outlineVariant,
+                      },
                     ]}
                   >
                     <View style={styles.orderLineMain}>
@@ -714,7 +715,7 @@ export default function PlaceOrderScreen({
                     />
                   </View>
                 ))}
-              </ScrollView>
+              </ScrollFrame>
             )}
           </View>
         </View>
@@ -1177,8 +1178,11 @@ const styles = StyleSheet.create({
   orderLineRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
     gap: 8,
   },
   orderLineMain: {

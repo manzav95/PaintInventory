@@ -25,6 +25,7 @@ import { SkeletonStack } from "../components/SkeletonBlock";
 import showToast from "../utils/showToast";
 import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import {
   WASTE_MATERIALS,
   inchesToGallons,
@@ -36,7 +37,7 @@ import {
   GALLONS_PER_INCH,
   todayPacificIso,
   formatMonthDayYear,
-  formatWeekdayBeforeDate,
+  weekMondayIso,
   bundleWasteByWeek,
   computeWasteSummary,
   buildWasteAlerts,
@@ -44,6 +45,25 @@ import {
   formatMonthLabel,
 } from "../utils/wasteDrumConversion";
 
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function formatRecordDateParts(dateStr) {
+  const key = String(dateStr || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    return { weekday: "—", dateLine: formatMonthDayYear(dateStr) };
+  }
+  const d = new Date(`${key}T12:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    return { weekday: "—", dateLine: formatMonthDayYear(dateStr) };
+  }
+  return {
+    weekday: WEEKDAY_SHORT[d.getDay()] || "—",
+    dateLine: d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    }),
+  };
+}
 function parseInches(raw) {
   const t = String(raw ?? "").trim();
   if (!t) return 0;
@@ -93,6 +113,7 @@ export default function WasteTrackingScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [shakeTick, setShakeTick] = useState(0);
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
+  const weeksSeededRef = useRef(false);
 
   useEffect(() => {
     if (userName && !name) setName(userName);
@@ -133,18 +154,21 @@ export default function WasteTrackingScreen({
   );
   const alerts = useMemo(() => buildWasteAlerts(summary), [summary]);
   const weeks = useMemo(() => bundleWasteByWeek(records), [records]);
+  const thisWeekMonday = useMemo(
+    () => weekMondayIso(todayPacificIso()),
+    [],
+  );
 
   useEffect(() => {
-    if (!weeks.length) return;
-    setExpandedWeeks((prev) => {
-      if (prev.size > 0) return prev;
-      // Expand current + previous week by default
-      const next = new Set();
-      weeks.slice(0, 2).forEach((w) => next.add(w.monday));
-      return next;
-    });
-  }, [weeks]);
-
+    if (!weeks.length || weeksSeededRef.current) return;
+    weeksSeededRef.current = true;
+    // This week expanded; all others collapsed
+    setExpandedWeeks(
+      new Set(
+        weeks.some((w) => w.monday === thisWeekMonday) ? [thisWeekMonday] : [],
+      ),
+    );
+  }, [weeks, thisWeekMonday]);
   const loadRecords = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
@@ -660,48 +684,43 @@ export default function WasteTrackingScreen({
           </Card>
         ) : null}
 
-        <Card
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.surfaceContainerHighest,
-              borderColor: theme.colors.outlineVariant,
-            },
-          ]}
-          mode="outlined"
-        >
-          <Card.Content>
-            <Text
-              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-            >
-              Waste records by week (gal)
+        <View style={styles.recordsSection}>
+          <Text
+            style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+          >
+            Waste records by week (gal)
+          </Text>
+          <Text
+            style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
+          >
+            Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
+            Primer, Acetone).
+          </Text>
+          {loading && records.length === 0 ? (
+            <SkeletonStack lines={4} style={{ marginTop: 8 }} />
+          ) : weeks.length === 0 ? (
+            <Text style={{ color: theme.colors.onSurfaceVariant }}>
+              No records yet.
             </Text>
-            <Text
-              style={[
-                styles.hint,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
-              Primer, Acetone).
-            </Text>
-            {loading && records.length === 0 ? (
-              <SkeletonStack lines={4} style={{ marginTop: 8 }} />
-            ) : weeks.length === 0 ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                No records yet.
-              </Text>
-            ) : (
-              weeks.map((week, wIdx) => {
-                const open = expandedWeeks.has(week.monday);
-                return (
-                  <StaggerItem key={week.monday} index={wIdx}>
-                    <View
-                      style={[
-                        styles.weekBlock,
-                        { borderTopColor: theme.colors.outlineVariant },
-                      ]}
-                    >
+          ) : (
+            weeks.map((week, wIdx) => {
+              const open = expandedWeeks.has(week.monday);
+              const isThisWeek = week.monday === thisWeekMonday;
+              const recordSurface = nestedSurfaceColor(theme);
+              return (
+                <StaggerItem key={week.monday} index={wIdx}>
+                  <Card
+                    style={[
+                      styles.card,
+                      styles.weekCard,
+                      {
+                        backgroundColor: theme.colors.surfaceContainerHighest,
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                    mode="outlined"
+                  >
+                    <Card.Content style={styles.weekCardContent}>
                       <View style={styles.weekHeader}>
                         <Pressable
                           onPress={() => toggleWeek(week.monday)}
@@ -715,6 +734,7 @@ export default function WasteTrackingScreen({
                           >
                             {open ? "▾ " : "▸ "}
                             {week.label}
+                            {isThisWeek ? " · This week" : ""}
                           </Text>
                         </Pressable>
                         <View style={styles.weekHeaderRight}>
@@ -753,8 +773,9 @@ export default function WasteTrackingScreen({
                       >
                         {formatTotalsBreakdown(week.totals)}
                       </Text>
-                      {open
-                        ? week.rows.map((r) => {
+                      {open ? (
+                        <View style={styles.recordList}>
+                          {week.rows.map((r) => {
                             const paint = formatGallonsTenths(r.paint_gallons);
                             const clear = formatGallonsTenths(
                               r.clear_toner_gallons,
@@ -773,81 +794,115 @@ export default function WasteTrackingScreen({
                                   (Number(r.acetone_gallons) || 0),
                               ),
                             );
+                            const dateParts = formatRecordDateParts(
+                              r.entry_date,
+                            );
                             return (
                               <View
                                 key={r.id}
                                 style={[
-                                  styles.recordRow,
+                                  styles.recordCard,
                                   {
-                                    borderTopColor: theme.colors.outlineVariant,
+                                    backgroundColor: recordSurface,
+                                    borderColor: theme.colors.outlineVariant,
                                   },
                                 ]}
                               >
-                                <View style={styles.recordMain}>
-                                  <Text
-                                    style={[
-                                      styles.recordTitle,
-                                      { color: theme.colors.onSurface },
-                                    ]}
-                                  >
-                                    {formatWeekdayBeforeDate(r.entry_date)} ·{" "}
-                                    {r.user_name || "—"}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.recordMeta,
-                                      {
-                                        color: theme.colors.onSurfaceVariant,
-                                      },
-                                    ]}
-                                  >
-                                    Paint {paint} · Clear {clear} · Primer{" "}
-                                    {primer} · Acetone {acetone} · Total {total}{" "}
-                                    gal
-                                  </Text>
-                                </View>
-                                {isAdmin ? (
-                                  <View style={styles.recordActions}>
-                                    <Button
-                                      mode="outlined"
-                                      compact
-                                      icon={
-                                        copiedId === r.id
-                                          ? "check"
-                                          : "content-copy"
-                                      }
-                                      onPress={() => handleCopyRecord(r)}
+                                <View style={styles.recordCardInner}>
+                                  <View style={styles.recordDateCol}>
+                                    <Text
+                                      style={[
+                                        styles.recordWeekday,
+                                        { color: theme.colors.primary },
+                                      ]}
                                     >
-                                      {copiedId === r.id ? "Copied" : "Copy"}
-                                    </Button>
-                                    <Button
-                                      mode="outlined"
-                                      compact
-                                      textColor={theme.colors.error}
-                                      onPress={() => handleDelete(r)}
-                                      loading={deletingId === r.id}
-                                      disabled={deletingId != null}
+                                      {dateParts.weekday}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.recordDateLine,
+                                        {
+                                          color: theme.colors.onSurfaceVariant,
+                                        },
+                                      ]}
                                     >
-                                      Delete
-                                    </Button>
+                                      {dateParts.dateLine}
+                                    </Text>
                                   </View>
-                                ) : null}
+                                  <View style={styles.recordMain}>
+                                    <Text
+                                      style={[
+                                        styles.recordTitle,
+                                        { color: theme.colors.onSurface },
+                                      ]}
+                                    >
+                                      {r.user_name || "—"}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.recordMeta,
+                                        {
+                                          color: theme.colors.onSurfaceVariant,
+                                        },
+                                      ]}
+                                    >
+                                      Paint {paint} · Clear {clear} · Primer{" "}
+                                      {primer} · Acetone {acetone}
+                                    </Text>
+                                    <Text
+                                      style={[
+                                        styles.recordTotal,
+                                        { color: theme.colors.onSurface },
+                                      ]}
+                                    >
+                                      Total {total} gal
+                                    </Text>
+                                    {isAdmin ? (
+                                      <View style={styles.recordActions}>
+                                        <Button
+                                          mode="outlined"
+                                          compact
+                                          icon={
+                                            copiedId === r.id
+                                              ? "check"
+                                              : "content-copy"
+                                          }
+                                          onPress={() => handleCopyRecord(r)}
+                                        >
+                                          {copiedId === r.id
+                                            ? "Copied"
+                                            : "Copy"}
+                                        </Button>
+                                        <Button
+                                          mode="outlined"
+                                          compact
+                                          textColor={theme.colors.error}
+                                          onPress={() => handleDelete(r)}
+                                          loading={deletingId === r.id}
+                                          disabled={deletingId != null}
+                                        >
+                                          Delete
+                                        </Button>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                </View>
                               </View>
                             );
-                          })
-                        : null}
-                    </View>
-                  </StaggerItem>
-                );
-              })
-            )}
-          </Card.Content>
-        </Card>
+                          })}
+                        </View>
+                      ) : null}
+                    </Card.Content>
+                  </Card>
+                </StaggerItem>
+              );
+            })
+          )}
+        </View>
       </ScrollView>
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 0 },
   scroll: {
@@ -987,12 +1042,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
   },
-  weekBlock: {
-    borderTopWidth: 1,
-    paddingTop: 12,
-    marginTop: 10,
-    gap: 8,
+  recordsSection: {
+    marginTop: 2,
+    gap: 10,
     width: "100%",
+    maxWidth: "100%",
+  },
+  weekCard: {
+    marginBottom: 4,
+  },
+  weekCardContent: {
+    gap: 10,
+    paddingVertical: 12,
   },
   weekHeader: {
     flexDirection: "column",
@@ -1024,16 +1085,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  recordRow: {
-    flexDirection: "column",
-    alignItems: "stretch",
-    gap: 8,
-    paddingVertical: 12,
-    borderTopWidth: 1,
+  recordList: {
+    gap: 10,
+    marginTop: 4,
     width: "100%",
   },
-  recordMain: {
+  recordCard: {
+    marginLeft: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    width: "auto",
+    maxWidth: "100%",
+    alignSelf: "stretch",
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 1px 4px rgba(0,0,0,0.08)" }
+      : {
+          elevation: 1,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 2,
+        }),
+  },
+  recordCardInner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
     width: "100%",
+    minWidth: 0,
+  },
+  recordDateCol: {
+    width: 52,
+    flexShrink: 0,
+    paddingTop: 1,
+  },
+  recordWeekday: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  recordDateLine: {
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  recordMain: {
+    flex: 1,
     minWidth: 0,
     gap: 4,
   },
@@ -1042,7 +1140,9 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
     alignItems: "center",
+    marginTop: 6,
   },
   recordTitle: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
   recordMeta: { fontSize: 12, lineHeight: 18, flexShrink: 1 },
+  recordTotal: { fontSize: 13, fontWeight: "700", marginTop: 2 },
 });

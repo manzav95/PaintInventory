@@ -4,11 +4,11 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from "react-native";
 import { IconButton, Text, useTheme } from "react-native-paper";
+import ScrollFrame from "./ScrollFrame";
 
 /**
  * Help content shape:
@@ -69,10 +69,10 @@ export default function FormHelp({ content, style, size = 22, accessibilityLabel
                 accessibilityLabel="Close help"
               />
             </View>
-            <ScrollView
-              style={styles.sheetScroll}
+            <ScrollFrame
+              maxHeight={520}
               contentContainerStyle={styles.sheetBody}
-              keyboardShouldPersistTaps="handled"
+              style={styles.sheetScroll}
             >
               {content.intro ? (
                 <Text
@@ -141,7 +141,7 @@ export default function FormHelp({ content, style, size = 22, accessibilityLabel
                   ) : null}
                 </View>
               ))}
-            </ScrollView>
+            </ScrollFrame>
           </Pressable>
         </Pressable>
       </Modal>
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   sheetScroll: {
-    maxHeight: 520,
+    marginTop: 4,
   },
   sheetBody: {
     padding: 16,

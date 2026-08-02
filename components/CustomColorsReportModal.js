@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   StyleSheet,
-  ScrollView,
   Modal,
   Pressable,
   useWindowDimensions,
@@ -19,6 +18,7 @@ import {
 import DateField from "./DateField";
 import OutlinedSearchInput from "./OutlinedSearchInput";
 import SimpleLineChart from "./SimpleLineChart";
+import ScrollFrame from "./ScrollFrame";
 import ReportService from "../services/reportService";
 import { itemMatchesSearch } from "../utils/reportSearch";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
@@ -356,10 +356,10 @@ export default function CustomColorsReportModal({
             />
           </View>
 
-          <ScrollView
+          <ScrollFrame
+            fill
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
           >
             {loading && !report ? (
               <ActivityIndicator style={styles.loader} />
@@ -948,7 +948,7 @@ export default function CustomColorsReportModal({
                 </Card>
               </>
             )}
-          </ScrollView>
+          </ScrollFrame>
         </Pressable>
       </Pressable>
     </Modal>

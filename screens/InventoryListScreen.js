@@ -11,6 +11,7 @@ import {
   Pressable,
   Alert,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import ReceivePoModal from "../components/ReceivePoModal";
 import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
@@ -36,6 +37,9 @@ import {
   getMaterialTypeLabel,
   getMaterialTypeColor,
 } from "../utils/materialTypes";
+import showToast from "../utils/showToast";
+import { nestedSurfaceColor } from "../utils/themeColors";
+import { EdgeFade } from "../components/ScrollFrame";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 const STANDARD_TYPES = [
@@ -204,6 +208,8 @@ export default function InventoryListScreen({
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
+  const [copiedItemId, setCopiedItemId] = useState(null);
+  const copiedItemIdTimerRef = useRef(null);
   const [viewMode, setViewMode] = useState(initialViewMode || "inventory"); // 'inventory' | 'colorBook' — default to standard inventory
   const [bookFilter, setBookFilter] = useState(
     initialBookFilter || (recycleDueFilter ? "custom" : "standard"),
@@ -219,12 +225,26 @@ export default function InventoryListScreen({
   const listRef = useRef(null);
   const hasRestoredScrollRef = useRef(false);
   const searchInputRef = useRef(null);
+  const receivePoAnchorRef = useRef(null);
+  const tableScrollMetricsRef = useRef({ contentH: 0, layoutH: 0 });
+  const [tableScrollFades, setTableScrollFades] = useState({
+    top: false,
+    bottom: false,
+  });
 
   useEffect(() => {
     const timer = setTimeout(() => {
       searchInputRef.current?.focus?.();
     }, 100);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copiedItemIdTimerRef.current) {
+        clearTimeout(copiedItemIdTimerRef.current);
+      }
+    };
   }, []);
 
   const notifyViewState = (next = {}) => {
@@ -270,9 +290,19 @@ export default function InventoryListScreen({
   };
 
   const formatOrderColorsPreview = (order) => {
-    const lines = order?.lines || [];
+    const lines = (order?.lines || []).filter((l) => {
+      const ordered = Number(l?.quantity ?? l?.qty) || 0;
+      const receivedRaw = l?.received_quantity ?? l?.receivedQuantity;
+      const received =
+        receivedRaw === undefined ||
+        receivedRaw === null ||
+        receivedRaw === ""
+          ? 0
+          : Number(receivedRaw) || 0;
+      return ordered - received > 0;
+    });
     const names = lines.map((l) => getItemNameForOrder(l.itemId ?? l.item_id));
-    if (names.length === 0) return "No lines";
+    if (names.length === 0) return "No open lines";
     if (names.length <= 3) return names.join(" · ");
     return `${names.slice(0, 3).join(" · ")} · +${names.length - 3} more`;
   };
@@ -597,6 +627,98 @@ export default function InventoryListScreen({
     return null;
   };
 
+  const handleCopyItemId = async (rawId, event, itemName) => {
+    event?.stopPropagation?.();
+    if (typeof event?.preventDefault === "function") event.preventDefault();
+    const id = String(rawId ?? "").trim();
+    if (!id || id === "N/A" || id === "—") return;
+    try {
+      await Clipboard.setStringAsync(id);
+      setCopiedItemId(id);
+      if (copiedItemIdTimerRef.current) {
+        clearTimeout(copiedItemIdTimerRef.current);
+      }
+      copiedItemIdTimerRef.current = setTimeout(() => {
+        setCopiedItemId(null);
+        copiedItemIdTimerRef.current = null;
+      }, 2000);
+      const name = String(itemName || "").trim() || "Item";
+      showToast({
+        title: "Copied",
+        message: `${name} · ID ${id} copied.`,
+      });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Copy failed",
+        message: e?.message || "Could not copy ID.",
+      });
+    }
+  };
+
+  const renderCopyableItemId = ({
+    id,
+    name,
+    prefix = false,
+    textStyle,
+    numberOfLines,
+  }) => {
+    const idStr = id != null && id !== "" ? String(id) : "";
+    const display = idStr || "N/A";
+    const copied = idStr && copiedItemId === idStr;
+    const flatStyle = StyleSheet.flatten(textStyle) || {};
+    const itemName = String(name || "").trim();
+    const showCopiedBelow = isDesktop;
+    const idLabel = prefix ? `ID: ${display}` : display;
+    return (
+      <Pressable
+        onPress={(e) => handleCopyItemId(idStr || display, e, itemName)}
+        onPressIn={(e) => e?.stopPropagation?.()}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={
+          display !== "N/A" && display !== "—"
+            ? `Copy item ID ${display}${itemName ? ` for ${itemName}` : ""}`
+            : "Item ID unavailable"
+        }
+      >
+        <Text
+          numberOfLines={numberOfLines}
+          style={[
+            flatStyle,
+            {
+              color: flatStyle.color || theme.colors.onSurfaceVariant,
+              fontWeight: "700",
+            },
+          ]}
+        >
+          {idLabel}
+          {copied && !showCopiedBelow ? (
+            <Text
+              style={{
+                fontWeight: "400",
+                fontStyle: "italic",
+                color: theme.colors.primary,
+              }}
+            >
+              {" · Copied"}
+            </Text>
+          ) : null}
+        </Text>
+        {copied && showCopiedBelow ? (
+          <Text
+            style={[
+              styles.copiedHint,
+              { color: theme.colors.primary },
+            ]}
+          >
+            Copied
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  };
+
   const getActionLabel = (log) => {
     if (!log) return null;
     const a = log.action;
@@ -811,9 +933,8 @@ export default function InventoryListScreen({
               style={[
                 styles.colorModalNameRow,
                 {
-                  backgroundColor: theme.dark
-                    ? theme.colors.surfaceContainerHighest
-                    : "rgba(0,0,0,0.04)",
+                  backgroundColor: nestedSurfaceColor(theme),
+                  borderColor: theme.colors.outlineVariant,
                 },
               ]}
             >
@@ -826,14 +947,15 @@ export default function InventoryListScreen({
               >
                 {name}
               </Text>
-              <Text
-                style={[
+              {renderCopyableItemId({
+                id: it.id,
+                name,
+                prefix: true,
+                textStyle: [
                   styles.colorModalId,
                   { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                ID: {it.id != null ? String(it.id) : "—"}
-              </Text>
+                ],
+              })}
             </View>
             <IconButton
               icon="close"
@@ -884,6 +1006,7 @@ export default function InventoryListScreen({
       getItemCodeForOrder={getItemCodeForOrder}
       getItemTypeForOrder={getItemTypeForOrder}
       formatOrderColorsPreview={formatOrderColorsPreview}
+      anchorRef={receivePoAnchorRef}
     />
   );
 
@@ -965,7 +1088,12 @@ export default function InventoryListScreen({
             {item.location && (
               <Text style={styles.itemLocation}>📍 {item.location}</Text>
             )}
-            <Text style={styles.itemId}>ID: {itemId}</Text>
+            {renderCopyableItemId({
+              id: itemId === "N/A" ? "" : itemId,
+              name: item.name || "Unnamed Item",
+              prefix: true,
+              textStyle: styles.itemId,
+            })}
             {(() => {
               const orderInfo =
                 onOrderSummary[item.id] || onOrderSummary[itemId];
@@ -1497,15 +1625,21 @@ export default function InventoryListScreen({
                             autoCapitalize="none"
                           />
                           {actorName ? (
-                            <Button
-                              mode="outlined"
-                              compact
-                              icon="truck-delivery"
-                              onPress={openReceivePoModal}
-                              style={styles.receivePoButton}
+                            <View
+                              ref={receivePoAnchorRef}
+                              collapsable={false}
+                              style={styles.receivePoButtonWrap}
                             >
-                              Receive PO
-                            </Button>
+                              <Button
+                                mode="outlined"
+                                compact
+                                icon="truck-delivery"
+                                onPress={openReceivePoModal}
+                                style={styles.receivePoButton}
+                              >
+                                Receive PO
+                              </Button>
+                            </View>
                           ) : null}
                         </View>
                       </View>
@@ -1618,23 +1752,74 @@ export default function InventoryListScreen({
                                 ) : null}
                               </DataTable.Header>
                             </DataTable>
-                            <ScrollView
-                              style={styles.tableScrollOuter}
-                              contentContainerStyle={
-                                styles.tableScrollOuterContent
-                              }
-                              showsVerticalScrollIndicator={true}
-                              nestedScrollEnabled
-                              refreshControl={
-                                <RefreshControl
-                                  refreshing={isRefreshing}
-                                  onRefresh={onRefresh}
-                                  tintColor={theme.colors.primary}
-                                />
-                              }
+                            <View
+                              style={[
+                                styles.tableScrollOuter,
+                                styles.tableScrollFadeHost,
+                              ]}
                             >
-                              <DataTable style={styles.dataTable}>
-                                {filteredAndSortedInventory.map((item) => {
+                              <ScrollView
+                                style={styles.tableScrollOuter}
+                                contentContainerStyle={
+                                  styles.tableScrollOuterContent
+                                }
+                                showsVerticalScrollIndicator
+                                nestedScrollEnabled
+                                scrollEventThrottle={16}
+                                onScroll={(e) => {
+                                  const {
+                                    contentOffset,
+                                    contentSize,
+                                    layoutMeasurement,
+                                  } = e.nativeEvent;
+                                  const y = contentOffset.y;
+                                  const canScroll =
+                                    contentSize.height >
+                                    layoutMeasurement.height + 2;
+                                  setTableScrollFades({
+                                    top: canScroll && y > 2,
+                                    bottom:
+                                      canScroll &&
+                                      y + layoutMeasurement.height <
+                                        contentSize.height - 2,
+                                  });
+                                }}
+                                onContentSizeChange={(_w, h) => {
+                                  tableScrollMetricsRef.current.contentH = h;
+                                  const layoutH =
+                                    tableScrollMetricsRef.current.layoutH;
+                                  if (layoutH > 0) {
+                                    const canScroll = h > layoutH + 2;
+                                    setTableScrollFades((prev) => ({
+                                      top: prev.top && canScroll,
+                                      bottom: canScroll,
+                                    }));
+                                  }
+                                }}
+                                onLayout={(e) => {
+                                  const layoutH = e.nativeEvent.layout.height;
+                                  tableScrollMetricsRef.current.layoutH =
+                                    layoutH;
+                                  const contentH =
+                                    tableScrollMetricsRef.current.contentH;
+                                  if (contentH > 0) {
+                                    const canScroll = contentH > layoutH + 2;
+                                    setTableScrollFades((prev) => ({
+                                      top: prev.top && canScroll,
+                                      bottom: canScroll,
+                                    }));
+                                  }
+                                }}
+                                refreshControl={
+                                  <RefreshControl
+                                    refreshing={isRefreshing}
+                                    onRefresh={onRefresh}
+                                    tintColor={theme.colors.primary}
+                                  />
+                                }
+                              >
+                                <DataTable style={styles.dataTable}>
+                                  {filteredAndSortedInventory.map((item) => {
                                   const isLowStock =
                                     (item.quantity || 0) <
                                     (item.minQuantity ?? minQuantity ?? 30);
@@ -1696,18 +1881,19 @@ export default function InventoryListScreen({
                                           styles.idColCell,
                                         ]}
                                       >
-                                        <Text
-                                          style={[
+                                        {renderCopyableItemId({
+                                          id: item.id,
+                                          name: item.name || "Unnamed",
+                                          prefix: false,
+                                          textStyle: [
                                             styles.idText,
                                             {
                                               color: theme.dark
                                                 ? "#fff"
                                                 : "#666",
                                             },
-                                          ]}
-                                        >
-                                          {item.id || "N/A"}
-                                        </Text>
+                                          ],
+                                        })}
                                       </DataTable.Cell>
                                       <DataTable.Cell style={styles.tableCell}>
                                         {(() => {
@@ -1989,7 +2175,20 @@ export default function InventoryListScreen({
                                   );
                                 })}
                               </DataTable>
-                            </ScrollView>
+                              </ScrollView>
+                              {tableScrollFades.top ? (
+                                <EdgeFade
+                                  color={theme.colors.surfaceContainerHighest}
+                                  side="top"
+                                />
+                              ) : null}
+                              {tableScrollFades.bottom ? (
+                                <EdgeFade
+                                  color={theme.colors.surfaceContainerHighest}
+                                  side="bottom"
+                                />
+                              ) : null}
+                            </View>
                           </View>
                         </ScrollView>
                       )}
@@ -2113,30 +2312,38 @@ export default function InventoryListScreen({
                     : "Stock - Alphabetical"}
             </Text>
           </View>
-          <OutlinedSearchInput
-            ref={searchInputRef}
-            placeholder={
-              viewMode === "colorBook" ? "Search colors" : "Search or Scan"
-            }
-            onChangeText={setSearchQuery}
-            value={searchQuery}
-            style={styles.searchbar}
-            autoCorrect={false}
-            autoCapitalize="none"
-            blurOnSubmit={false}
-            onSubmitEditing={handleSearchSubmit}
-          />
-          {actorName ? (
-            <Button
-              mode="outlined"
-              compact
-              icon="truck-delivery"
-              onPress={openReceivePoModal}
-              style={styles.receivePoButtonMobile}
-            >
-              Receive PO
-            </Button>
-          ) : null}
+          <View style={styles.searchRow}>
+            <OutlinedSearchInput
+              ref={searchInputRef}
+              placeholder={
+                viewMode === "colorBook" ? "Search colors" : "Search or Scan"
+              }
+              onChangeText={setSearchQuery}
+              value={searchQuery}
+              style={styles.searchbar}
+              autoCorrect={false}
+              autoCapitalize="none"
+              blurOnSubmit={false}
+              onSubmitEditing={handleSearchSubmit}
+            />
+            {actorName && viewMode !== "colorBook" ? (
+              <View
+                ref={receivePoAnchorRef}
+                collapsable={false}
+                style={styles.receivePoButtonWrap}
+              >
+                <Button
+                  mode="outlined"
+                  compact
+                  icon="truck-delivery"
+                  onPress={openReceivePoModal}
+                  style={styles.receivePoButton}
+                >
+                  Receive PO
+                </Button>
+              </View>
+            ) : null}
+          </View>
           {recycleDueFilter && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
@@ -2474,30 +2681,38 @@ export default function InventoryListScreen({
                   : "Stock - Alphabetical"}
           </Text>
         </View>
-        <OutlinedSearchInput
-          ref={searchInputRef}
-          placeholder={
-            viewMode === "colorBook" ? "Search colors" : "Search or Scan"
-          }
-          onChangeText={setSearchQuery}
-          value={searchQuery}
-          style={styles.searchbar}
-          autoCorrect={false}
-          autoCapitalize="none"
-          blurOnSubmit={false}
-          onSubmitEditing={handleSearchSubmit}
-        />
-        {actorName ? (
-          <Button
-            mode="outlined"
-            compact
-            icon="truck-delivery"
-            onPress={openReceivePoModal}
-            style={styles.receivePoButtonMobile}
-          >
-            Receive PO
-          </Button>
-        ) : null}
+        <View style={styles.searchRow}>
+          <OutlinedSearchInput
+            ref={searchInputRef}
+            placeholder={
+              viewMode === "colorBook" ? "Search colors" : "Search or Scan"
+            }
+            onChangeText={setSearchQuery}
+            value={searchQuery}
+            style={styles.searchbar}
+            autoCorrect={false}
+            autoCapitalize="none"
+            blurOnSubmit={false}
+            onSubmitEditing={handleSearchSubmit}
+          />
+          {actorName && viewMode !== "colorBook" ? (
+            <View
+              ref={receivePoAnchorRef}
+              collapsable={false}
+              style={styles.receivePoButtonWrap}
+            >
+              <Button
+                mode="outlined"
+                compact
+                icon="truck-delivery"
+                onPress={openReceivePoModal}
+                style={styles.receivePoButton}
+              >
+                Receive PO
+              </Button>
+            </View>
+          ) : null}
+        </View>
       </View>
       {recycleDueFilter && (
         <View style={styles.recycleDueBanner}>
@@ -2654,19 +2869,26 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 6,
   },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+  },
   searchbar: {
     margin: 0,
     height: 52,
-    width: "100%",
-    alignSelf: "stretch",
+    flex: 1,
+    minWidth: 0,
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   receivePoButton: {
     flexShrink: 0,
+    alignSelf: "center",
   },
-  receivePoButtonMobile: {
-    marginTop: 8,
-    alignSelf: "flex-start",
+  receivePoButtonWrap: {
+    flexShrink: 0,
+    alignSelf: "center",
   },
   receivePoKb: {
     flex: 1,
@@ -2880,6 +3102,12 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
     marginBottom: 4,
   },
+  copiedHint: {
+    fontSize: 11,
+    fontStyle: "italic",
+    marginTop: 2,
+    marginBottom: 2,
+  },
   onOrderText: {
     fontSize: 12,
     marginBottom: 2,
@@ -2973,7 +3201,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     paddingBottom: 12,
-    backgroundColor: "rgba(0,0,0,0.04)",
+    borderTopWidth: 1,
   },
   colorModalName: {
     fontSize: 18,
@@ -3225,14 +3453,15 @@ const styles = StyleSheet.create({
   tableHeaderSearchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: 12,
+    width: "100%",
+    minWidth: 0,
   },
   webSearchbar: {
     flex: 1,
+    minWidth: 0,
     elevation: 0,
     height: 52,
-    width: "100%",
-    alignSelf: "stretch",
     ...(Platform.OS === "web" && { minHeight: 52 }),
   },
   colorBookSearchbar: {
@@ -3278,6 +3507,9 @@ const styles = StyleSheet.create({
       overflowY: "auto",
       overflowX: "hidden",
     }),
+  },
+  tableScrollFadeHost: {
+    position: "relative",
   },
   tableScrollOuterContent: {
     flexGrow: 0,

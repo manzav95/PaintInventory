@@ -23,18 +23,19 @@ import {
   findInventoryLookupMatches,
   resolveBestInventoryMatch,
 } from "../utils/itemLookup";
+import ScrollFrame from "../components/ScrollFrame";
 
 function LookupSuggestions({ matches, theme, onPick }) {
   if (!matches.length) return null;
   return (
-    <View
-      style={[
-        styles.suggestBox,
-        {
-          borderColor: theme.colors.outlineVariant,
-          backgroundColor: theme.colors.surfaceContainerHigh,
-        },
-      ]}
+    <ScrollFrame
+      maxHeight={200}
+      fadeColor={theme.colors.surfaceContainerHigh}
+      nested={false}
+      style={{
+        marginTop: 6,
+        backgroundColor: theme.colors.surfaceContainerHigh,
+      }}
     >
       {matches.map(({ item, score }, idx) => (
         <Pressable
@@ -79,7 +80,7 @@ function LookupSuggestions({ matches, theme, onPick }) {
           ) : null}
         </Pressable>
       ))}
-    </View>
+    </ScrollFrame>
   );
 }
 

@@ -21,6 +21,7 @@ import {
 } from "react-native-paper";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import DashboardGreeting from "../components/DashboardGreeting";
+import ScrollFrame from "../components/ScrollFrame";
 import { getDayKey, formatDayHeader } from "../utils/transactionDayUtils";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 
@@ -685,7 +686,7 @@ export default function DashboardScreen({
               </Title>
               <Button onPress={() => setStaleListOpen(false)}>Close</Button>
             </View>
-            <ScrollView style={{ maxHeight: 420 }}>
+            <ScrollFrame maxHeight={420}>
               {notScannedItems.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>
                   None.
@@ -765,7 +766,7 @@ export default function DashboardScreen({
                   </View>
                 ))
               )}
-            </ScrollView>
+            </ScrollFrame>
           </Pressable>
         </Pressable>
       </Modal>
@@ -806,7 +807,7 @@ export default function DashboardScreen({
                 maximumFractionDigits: 2,
               })}
             </Text>
-            <ScrollView style={{ maxHeight: 420 }}>
+            <ScrollFrame maxHeight={420}>
               {totalValueItems.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>
                   No items.
@@ -878,7 +879,7 @@ export default function DashboardScreen({
                   </View>
                 ))
               )}
-            </ScrollView>
+            </ScrollFrame>
           </Pressable>
         </Pressable>
       </Modal>
@@ -919,7 +920,7 @@ export default function DashboardScreen({
                 ? thisWeekRange.label
                 : thisMonthRange.label}
             </Text>
-            <ScrollView style={{ maxHeight: 420 }}>
+            <ScrollFrame maxHeight={420}>
               {(checkedOutListIsWeek
                 ? checkedOutByItemWeek
                 : checkedOutByItemMonth
@@ -971,7 +972,7 @@ export default function DashboardScreen({
                   </View>
                 ))
               )}
-            </ScrollView>
+            </ScrollFrame>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1398,14 +1399,11 @@ export default function DashboardScreen({
                   ) : null}
                 </View>
               ) : (
-                <ScrollView
-                  style={[
-                    styles.tableScrollOuter,
-                    isWeb && styles.tableScrollOuterWeb,
-                  ]}
+                <ScrollFrame
+                  fill={!!isWeb}
+                  maxHeight={isWeb ? undefined : 520}
                   contentContainerStyle={styles.tableScrollOuterContent}
-                  showsVerticalScrollIndicator={true}
-                  nestedScrollEnabled
+                  style={isWeb ? styles.tableScrollOuterWeb : undefined}
                 >
                   <ScrollView
                     horizontal
@@ -1619,7 +1617,7 @@ export default function DashboardScreen({
                       </Text>
                     </Pressable>
                   ) : null}
-                </ScrollView>
+                </ScrollFrame>
               )}
             </Card.Content>
           </Card>
@@ -1902,19 +1900,9 @@ const styles = StyleSheet.create({
     color: "#888",
     fontSize: 14,
   },
-  tableScrollOuter: {
-    maxHeight: 520,
-    overflow: "hidden",
-    ...(Platform.OS === "web" && {
-      overflowY: "auto",
-      overflowX: "hidden",
-      WebkitOverflowScrolling: "touch",
-    }),
-  },
   tableScrollOuterWeb: {
     flex: 1,
     minHeight: 0,
-    maxHeight: undefined,
   },
   tableScrollOuterContent: {
     flexGrow: 1,

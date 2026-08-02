@@ -60,7 +60,7 @@ const OutlinedSearchInput = React.forwardRef(function OutlinedSearchInput(
 
   return (
     <View
-      style={styles.wrap}
+      style={[styles.wrap, style]}
       // RN Web → data-search-anchor="…"
       {...(Platform.OS === "web"
         ? { dataSet: { searchAnchor: inputDomId } }
@@ -74,7 +74,7 @@ const OutlinedSearchInput = React.forwardRef(function OutlinedSearchInput(
         value={value}
         onChangeText={onChangeText}
         textAlign="left"
-        style={[styles.root, style]}
+        style={styles.root}
         contentStyle={styles.inputContent}
         outlineColor={theme.colors.outlineVariant}
         activeOutlineColor={theme.colors.primary}
@@ -88,7 +88,9 @@ export default OutlinedSearchInput;
 
 const styles = StyleSheet.create({
   wrap: {
-    width: "100%",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
     alignSelf: "stretch",
   },
   root: {

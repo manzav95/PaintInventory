@@ -7,17 +7,18 @@ import {
   useWindowDimensions,
   Modal,
   Pressable,
-  ScrollView,
 } from "react-native";
 import { Card, Text, Button, TextInput, useTheme } from "react-native-paper";
 import PageHeader from "../components/PageHeader";
 import { getContrastingTextColors } from "../utils/colorUtils";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import {
   allowsHalfGallon,
   parseGallonQuantity,
   formatGallonQuantity,
 } from "../utils/gallonQuantity";
+import ScrollFrame from "../components/ScrollFrame";
 
 const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
 
@@ -579,10 +580,7 @@ export default function CheckInOutScreen({
               Select the PO # for {item.name || "this item"} (ID: {itemIdStr}).
               Quantity defaults to remaining; change it for partial shipments.
             </Text>
-            <ScrollView
-              style={styles.poList}
-              keyboardShouldPersistTaps="handled"
-            >
+            <ScrollFrame maxHeight={200}>
               {receiveOrdersLoading && openOrdersWithItem.length === 0 ? (
                 <Text
                   style={[
@@ -608,9 +606,11 @@ export default function CheckInOutScreen({
                     onPress={() => handleSelectOrder(order)}
                     style={[
                       styles.poRow,
-                      { borderColor: theme.colors.outline },
-                      isSelected && {
-                        backgroundColor: theme.colors.surfaceVariant,
+                      {
+                        borderColor: theme.colors.outlineVariant,
+                        backgroundColor: isSelected
+                          ? theme.colors.surfaceContainerHighest
+                          : nestedSurfaceColor(theme),
                       },
                     ]}
                   >
@@ -635,7 +635,7 @@ export default function CheckInOutScreen({
                   </Pressable>
                 );
               })}
-            </ScrollView>
+            </ScrollFrame>
             {selectedOrder && (
               <>
                 <TextInput
