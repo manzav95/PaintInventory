@@ -245,6 +245,29 @@ export default function App() {
   }, [userName]);
 
   useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return undefined;
+    const id = "app-viewport-lock-style";
+    if (!document.getElementById(id)) {
+      const style = document.createElement("style");
+      style.id = id;
+      style.textContent = `
+        html, body, #root {
+          height: 100%;
+          max-height: 100%;
+          overflow: hidden;
+          overscroll-behavior: none;
+        }
+        #root {
+          display: flex;
+          flex-direction: column;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    return undefined;
+  }, []);
+
+  useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
       const bg = paperTheme.colors.background;
       document.body.style.backgroundColor = bg;
@@ -1440,6 +1463,12 @@ export default function App() {
         onCloseDrawer={() => setNavDrawerOpen(false)}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
+        disablePullToRefresh={
+          currentScreen === 'settings' ||
+          currentScreen === 'checkinout' ||
+          currentScreen === 'add' ||
+          (currentScreen === 'list' && !showPersistentSidebar)
+        }
         onOpenSettings={() => navigateTo('settings')}
         onSignOut={handleSwitchUser}
         notifications={
@@ -1607,7 +1636,9 @@ const styles = StyleSheet.create({
   },
   containerWeb: {
     width: '100%',
-    minHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
+    overflow: 'hidden',
   },
   webContainer: {
     flex: 1,

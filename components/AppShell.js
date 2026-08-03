@@ -4,12 +4,12 @@ import {
   StyleSheet,
   Platform,
   Pressable,
-  ActivityIndicator,
   Animated,
 } from "react-native";
 import { IconButton, Text, useTheme } from "react-native-paper";
 import { layout, space, colors } from "../theme/tokens";
 import UserMenuAvatar from "./UserMenuAvatar";
+import PullToRefresh from "./PullToRefresh";
 
 const DRAWER_MS = 200;
 const isWeb = Platform.OS === "web";
@@ -31,6 +31,7 @@ export default function AppShell({
   onCloseDrawer,
   onRefresh,
   isRefreshing = false,
+  disablePullToRefresh = false,
   onOpenSettings,
   onSignOut,
   notifications,
@@ -40,7 +41,6 @@ export default function AppShell({
   const sidebarBg = colors.dark.sidebar;
   const canvasBg = theme.dark ? colors.dark.background : theme.colors.background;
   const drawerWidth = Math.min(layout.sidebarWidth, 300);
-  const iconColor = theme.colors.onSurfaceVariant;
 
   // Stay mounted through the close animation.
   const [drawerMounted, setDrawerMounted] = useState(false);
@@ -130,24 +130,6 @@ export default function AppShell({
 
   const topActions = (
     <View style={styles.topActions}>
-      <View style={styles.topActionSlot}>
-        <IconButton
-          icon="refresh"
-          size={22}
-          onPress={onRefresh}
-          disabled={isRefreshing}
-          iconColor={iconColor}
-          accessibilityLabel="Refresh"
-          style={styles.topActionBtn}
-        />
-        {isRefreshing ? (
-          <ActivityIndicator
-            size="small"
-            color={theme.colors.primary}
-            style={styles.refreshSpinner}
-          />
-        ) : null}
-      </View>
       <View style={styles.topActionSlot}>{notifications}</View>
       <View style={styles.topActionSlot}>
         <UserMenuAvatar
@@ -251,15 +233,21 @@ export default function AppShell({
             {topActions}
           </View>
 
-          <View
+          <PullToRefresh
             style={[
               styles.webMain,
               isNarrowDesktop && styles.webMainNarrow,
               mobile && styles.webMainMobile,
             ]}
+            contentStyle={
+              mobile ? styles.webMainScrollMobile : styles.webMainScroll
+            }
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            disabled={drawerOpen || disablePullToRefresh}
           >
             {children}
-          </View>
+          </PullToRefresh>
         </View>
       </View>
 
@@ -373,14 +361,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     minHeight: 0,
+    overflow: "hidden",
   },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexShrink: 0,
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingLeft: space[1],
+    zIndex: 5,
   },
   topBarLeft: {
     flexDirection: "row",
@@ -412,29 +403,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  topActionBtn: {
-    margin: 0,
-  },
-  refreshSpinner: {
-    position: "absolute",
-    right: -2,
-    top: -2,
-    transform: [{ scale: 0.75 }],
-  },
   webMain: {
     flex: 1,
     paddingHorizontal: layout.pagePadX,
     paddingTop: layout.pagePadY,
     paddingBottom: space[6],
     minHeight: 0,
-    ...(Platform.OS === "web"
-      ? {
-          overflowY: "auto",
-          overflowX: "hidden",
-        }
-      : {
-          overflow: "hidden",
-        }),
   },
   webMainNarrow: {
     paddingHorizontal: space[6],
@@ -443,9 +417,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[3],
     paddingTop: space[2],
     paddingBottom: space[3],
+  },
+  webMainScroll: {
     ...(Platform.OS === "web"
-      ? { overflowY: "hidden", overflowX: "hidden" }
-      : null),
+      ? {
+          overflowY: "auto",
+          overflowX: "hidden",
+          overscrollBehavior: "contain",
+        }
+      : {
+          overflow: "hidden",
+        }),
+  },
+  webMainScrollMobile: {
+    ...(Platform.OS === "web"
+      ? {
+          overflowY: "hidden",
+          overflowX: "hidden",
+          overscrollBehavior: "none",
+        }
+      : {
+          overflow: "hidden",
+        }),
   },
   drawerRoot: {
     ...StyleSheet.absoluteFillObject,

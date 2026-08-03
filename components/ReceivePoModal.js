@@ -484,7 +484,7 @@ export default function ReceivePoModal({
                     disabled={receiveSubmitting}
                     style={styles.backBtn}
                   />
-                  <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.detailHeaderCenter} pointerEvents="none">
                     <Text
                       style={[
                         styles.detailPo,
@@ -497,11 +497,11 @@ export default function ReceivePoModal({
                     </Text>
                     {expLabel ? (
                       <Text
-                        style={{
-                          color: theme.colors.onSurfaceVariant,
-                          fontSize: 12,
-                          marginTop: 2,
-                        }}
+                        style={[
+                          styles.detailExpected,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                        numberOfLines={1}
                       >
                         Expected ~{expLabel}
                       </Text>
@@ -849,17 +849,31 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   detailHeader: {
+    position: "relative",
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     marginBottom: 10,
-    marginLeft: -8,
+    minHeight: 44,
   },
   backBtn: {
     margin: 0,
+    zIndex: 1,
+  },
+  detailHeaderCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 48,
   },
   detailPo: {
     fontSize: 15,
     fontWeight: "600",
+    textAlign: "center",
+  },
+  detailExpected: {
+    fontSize: 12,
+    marginTop: 2,
+    textAlign: "center",
   },
   lineCard: {
     borderWidth: 1,

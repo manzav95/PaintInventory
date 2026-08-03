@@ -281,6 +281,7 @@ export default function UpcomingOrdersScreen({
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const isWideLayout = isDesktop || embeddedInShell;
+  const isCompactLayout = width < DESKTOP_BREAKPOINT;
 
   const orders = ordersFromApp;
   const showBlockingLoad = !ordersLoaded;
@@ -903,8 +904,11 @@ export default function UpcomingOrdersScreen({
               <Button
                 mode="outlined"
                 onPress={() => openEditOrder(order)}
-                style={styles.editOrderBtn}
+                style={styles.orderActionBtn}
+                contentStyle={styles.orderActionBtnContent}
+                labelStyle={styles.orderActionBtnLabel}
                 icon="pencil"
+                compact
                 disabled={deletingId === Number(order.id)}
               >
                 Edit
@@ -916,7 +920,10 @@ export default function UpcomingOrdersScreen({
                   markingId === order.id || deletingId === Number(order.id)
                 }
                 loading={markingId === order.id}
-                style={styles.markReceivedBtn}
+                style={styles.orderActionBtn}
+                contentStyle={styles.orderActionBtnContent}
+                labelStyle={styles.orderActionBtnLabel}
+                compact
               >
                 Mark Received
               </Button>
@@ -927,47 +934,58 @@ export default function UpcomingOrdersScreen({
                   deletingId === Number(order.id) || markingId === order.id
                 }
                 loading={deletingId === Number(order.id)}
-                style={styles.deleteOrderBtn}
+                style={styles.orderActionBtn}
+                contentStyle={styles.orderActionBtnContent}
+                labelStyle={styles.orderActionBtnLabel}
                 icon="delete-outline"
                 textColor={theme.colors.error}
+                compact
               >
                 Delete
               </Button>
             </View>
           )}
           {!isOpen && (
-            <View style={styles.orderActions}>
-              <Button
-                mode="outlined"
-                onPress={() => openEditReceived(order)}
-                style={styles.editOrderBtn}
-                icon="pencil"
-                disabled={deletingId === Number(order.id)}
-              >
-                Edit
-              </Button>
+            <>
               {getReceivedDateLine(order) ? (
                 <Text
                   style={[
-                    styles.receivedDateInline,
+                    styles.receivedDateFooter,
                     { color: theme.colors.onSurfaceVariant },
                   ]}
                 >
                   {getReceivedDateLine(order)}
                 </Text>
               ) : null}
-              <Button
-                mode="outlined"
-                onPress={() => confirmDeleteOrder(order)}
-                disabled={deletingId === Number(order.id)}
-                loading={deletingId === Number(order.id)}
-                style={styles.deleteOrderBtn}
-                icon="delete-outline"
-                textColor={theme.colors.error}
-              >
-                Delete
-              </Button>
-            </View>
+              <View style={styles.orderActions}>
+                <Button
+                  mode="outlined"
+                  onPress={() => openEditReceived(order)}
+                  style={styles.orderActionBtn}
+                  contentStyle={styles.orderActionBtnContent}
+                  labelStyle={styles.orderActionBtnLabel}
+                  icon="pencil"
+                  compact
+                  disabled={deletingId === Number(order.id)}
+                >
+                  Edit
+                </Button>
+                <Button
+                  mode="outlined"
+                  onPress={() => confirmDeleteOrder(order)}
+                  disabled={deletingId === Number(order.id)}
+                  loading={deletingId === Number(order.id)}
+                  style={styles.orderActionBtn}
+                  contentStyle={styles.orderActionBtnContent}
+                  labelStyle={styles.orderActionBtnLabel}
+                  icon="delete-outline"
+                  textColor={theme.colors.error}
+                  compact
+                >
+                  Delete
+                </Button>
+              </View>
+            </>
           )}
         </Card.Content>
       </Card>
@@ -1141,21 +1159,32 @@ export default function UpcomingOrdersScreen({
           onBack={onBack}
           embeddedInShell={embeddedInShell}
           actions={
-            !showForm ? (
+            !showForm && !isCompactLayout ? (
               <Button mode="contained" onPress={openNewOrder} icon="plus" compact>
                 Add Order
               </Button>
-            ) : (
+            ) : showForm && !isCompactLayout ? (
               <Button mode="outlined" onPress={closeForm} compact>
                 Cancel
               </Button>
-            )
+            ) : undefined
           }
         />
 
         {!showForm && (
           <>
             <MetricStrip items={metricItems} />
+            {isCompactLayout ? (
+              <Button
+                mode="contained"
+                onPress={openNewOrder}
+                icon="plus"
+                style={styles.addOrderFullWidth}
+                contentStyle={styles.addOrderFullWidthContent}
+              >
+                Add Order
+              </Button>
+            ) : null}
             <ToolbarCard>
               <TextInput
                 mode="outlined"
@@ -1209,7 +1238,7 @@ export default function UpcomingOrdersScreen({
             </ToolbarCard>
           </>
         )}
-        {isDesktop && showForm && (
+        {showForm && (
           <View
             style={[
               styles.filterRow,
@@ -1823,12 +1852,32 @@ const styles = StyleSheet.create({
   },
   orderActions: {
     flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     alignItems: "center",
+    gap: 8,
+    marginTop: 4,
   },
-  editOrderBtn: {
-    alignSelf: "flex-start",
+  orderActionBtn: {
+    flex: 1,
+    minWidth: 0,
+    margin: 0,
+  },
+  orderActionBtnContent: {
+    height: 36,
+    minHeight: 36,
+    paddingHorizontal: 6,
+  },
+  orderActionBtnLabel: {
+    fontSize: 12,
+    marginVertical: 0,
+  },
+  addOrderFullWidth: {
+    marginTop: space[3],
+    marginBottom: space[2],
+    borderRadius: radius.md,
+  },
+  addOrderFullWidthContent: {
+    height: 44,
   },
   addLineBtn: {
     marginTop: 4,
@@ -1985,12 +2034,6 @@ const styles = StyleSheet.create({
   },
   lineItemQty: {
     fontSize: 14,
-  },
-  markReceivedBtn: {
-    alignSelf: "flex-start",
-  },
-  deleteOrderBtn: {
-    alignSelf: "flex-start",
   },
   receivedModalOverlay: {
     flex: 1,

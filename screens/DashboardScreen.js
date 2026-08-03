@@ -698,11 +698,11 @@ export default function DashboardScreen({
     return action;
   };
 
-  /** Short verb for brief lists / popups: "check out", "received", … */
+  /** Short verb for brief lists / popups: "checked out", "received", … */
   const formatBriefVerb = (log) => {
     const type = resolveActionType(log);
-    if (type === "check_out") return "check out";
-    if (type === "check_in") return "check in";
+    if (type === "check_out") return "checked out";
+    if (type === "check_in") return "checked in";
     if (type === "receiving") return "received";
     if (type === "recycled") return "recycled";
     if (type === "add") return "added";
@@ -719,13 +719,16 @@ export default function DashboardScreen({
     return `${actionLabel} ${qtyPart}${colorName}`.replace(/\s+/g, " ").trim();
   };
 
-  const briefRecentLogs = useMemo(
-    () => (Array.isArray(filteredLogs) ? filteredLogs.slice(0, 10) : []),
-    [filteredLogs],
-  );
+  const briefRecentLogs = useMemo(() => {
+    const source = Array.isArray(visibleHistoryLogs) ? visibleHistoryLogs : [];
+    // Admin mobile: full week window (same as desktop table). Standard: last 10.
+    if (isAdmin) return source;
+    return source.slice(0, 10);
+  }, [visibleHistoryLogs, isAdmin]);
 
-  const showFullHistoryTable = showTransactionTable && !(isMobileLayout && !isAdmin);
-  const showBriefRecent = showTransactionTable && isMobileLayout && !isAdmin;
+  // Mobile: brief stacked list (legible, no horizontal scroll). Desktop: full table.
+  const showFullHistoryTable = showTransactionTable && !isMobileLayout;
+  const showBriefRecent = showTransactionTable && isMobileLayout;
 
   const getQuantity = (action, details, itemId) => {
     // Return the amount of gallons that were manipulated (changed)
@@ -2449,7 +2452,7 @@ export default function DashboardScreen({
               { color: theme.colors.onSurfaceVariant },
             ]}
           >
-            Recent activity
+            {isAdmin ? "Transaction history" : "Recent activity"}
           </Text>
           {!auditLogsLoaded ? (
             <View style={styles.statLoadingRow}>
@@ -2466,77 +2469,89 @@ export default function DashboardScreen({
               No recent transactions.
             </Text>
           ) : (
-            <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
-              {briefRecentLogs.map((log, index) => {
-                const accent = getActionColor(log.action, log.details);
-                const time = log.timestamp
-                  ? new Date(log.timestamp).toLocaleString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })
-                  : "—";
-                const user = getDisplayUserName(log);
-                const actionLabel = formatBriefVerb(log);
-                const qty = logQtyAbs(log);
-                const colorName = getItemName(log.itemId);
-                return (
-                  <View
-                    key={`${log.timestamp}-${log.itemId}-${index}`}
-                    style={[
-                      styles.briefHistoryRow,
-                      index > 0 && {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: theme.colors.outlineVariant,
-                      },
-                    ]}
-                  >
+            <>
+              <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
+                {briefRecentLogs.map((log, index) => {
+                  const accent = getActionColor(log.action, log.details);
+                  const time = log.timestamp
+                    ? new Date(log.timestamp).toLocaleString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : "—";
+                  const user = getDisplayUserName(log);
+                  const actionLabel = formatBriefVerb(log);
+                  const qty = logQtyAbs(log);
+                  const colorName = getItemName(log.itemId);
+                  return (
                     <View
+                      key={`${log.timestamp}-${log.itemId}-${index}`}
                       style={[
-                        styles.briefHistoryAccent,
-                        { backgroundColor: accent },
+                        styles.briefHistoryRow,
+                        index > 0 && {
+                          borderTopWidth: StyleSheet.hairlineWidth,
+                          borderTopColor: theme.colors.outlineVariant,
+                        },
                       ]}
-                    />
-                    <View style={styles.briefHistoryBody}>
-                      <View style={styles.briefHistoryTop}>
+                    >
+                      <View
+                        style={[
+                          styles.briefHistoryAccent,
+                          { backgroundColor: accent },
+                        ]}
+                      />
+                      <View style={styles.briefHistoryBody}>
+                        <View style={styles.briefHistoryTop}>
+                          <Text
+                            style={[
+                              styles.briefHistoryTime,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {time}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.briefHistoryUser,
+                              { color: theme.colors.onSurface },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {user}
+                          </Text>
+                        </View>
                         <Text
                           style={[
-                            styles.briefHistoryTime,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {time}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.briefHistoryUser,
+                            styles.briefHistorySummary,
                             { color: theme.colors.onSurface },
                           ]}
-                          numberOfLines={1}
+                          numberOfLines={2}
                         >
-                          {user}
+                          <Text style={{ color: accent, fontWeight: "700" }}>
+                            {actionLabel}
+                          </Text>
+                          {qty > 0 ? ` ${qty} gal ` : " "}
+                          <Text style={{ fontWeight: "700" }}>{colorName}</Text>
                         </Text>
                       </View>
-                      <Text
-                        style={[
-                          styles.briefHistorySummary,
-                          { color: theme.colors.onSurface },
-                        ]}
-                        numberOfLines={2}
-                      >
-                        <Text style={{ color: accent, fontWeight: "700" }}>
-                          {actionLabel}
-                        </Text>
-                        {qty > 0 ? ` ${qty} gal ` : " "}
-                        <Text style={{ fontWeight: "700" }}>{colorName}</Text>
-                      </Text>
                     </View>
-                  </View>
-                );
-              })}
-            </View>
+                  );
+                })}
+              </View>
+              {isAdmin && hasMoreHistory ? (
+                <Button
+                  mode="outlined"
+                  onPress={() => setHistoryWeeksShown((w) => w + 1)}
+                  style={styles.briefHistoryMoreBtn}
+                  compact
+                >
+                  Show more
+                </Button>
+              ) : null}
+            </>
           )}
         </View>
       ) : null}
@@ -3418,6 +3433,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
     lineHeight: 20,
+  },
+  briefHistoryMoreBtn: {
+    marginTop: space[3],
+    alignSelf: "stretch",
   },
   showMoreHistoryLink: {
     paddingVertical: 14,

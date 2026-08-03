@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   FlatList,
-  RefreshControl,
   Platform,
   useWindowDimensions,
   ScrollView,
@@ -17,6 +16,7 @@ import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
+import PullToRefresh from "../components/PullToRefresh";
 import {
   Card,
   Text,
@@ -245,6 +245,7 @@ export default function InventoryListScreen({
     top: false,
     bottom: false,
   });
+  const [listAtTop, setListAtTop] = useState(true);
 
   const syncScrollFades = (setter, y, contentH, layoutH) => {
     const canScroll = contentH > layoutH + 2;
@@ -337,6 +338,9 @@ export default function InventoryListScreen({
     setReceiveDetailKey((k) => k + 1);
     onRefreshReceiveOrders?.(false);
   };
+
+  const invBtnContentStyle = styles.viewModeButtonContent;
+  const invBtnLabelStyle = styles.viewModeButtonLabel;
 
   const closeReceivePoModal = () => {
     if (receiveSubmitting) return;
@@ -1241,6 +1245,9 @@ export default function InventoryListScreen({
                         prev === "standard" ? "custom" : "standard",
                       )
                     }
+                    style={styles.viewModeButton}
+                    contentStyle={invBtnContentStyle}
+                    labelStyle={invBtnLabelStyle}
                   >
                     {bookFilter === "standard" ? "Custom" : "Stock"}
                   </Button>
@@ -1253,6 +1260,12 @@ export default function InventoryListScreen({
                       viewMode === "colorBook" ? "inventory" : "colorBook",
                     )
                   }
+                  style={[
+                    styles.viewModeButton,
+                    styles.viewModeButtonColorBook,
+                  ]}
+                  contentStyle={invBtnContentStyle}
+                  labelStyle={invBtnLabelStyle}
                   icon="palette-outline"
                 >
                   {viewMode === "colorBook" ? "Inventory" : "Color Book"}
@@ -1570,7 +1583,8 @@ export default function InventoryListScreen({
                                         : "rgba(0,0,0,0.06)",
                                     },
                                   ]}
-                                  contentStyle={styles.viewModeButtonContent}
+                                  contentStyle={invBtnContentStyle}
+                                  labelStyle={invBtnLabelStyle}
                                   disabled={bookFilter === "custom"}
                                 >
                                   {listOrderMode === "trueOrder"
@@ -1591,6 +1605,8 @@ export default function InventoryListScreen({
                                   )
                                 }
                                 style={styles.viewModeButton}
+                                contentStyle={invBtnContentStyle}
+                                labelStyle={invBtnLabelStyle}
                               >
                                 {bookFilter === "standard" ? "Custom" : "Stock"}
                               </Button>
@@ -1600,6 +1616,8 @@ export default function InventoryListScreen({
                                   compact
                                   onPress={() => setApOnly((v) => !v)}
                                   style={styles.viewModeButton}
+                                  contentStyle={invBtnContentStyle}
+                                  labelStyle={invBtnLabelStyle}
                                 >
                                   AP
                                 </Button>
@@ -1644,6 +1662,8 @@ export default function InventoryListScreen({
                                 icon="truck-delivery"
                                 onPress={openReceivePoModal}
                                 style={styles.receivePoButton}
+                                contentStyle={invBtnContentStyle}
+                                labelStyle={invBtnLabelStyle}
                               >
                                 Receive PO
                               </Button>
@@ -1818,13 +1838,6 @@ export default function InventoryListScreen({
                                     }));
                                   }
                                 }}
-                                refreshControl={
-                                  <RefreshControl
-                                    refreshing={isRefreshing}
-                                    onRefresh={onRefresh}
-                                    tintColor={theme.colors.primary}
-                                  />
-                                }
                               >
                                 <DataTable style={styles.dataTable}>
                                   {filteredAndSortedInventory.map((item) => {
@@ -2225,6 +2238,13 @@ export default function InventoryListScreen({
             { backgroundColor: theme.colors.background },
           ]}
         >
+        <PullToRefresh
+          style={styles.listPullRefresh}
+          contentStyle={styles.listPullRefreshContent}
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          atTop={listAtTop}
+        >
         <ScrollView
           style={[
             styles.container,
@@ -2237,6 +2257,7 @@ export default function InventoryListScreen({
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } =
               e.nativeEvent;
+            setListAtTop((contentOffset.y ?? 0) <= 2);
             syncScrollFades(
               setMobileListFades,
               contentOffset.y,
@@ -2264,13 +2285,6 @@ export default function InventoryListScreen({
               syncScrollFades(setMobileListFades, 0, contentH, layoutH);
             }
           }}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.colors.primary}
-            />
-          }
         >
           <View style={styles.header}>
             <View style={styles.refreshContainer}>
@@ -2290,6 +2304,8 @@ export default function InventoryListScreen({
                       styles.viewModeButtonMobile,
                       styles.viewModeButtonLong,
                     ]}
+                    contentStyle={invBtnContentStyle}
+                    labelStyle={invBtnLabelStyle}
                     disabled={bookFilter === "custom"}
                   >
                     {listOrderMode === "trueOrder"
@@ -2306,6 +2322,8 @@ export default function InventoryListScreen({
                     )
                   }
                   style={styles.viewModeButtonMobile}
+                  contentStyle={invBtnContentStyle}
+                  labelStyle={invBtnLabelStyle}
                 >
                   {bookFilter === "standard" ? "Stock" : "Custom"}
                 </Button>
@@ -2315,6 +2333,8 @@ export default function InventoryListScreen({
                     compact
                     onPress={() => setApOnly((v) => !v)}
                     style={styles.viewModeButtonMobile}
+                    contentStyle={invBtnContentStyle}
+                    labelStyle={invBtnLabelStyle}
                   >
                     AP
                   </Button>
@@ -2332,6 +2352,8 @@ export default function InventoryListScreen({
                   styles.viewModeButtonMobile,
                   styles.viewModeButtonColorBook,
                 ]}
+                contentStyle={invBtnContentStyle}
+                labelStyle={invBtnLabelStyle}
                 icon="palette-outline"
               >
                 {viewMode === "colorBook" ? "Inventory" : "Color Book"}
@@ -2378,6 +2400,8 @@ export default function InventoryListScreen({
                   icon="truck-delivery"
                   onPress={openReceivePoModal}
                   style={styles.receivePoButton}
+                  contentStyle={invBtnContentStyle}
+                  labelStyle={invBtnLabelStyle}
                 >
                   Receive PO
                 </Button>
@@ -2625,6 +2649,7 @@ export default function InventoryListScreen({
             </View>
           )}
         </ScrollView>
+        </PullToRefresh>
         {mobileListFades.top ? (
           <EdgeFade color={theme.colors.background} side="top" />
         ) : null}
@@ -2665,7 +2690,8 @@ export default function InventoryListScreen({
                       : "rgba(0,0,0,0.06)",
                   },
                 ]}
-                contentStyle={styles.viewModeButtonContent}
+                contentStyle={invBtnContentStyle}
+                labelStyle={invBtnLabelStyle}
                 disabled={bookFilter === "custom"}
               >
                 {listOrderMode === "trueOrder" ? "True Order" : "Alphabetical"}
@@ -2680,6 +2706,8 @@ export default function InventoryListScreen({
                 )
               }
               style={styles.viewModeButtonMobile}
+              contentStyle={invBtnContentStyle}
+              labelStyle={invBtnLabelStyle}
             >
               {bookFilter === "standard" ? "Stock" : "Custom"}
             </Button>
@@ -2697,6 +2725,8 @@ export default function InventoryListScreen({
                 styles.viewModeButtonMobile,
                 styles.viewModeButtonColorBook,
               ]}
+              contentStyle={invBtnContentStyle}
+              labelStyle={invBtnLabelStyle}
               icon="palette-outline"
             >
               {viewMode === "colorBook" ? "Inventory" : "Color Book"}
@@ -2745,6 +2775,8 @@ export default function InventoryListScreen({
                 icon="truck-delivery"
                 onPress={openReceivePoModal}
                 style={styles.receivePoButton}
+                contentStyle={invBtnContentStyle}
+                labelStyle={invBtnLabelStyle}
               >
                 Receive PO
               </Button>
@@ -2765,109 +2797,118 @@ export default function InventoryListScreen({
         </View>
       )}
       <View style={styles.listContent}>
-        {viewMode === "inventory" && filteredAndSortedInventory.length === 0 ? (
-          <AppEmptyState
-            title={searchQuery ? "No items found" : "No items in inventory"}
-            subtitle={
-              searchQuery
-                ? "Try a different search term"
-                : "Scan a QR Code to add your first item"
-            }
-          />
-        ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
-          <AppEmptyState
-            title={
-              searchQuery
-                ? "No paint colors found"
-                : "No paint colors with hex in inventory"
-            }
-            subtitle={
-              searchQuery
-                ? "Try a different search"
-                : "Add paint items with a color (hex) to see them here"
-            }
-          />
-        ) : (
-          <View style={[styles.listFlex, styles.tableScrollFadeHost]}>
-            <FlatList
-              ref={listRef}
-              key={viewMode}
-              data={
-                viewMode === "inventory"
-                  ? filteredAndSortedInventory
-                  : colorBookItems
+        <PullToRefresh
+          style={styles.listPullRefresh}
+          contentStyle={styles.listPullRefreshContent}
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          atTop={
+            (viewMode === "inventory" &&
+              filteredAndSortedInventory.length === 0) ||
+            (viewMode === "colorBook" && colorBookItems.length === 0)
+              ? true
+              : listAtTop
+          }
+        >
+          {viewMode === "inventory" &&
+          filteredAndSortedInventory.length === 0 ? (
+            <AppEmptyState
+              title={searchQuery ? "No items found" : "No items in inventory"}
+              subtitle={
+                searchQuery
+                  ? "Try a different search term"
+                  : "Scan a QR Code to add your first item"
               }
-              renderItem={
-                viewMode === "inventory" ? renderItem : renderColorCard
-              }
-              keyExtractor={(item) =>
-                item.id?.toString() || String(Math.random())
-              }
-              numColumns={viewMode === "colorBook" ? 2 : 1}
-              columnWrapperStyle={
-                viewMode === "colorBook" ? styles.colorBookRow : undefined
-              }
-              style={styles.listFlex}
-              contentContainerStyle={
-                viewMode === "colorBook" ? styles.colorBookList : styles.list
-              }
-              refreshControl={
-                <RefreshControl
-                  refreshing={isRefreshing}
-                  onRefresh={onRefresh}
-                  tintColor={theme.colors.primary}
-                />
-              }
-              keyboardDismissMode="none"
-              keyboardShouldPersistTaps="handled"
-              onScroll={(e) => {
-                const { contentOffset, contentSize, layoutMeasurement } =
-                  e.nativeEvent;
-                const y = contentOffset.y ?? 0;
-                setScrollOffset(y);
-                notifyViewState({ scrollOffset: y });
-                syncScrollFades(
-                  setMobileListFades,
-                  y,
-                  contentSize.height,
-                  layoutMeasurement.height,
-                );
-              }}
-              onContentSizeChange={(_w, h) => {
-                mobileListMetricsRef.current.contentH = h;
-                const layoutH = mobileListMetricsRef.current.layoutH;
-                if (layoutH > 0) {
-                  syncScrollFades(
-                    setMobileListFades,
-                    scrollOffset,
-                    h,
-                    layoutH,
-                  );
-                }
-              }}
-              onLayout={(e) => {
-                const layoutH = e.nativeEvent.layout.height;
-                mobileListMetricsRef.current.layoutH = layoutH;
-                const contentH = mobileListMetricsRef.current.contentH;
-                if (contentH > 0) {
-                  syncScrollFades(
-                    setMobileListFades,
-                    scrollOffset,
-                    contentH,
-                    layoutH,
-                  );
-                }
-              }}
-              scrollEventThrottle={16}
             />
-            {mobileListFades.top ? (
-              <EdgeFade color={theme.colors.background} side="top" />
-            ) : null}
-            {mobileListFades.bottom ? (
-              <EdgeFade color={theme.colors.background} side="bottom" />
-            ) : null}
-          </View>
-        )}
+          ) : viewMode === "colorBook" && colorBookItems.length === 0 ? (
+            <AppEmptyState
+              title={
+                searchQuery
+                  ? "No paint colors found"
+                  : "No paint colors with hex in inventory"
+              }
+              subtitle={
+                searchQuery
+                  ? "Try a different search"
+                  : "Add paint items with a color (hex) to see them here"
+              }
+            />
+          ) : (
+            <View style={[styles.listFlex, styles.tableScrollFadeHost]}>
+              <FlatList
+                ref={listRef}
+                key={viewMode}
+                data={
+                  viewMode === "inventory"
+                    ? filteredAndSortedInventory
+                    : colorBookItems
+                }
+                renderItem={
+                  viewMode === "inventory" ? renderItem : renderColorCard
+                }
+                keyExtractor={(item) =>
+                  item.id?.toString() || String(Math.random())
+                }
+                numColumns={viewMode === "colorBook" ? 2 : 1}
+                columnWrapperStyle={
+                  viewMode === "colorBook" ? styles.colorBookRow : undefined
+                }
+                style={styles.listFlex}
+                contentContainerStyle={
+                  viewMode === "colorBook" ? styles.colorBookList : styles.list
+                }
+                keyboardDismissMode="none"
+                keyboardShouldPersistTaps="handled"
+                onScroll={(e) => {
+                  const { contentOffset, contentSize, layoutMeasurement } =
+                    e.nativeEvent;
+                  const y = contentOffset.y ?? 0;
+                  setListAtTop(y <= 2);
+                  setScrollOffset(y);
+                  notifyViewState({ scrollOffset: y });
+                  syncScrollFades(
+                    setMobileListFades,
+                    y,
+                    contentSize.height,
+                    layoutMeasurement.height,
+                  );
+                }}
+                onContentSizeChange={(_w, h) => {
+                  mobileListMetricsRef.current.contentH = h;
+                  const layoutH = mobileListMetricsRef.current.layoutH;
+                  if (layoutH > 0) {
+                    syncScrollFades(
+                      setMobileListFades,
+                      scrollOffset,
+                      h,
+                      layoutH,
+                    );
+                  }
+                }}
+                onLayout={(e) => {
+                  const layoutH = e.nativeEvent.layout.height;
+                  mobileListMetricsRef.current.layoutH = layoutH;
+                  const contentH = mobileListMetricsRef.current.contentH;
+                  if (contentH > 0) {
+                    syncScrollFades(
+                      setMobileListFades,
+                      scrollOffset,
+                      contentH,
+                      layoutH,
+                    );
+                  }
+                }}
+                scrollEventThrottle={16}
+              />
+              {mobileListFades.top ? (
+                <EdgeFade color={theme.colors.background} side="top" />
+              ) : null}
+              {mobileListFades.bottom ? (
+                <EdgeFade color={theme.colors.background} side="bottom" />
+              ) : null}
+            </View>
+          )}
+        </PullToRefresh>
       </View>
       {receivePoModal}
       <ColorPreviewModal />
@@ -2883,6 +2924,17 @@ const styles = StyleSheet.create({
   listContent: {
     flex: 1,
     minHeight: 0,
+  },
+  listPullRefresh: {
+    flex: 1,
+    minHeight: 0,
+  },
+  listPullRefreshContent: {
+    flex: 1,
+    minHeight: 0,
+    ...(Platform.OS === "web"
+      ? { overflowY: "hidden", overflowX: "hidden" }
+      : { overflow: "hidden" }),
   },
   listFlex: {
     flex: 1,
@@ -2964,6 +3016,10 @@ const styles = StyleSheet.create({
   receivePoButton: {
     flexShrink: 0,
     alignSelf: "center",
+    margin: 0,
+    height: 36,
+    borderRadius: radius.md,
+    justifyContent: "center",
   },
   receivePoButtonWrap: {
     flexShrink: 0,
@@ -3702,30 +3758,38 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   viewModeButton: {
-    marginRight: 6,
+    margin: 0,
+    marginRight: 0,
     minWidth: 68,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    height: 36,
+    borderRadius: radius.md,
+    justifyContent: "center",
   },
   viewModeButtonContent: {
     height: 36,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+  },
+  viewModeButtonLabel: {
+    fontSize: 13,
+    marginVertical: 0,
+    lineHeight: 18,
   },
   viewModeButtonColorBook: {
-    marginLeft: 6,
-    minWidth: 128,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    marginLeft: 0,
+    minWidth: 118,
   },
   viewModeButtonMobile: {
-    marginRight: 4,
+    margin: 0,
+    marginRight: 0,
     minWidth: 68,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    height: 36,
+    borderRadius: radius.md,
+    justifyContent: "center",
   },
   viewModeButtonLong: {
     minWidth: 0,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
   },
   colorBookScrollDesktop: {
     flex: 1,

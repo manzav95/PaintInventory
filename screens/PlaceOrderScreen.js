@@ -99,19 +99,28 @@ function getMaterialTypeLabelAndColor(item, theme) {
 }
 
 /** Column count from actual content width (main pane when sidebar is open). */
-function gridColumnCount(contentWidth, isDesktop) {
-  if (isDesktop) return contentWidth >= 360 ? 3 : 1;
+function gridColumnCount(contentWidth, { isDesktop, isMobile }) {
+  if (isMobile) return 2;
+  if (isDesktop) return contentWidth >= 360 ? 3 : 2;
   if (contentWidth >= 680) return 3;
-  if (contentWidth >= 420) return 2;
-  return 1;
+  if (contentWidth >= 360) return 2;
+  return 2;
 }
 
-function getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop) {
+function getContentWidth(
+  windowWidth,
+  { embeddedInShell, isNarrowDesktop, showPersistentSidebar },
+) {
   const scrollPad = 32;
-  if (embeddedInShell) {
+  if (embeddedInShell && showPersistentSidebar) {
     const sidebar = isNarrowDesktop ? SHELL_SIDEBAR_NARROW : SHELL_SIDEBAR_WIDE;
     const shellChrome = 40 + sidebar + 20 + scrollPad;
     return Math.max(280, windowWidth - shellChrome);
+  }
+  // Mobile shell / no sidebar: only page + scroll padding.
+  if (embeddedInShell) {
+    const mobileChrome = 24 + scrollPad;
+    return Math.max(260, windowWidth - mobileChrome);
   }
   return Math.max(280, Math.min(PAGE_MAX_WIDTH, windowWidth) - scrollPad);
 }
@@ -256,13 +265,19 @@ export default function PlaceOrderScreen({
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width: windowWidth } = useWindowDimensions();
-  const { isNarrowDesktop } = useAppLayout();
-  const contentWidth = useMemo(
-    () => getContentWidth(windowWidth, embeddedInShell, isNarrowDesktop),
-    [windowWidth, embeddedInShell, isNarrowDesktop],
-  );
+  const { isNarrowDesktop, showPersistentSidebar } = useAppLayout();
   const isDesktop = isWeb && windowWidth >= DESKTOP_BREAKPOINT;
-  const numCols = gridColumnCount(contentWidth, isDesktop);
+  const isMobile = windowWidth < DESKTOP_BREAKPOINT;
+  const contentWidth = useMemo(
+    () =>
+      getContentWidth(windowWidth, {
+        embeddedInShell,
+        isNarrowDesktop,
+        showPersistentSidebar,
+      }),
+    [windowWidth, embeddedInShell, isNarrowDesktop, showPersistentSidebar],
+  );
+  const numCols = gridColumnCount(contentWidth, { isDesktop, isMobile });
 
   const [filterTab, setFilterTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");

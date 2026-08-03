@@ -1,7 +1,13 @@
-import React, { useMemo, useRef, useState } from "react";
-import { Platform, Pressable, StyleSheet, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  View,
+} from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { TextInput, useTheme } from "react-native-paper";
+import { Button, Text, TextInput, useTheme } from "react-native-paper";
 
 function toYmd(d) {
   if (!(d instanceof Date) || isNaN(d.getTime())) return "";
@@ -32,9 +38,33 @@ function formatMdy(value) {
 }
 
 /**
- * Outlined date field that matches Paper TextInput chrome on every platform.
- * Web uses a hidden native date input (avoids type=date overflow / missing right border).
+ * Outlined date field that matches Paper TextInput chrome.
+ * Web: full-size transparent native date input over the field (works on mobile Safari).
+ * Native: system / modal picker.
  */
+
+const webOverlayInputStyle = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
+  width: "100%",
+  height: "100%",
+  // Not fully 0 — iOS Safari ignores taps on opacity:0 controls.
+  opacity: 0.011,
+  zIndex: 5,
+  border: "none",
+  padding: 0,
+  margin: 0,
+  cursor: "pointer",
+  fontSize: 16,
+  color: "transparent",
+  backgroundColor: "transparent",
+  WebkitAppearance: "none",
+  appearance: "none",
+};
+
 export default function DateField({
   label,
   value,
@@ -47,58 +77,27 @@ export default function DateField({
 }) {
   const isWeb = Platform.OS === "web";
   const [show, setShow] = useState(false);
+  const [draft, setDraft] = useState(() => parseYmd(value) || new Date());
   const theme = useTheme();
-  const hiddenRef = useRef(null);
 
   const nativeDate = useMemo(() => parseYmd(value) || new Date(), [value]);
   const display = formatMdy(value);
 
-  const openWebPicker = () => {
-    if (disabled) return;
-    const el = hiddenRef.current;
-    if (!el) return;
-    try {
-      if (typeof el.showPicker === "function") {
-        el.showPicker();
-        return;
-      }
-    } catch (_) {
-      /* fall through */
-    }
-    el.focus();
-    el.click();
-  };
-
   const openNativePicker = () => {
-    if (!disabled) setShow(true);
+    if (disabled) return;
+    setDraft(nativeDate);
+    setShow(true);
   };
 
-  const open = isWeb ? openWebPicker : openNativePicker;
+  const confirmIos = () => {
+    onChange?.(toYmd(draft));
+    setShow(false);
+  };
 
   return (
     <View style={[styles.wrap, style]}>
-      {isWeb ? (
-        <input
-          ref={hiddenRef}
-          type="date"
-          value={String(value ?? "")}
-          disabled={disabled}
-          min={min}
-          max={max}
-          tabIndex={-1}
-          aria-hidden="true"
-          onChange={(e) => onChange?.(e.target.value)}
-          style={styles.hiddenNative}
-        />
-      ) : null}
-
-      <Pressable
-        onPress={open}
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityLabel={label || "Choose date"}
-      >
-        <View pointerEvents="none">
+      <View pointerEvents={isWeb ? "none" : "auto"}>
+        {isWeb ? (
           <TextInput
             label={label}
             value={display}
@@ -112,22 +111,113 @@ export default function DateField({
             placeholder="MM/DD/YYYY"
             right={<TextInput.Icon icon="calendar" disabled={disabled} />}
           />
-        </View>
-      </Pressable>
+        ) : (
+          <Pressable
+            onPress={openNativePicker}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={label || "Choose date"}
+          >
+            <View pointerEvents="none">
+              <TextInput
+                label={label}
+                value={display}
+                mode={mode}
+                editable={false}
+                disabled={disabled}
+                style={styles.input}
+                outlineColor={
+                  theme.colors?.outlineVariant ?? theme.colors?.outline
+                }
+                activeOutlineColor={theme.colors?.primary}
+                textColor={theme.colors?.onSurface}
+                placeholder="MM/DD/YYYY"
+                right={<TextInput.Icon icon="calendar" disabled={disabled} />}
+              />
+            </View>
+          </Pressable>
+        )}
+      </View>
 
-      {!isWeb && show ? (
+      {isWeb ? (
+        <input
+          type="date"
+          value={String(value ?? "")}
+          disabled={disabled}
+          min={min}
+          max={max}
+          aria-label={label || "Choose date"}
+          onChange={(e) => onChange?.(e.target.value)}
+          style={webOverlayInputStyle}
+        />
+      ) : null}
+
+      {!isWeb && Platform.OS === "android" && show ? (
         <DateTimePicker
           value={nativeDate}
           mode="date"
-          display={Platform.OS === "ios" ? "spinner" : "default"}
+          display="default"
           themeVariant={theme.dark ? "dark" : "light"}
           minimumDate={min ? parseYmd(min) || undefined : undefined}
           maximumDate={max ? parseYmd(max) || undefined : undefined}
-          onChange={(_, selectedDate) => {
-            if (Platform.OS !== "ios") setShow(false);
+          onChange={(event, selectedDate) => {
+            setShow(false);
+            if (event?.type === "dismissed") return;
             if (selectedDate) onChange?.(toYmd(selectedDate));
           }}
         />
+      ) : null}
+
+      {!isWeb && Platform.OS === "ios" ? (
+        <Modal
+          visible={show}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShow(false)}
+        >
+          <Pressable style={styles.backdrop} onPress={() => setShow(false)}>
+            <Pressable
+              style={[
+                styles.sheet,
+                { backgroundColor: theme.colors.surface },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.sheetHeader}>
+                <Text
+                  style={[
+                    styles.sheetTitle,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {label || "Date"}
+                </Text>
+                <Button mode="text" compact onPress={() => setShow(false)}>
+                  Cancel
+                </Button>
+              </View>
+              <DateTimePicker
+                value={draft}
+                mode="date"
+                display="spinner"
+                themeVariant={theme.dark ? "dark" : "light"}
+                minimumDate={min ? parseYmd(min) || undefined : undefined}
+                maximumDate={max ? parseYmd(max) || undefined : undefined}
+                style={styles.spinner}
+                onChange={(_, selectedDate) => {
+                  if (selectedDate) setDraft(selectedDate);
+                }}
+              />
+              <Button
+                mode="contained"
+                onPress={confirmIos}
+                style={styles.doneBtn}
+              >
+                Done
+              </Button>
+            </Pressable>
+          </Pressable>
+        </Modal>
       ) : null}
     </View>
   );
@@ -147,16 +237,34 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     backgroundColor: "transparent",
   },
-  hiddenNative: {
-    position: "absolute",
-    opacity: 0.01,
-    width: 1,
-    height: 1,
-    left: 0,
-    top: 0,
-    zIndex: -1,
-    border: "none",
-    padding: 0,
-    margin: 0,
+  backdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  sheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 28,
+    width: "100%",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  spinner: {
+    width: "100%",
+    alignSelf: "center",
+  },
+  doneBtn: {
+    marginTop: 8,
   },
 });

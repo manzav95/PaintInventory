@@ -8,8 +8,6 @@ import {
   Alert,
 } from "react-native";
 import {
-  Card,
-  Title,
   Text,
   Button,
   Switch,
@@ -18,15 +16,14 @@ import {
   TextInput,
   ActivityIndicator,
 } from "react-native-paper";
-import { IconButton } from "react-native-paper";
 import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
 import version from "../version";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
-import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import InventoryService from "../services/inventoryService";
 import LoginHistoryModal from "../components/LoginHistoryModal";
-import { fontFamily } from "../theme/tokens";
+import { AppSurface, AppText } from "../components/ui";
+import { colors, fontFamily, space, radius } from "../theme/tokens";
 
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
@@ -74,10 +71,12 @@ export default function SettingsScreen({
     })();
   }, []);
 
+  const canvasBg = theme.dark
+    ? colors.dark.background
+    : theme.colors.background;
+
   return (
-    <View
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-    >
+    <View style={[styles.container, { backgroundColor: canvasBg }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[
@@ -91,270 +90,245 @@ export default function SettingsScreen({
           embeddedInShell={embeddedInShell}
         />
         <View style={isDesktop && styles.webWrapper}>
-          <Card
-            style={[
-              styles.card,
-              { backgroundColor: theme.colors.surface },
-              isDesktop && styles.webCard,
-            ]}
-          >
-            <Card.Content>
-              <Title style={styles.sectionTitle}>Appearance</Title>
+          <AppSurface>
+            <AppText variant="sectionTitle" style={styles.sectionTitle}>
+              Appearance
+            </AppText>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <AppText variant="bodyStrong">Dark Mode</AppText>
+              </View>
+              <Switch
+                value={isDarkMode}
+                onValueChange={onToggleDarkMode}
+                color={theme.colors.primary}
+              />
+            </View>
+          </AppSurface>
+
+          <AppSurface>
+            <AppText variant="sectionTitle" style={styles.sectionTitle}>
+              Account
+            </AppText>
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <AppText variant="bodyStrong">Current User</AppText>
+                <AppText
+                  variant="caption"
+                  tone="muted"
+                  style={styles.settingDescription}
+                >
+                  Logged in as: {userName || "Unknown"}
+                </AppText>
+              </View>
+            </View>
+            <Divider
+              style={[
+                styles.divider,
+                { backgroundColor: theme.colors.outlineVariant },
+              ]}
+            />
+            <Button
+              mode="outlined"
+              onPress={onSwitchUser}
+              style={styles.switchUserButton}
+              icon="account-switch"
+            >
+              Switch User
+            </Button>
+          </AppSurface>
+
+          {isAdmin && (
+            <AppSurface>
+              <AppText variant="sectionTitle" style={styles.sectionTitle}>
+                Admin Settings
+              </AppText>
               <View style={styles.settingRow}>
                 <View style={styles.settingInfo}>
-                  <Text
-                    style={[
-                      styles.settingLabel,
-                      { color: theme.colors.onSurface },
-                    ]}
+                  <AppText variant="bodyStrong">Overtime</AppText>
+                  <AppText
+                    variant="caption"
+                    tone="muted"
+                    style={styles.settingDescription}
                   >
-                    Dark Mode
-                  </Text>
+                    Material Usage Overtime
+                    {"\n"}On: Day 6:00am–4:25pm · Swing 4:26pm–2:30am
+                    {"\n"}Off: Day 6:00am–3:25pm · Swing 3:26pm–12:30am
+                  </AppText>
                 </View>
                 <Switch
-                  value={isDarkMode}
-                  onValueChange={onToggleDarkMode}
+                  value={materialUsageOvertime}
+                  onValueChange={(v) => onSetMaterialUsageOvertime?.(v)}
                   color={theme.colors.primary}
                 />
               </View>
-            </Card.Content>
-          </Card>
-
-          <Card
-            style={[styles.card, { backgroundColor: theme.colors.surface }]}
-          >
-            <Card.Content>
-              <Title style={styles.sectionTitle}>Account</Title>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <Text
-                    style={[
-                      styles.settingLabel,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    Current User
-                  </Text>
-                  <Text
-                    style={[
-                      styles.settingDescription,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Logged in as: {userName || "Unknown"}
-                  </Text>
-                </View>
-              </View>
-              <Divider style={styles.divider} />
+              <Divider
+                style={[
+                  styles.divider,
+                  { backgroundColor: theme.colors.outlineVariant },
+                ]}
+              />
+              <AppText variant="caption" tone="muted" style={styles.blockHint}>
+                View sign-in history for all users (timestamp per login).
+              </AppText>
               <Button
                 mode="outlined"
-                onPress={onSwitchUser}
-                style={styles.switchUserButton}
-                icon="account-switch"
+                onPress={() => setLoginHistoryOpen(true)}
+                style={styles.adminButton}
+                icon="account-clock"
               >
-                Switch User
+                User login history
               </Button>
-            </Card.Content>
-          </Card>
-
-          {isAdmin && (
-            <Card
-              style={[styles.card, { backgroundColor: theme.colors.surface }]}
-            >
-              <Card.Content>
-                <Title style={styles.sectionTitle}>Admin Settings</Title>
-                <View style={styles.settingRow}>
-                  <View style={styles.settingInfo}>
-                    <Text
-                      style={[
-                        styles.settingLabel,
-                        { color: theme.colors.onSurface },
-                      ]}
-                    >
-                      Overtime
-                    </Text>
-                    <Text
-                      style={[
-                        styles.settingDescription,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Material Usage Overtime
-                      {"\n"}On: Day 6:00am–4:25pm · Swing 4:26pm–2:30am
-                      {"\n"}Off: Day 6:00am–3:25pm · Swing 3:26pm–12:30am
-                    </Text>
-                  </View>
-                  <Switch
-                    value={materialUsageOvertime}
-                    onValueChange={(v) => onSetMaterialUsageOvertime?.(v)}
-                    color={theme.colors.primary}
-                  />
-                </View>
-                <Divider style={styles.divider} />
-                <Text
-                  style={[
-                    styles.settingDescription,
-                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
-                  ]}
-                >
-                  View sign-in history for all users (timestamp per login).
+              <Divider
+                style={[
+                  styles.divider,
+                  { backgroundColor: theme.colors.outlineVariant },
+                ]}
+              />
+              <AppText variant="caption" tone="muted" style={styles.blockHint}>
+                Export current inventory to Excel file
+              </AppText>
+              <Button
+                mode="outlined"
+                onPress={onExportExcel}
+                style={styles.adminButton}
+                icon="file-excel"
+              >
+                Export inventory to Excel
+              </Button>
+              <Divider
+                style={[
+                  styles.divider,
+                  { backgroundColor: theme.colors.outlineVariant },
+                ]}
+              />
+              <AppText variant="caption" tone="muted" style={styles.blockHint}>
+                Export Material Usage log to Excel (choose date range)
+              </AppText>
+              <DateField
+                label="From date"
+                value={exportFromDate}
+                onChange={setExportFromDate}
+                style={styles.adminInput}
+              />
+              <DateField
+                label="To date"
+                value={exportToDate}
+                onChange={setExportToDate}
+                style={styles.adminInput}
+              />
+              <Button
+                mode="outlined"
+                onPress={() =>
+                  onExportMaterialUsageExcel?.(exportFromDate, exportToDate)
+                }
+                style={styles.adminButton}
+                icon="file-excel"
+              >
+                Export Material Usage to Excel
+              </Button>
+              <Divider
+                style={[
+                  styles.divider,
+                  { backgroundColor: theme.colors.outlineVariant },
+                ]}
+              />
+              <AppText variant="bodyStrong">Paint external code suffix</AppText>
+              <AppText
+                variant="caption"
+                tone="muted"
+                style={styles.settingDescription}
+              >
+                Optional ending sequence automatically appended to Paint and
+                Custom Paint IDs (for bucket barcodes). Example:{" "}
+                <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text>{" "}
+                turns ID{" "}
+                <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text>{" "}
+                into external code{" "}
+                <Text style={{ fontFamily: fontFamily.mono }}>
+                  H66LNL49323-794394
                 </Text>
-                <Button
-                  mode="outlined"
-                  onPress={() => setLoginHistoryOpen(true)}
-                  style={styles.adminButton}
-                  icon="account-clock"
-                >
-                  User login history
-                </Button>
-                <Divider style={styles.divider} />
-                <Text
-                  style={[
-                    styles.settingDescription,
-                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
-                  ]}
-                >
-                  Export current inventory to Excel file
-                </Text>
-                <Button
-                  mode="outlined"
-                  onPress={onExportExcel}
-                  style={styles.adminButton}
-                  icon="file-excel"
-                >
-                  Export inventory to Excel
-                </Button>
-                <Divider style={styles.divider} />
-                <Text
-                  style={[
-                    styles.settingDescription,
-                    { color: theme.colors.onSurfaceVariant, marginBottom: 8 },
-                  ]}
-                >
-                  Export Material Usage log to Excel (choose date range)
-                </Text>
-                <DateField
-                  label="From date"
-                  value={exportFromDate}
-                  onChange={setExportFromDate}
-                  style={styles.adminInput}
-                />
-                <DateField
-                  label="To date"
-                  value={exportToDate}
-                  onChange={setExportToDate}
-                  style={styles.adminInput}
-                />
-                <Button
-                  mode="outlined"
-                  onPress={() =>
-                    onExportMaterialUsageExcel?.(exportFromDate, exportToDate)
-                  }
-                  style={styles.adminButton}
-                  icon="file-excel"
-                >
-                  Export Material Usage to Excel
-                </Button>
-                <Divider style={styles.divider} />
-                <Text
-                  style={[
-                    styles.settingLabel,
-                    { color: theme.colors.onSurface },
-                  ]}
-                >
-                  Paint external code suffix
-                </Text>
-                <Text
-                  style={[
-                    styles.settingDescription,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  Optional ending sequence automatically appended to Paint and
-                  Custom Paint IDs (for bucket barcodes). Example:{" "}
-                  <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text> turns
-                  ID{" "}
-                  <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text>{" "}
-                  into external code{" "}
-                  <Text style={{ fontFamily: fontFamily.mono }}>
-                    H66LNL49323-794394
-                  </Text>
-                  .
-                </Text>
-                <TextInput
-                  label="Suffix (optional)"
-                  value={paintSuffix}
-                  onChangeText={setPaintSuffix}
-                  mode="outlined"
-                  style={styles.adminInput}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder=""
-                  editable={!savingSuffix}
-                />
-                <Button
-                  mode="outlined"
-                  style={styles.adminButton}
-                  disabled={savingSuffix}
-                  onPress={async () => {
-                    try {
-                      setSavingSuffix(true);
-                      const result = await InventoryService.setPaintExternalSuffix(
+                .
+              </AppText>
+              <TextInput
+                label="Suffix (optional)"
+                value={paintSuffix}
+                onChangeText={setPaintSuffix}
+                mode="outlined"
+                style={styles.adminInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder=""
+                editable={!savingSuffix}
+              />
+              <Button
+                mode="outlined"
+                style={styles.adminButton}
+                disabled={savingSuffix}
+                onPress={async () => {
+                  try {
+                    setSavingSuffix(true);
+                    const result =
+                      await InventoryService.setPaintExternalSuffix(
                         paintSuffix,
                         userName || "unknown",
                       );
-                      if (!result?.success) {
-                        Alert.alert(
-                          "Error",
-                          result?.error || "Failed to save suffix.",
-                        );
-                      } else {
-                        const confirmed =
-                          await InventoryService.getPaintExternalSuffix();
-                        setPaintSuffix(confirmed || "");
-                        Alert.alert("Saved", "Paint external suffix updated.");
-                      }
-                    } catch (e) {
-                      console.error("Save paint suffix error:", e);
+                    if (!result?.success) {
                       Alert.alert(
                         "Error",
-                        e?.message || "Failed to save suffix.",
+                        result?.error || "Failed to save suffix.",
                       );
-                    } finally {
-                      setSavingSuffix(false);
+                    } else {
+                      const confirmed =
+                        await InventoryService.getPaintExternalSuffix();
+                      setPaintSuffix(confirmed || "");
+                      Alert.alert("Saved", "Paint external suffix updated.");
                     }
-                  }}
-                >
-                  {savingSuffix ? "Saving..." : "Save Suffix"}
-                </Button>
-              </Card.Content>
-            </Card>
+                  } catch (e) {
+                    console.error("Save paint suffix error:", e);
+                    Alert.alert(
+                      "Error",
+                      e?.message || "Failed to save suffix.",
+                    );
+                  } finally {
+                    setSavingSuffix(false);
+                  }
+                }}
+              >
+                {savingSuffix ? "Saving..." : "Save Suffix"}
+              </Button>
+            </AppSurface>
           )}
           <View style={styles.footer}>
-            <Text
-              style={[
-                styles.footerSignedIn,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
+            <AppText variant="caption" tone="muted">
               Signed in as {userName || "Unknown"}
-            </Text>
-            <Text
-              style={[
-                styles.footerVersion,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
+            </AppText>
+            <AppText variant="caption" tone="dim" style={styles.footerVersion}>
               v1.{version?.build ?? "?"}
-            </Text>
+            </AppText>
           </View>
         </View>
       </ScrollView>
       {savingSuffix && (
-        <View style={styles.suffixSavingOverlay}>
-          <View style={styles.suffixSavingBox}>
-            <ActivityIndicator size="small" />
-            <Text style={styles.suffixSavingText}>Saving suffix…</Text>
+        <View
+          style={[
+            styles.suffixSavingOverlay,
+            { backgroundColor: colors.semantic.scrimLight },
+          ]}
+        >
+          <View
+            style={[
+              styles.suffixSavingBox,
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={theme.colors.primary} />
+            <AppText variant="body" style={styles.suffixSavingText}>
+              Saving suffix…
+            </AppText>
           </View>
         </View>
       )}
@@ -370,95 +344,62 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "transparent",
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    flex: 1,
-    textAlign: "center",
-  },
-  placeholder: {
-    width: 40,
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 16,
-    paddingTop: 8,
-    paddingBottom: 32,
-  },
-  card: {
-    marginBottom: 16,
-    elevation: 2,
+    padding: space[4],
+    paddingTop: space[2],
+    paddingBottom: space[8],
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: space[2],
   },
   settingRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 8,
+    paddingVertical: space[2],
   },
   settingInfo: {
     flex: 1,
-    marginRight: 16,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: "500",
-    marginBottom: 4,
+    marginRight: space[4],
   },
   settingDescription: {
-    fontSize: 14,
+    marginTop: space[1],
+  },
+  blockHint: {
+    marginBottom: space[2],
   },
   divider: {
-    marginVertical: 16,
+    marginVertical: space[4],
   },
   switchUserButton: {
-    marginTop: 8,
+    marginTop: space[2],
   },
   adminInput: {
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: space[2],
+    marginBottom: space[3],
   },
   adminButton: {
-    marginTop: 8,
+    marginTop: space[2],
   },
   webWrapper: {
     width: "100%",
     maxWidth: 700,
     alignSelf: "center",
   },
-  webCard: {
-    width: "100%",
-  },
   webScrollContent: {
     alignItems: "center",
   },
   footer: {
-    marginTop: 24,
-    marginBottom: 16,
+    marginTop: space[6],
+    marginBottom: space[4],
     alignItems: "center",
-  },
-  footerSignedIn: {
-    fontSize: 14,
+    gap: space[1],
   },
   footerVersion: {
-    fontSize: 12,
-    marginTop: 4,
-    opacity: 0.8,
+    opacity: 0.85,
   },
   suffixSavingOverlay: {
     position: "absolute",
@@ -468,19 +409,17 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.25)",
   },
   suffixSavingBox: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    backgroundColor: DARK_SURFACE_ELEVATED,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: space[3],
+    paddingVertical: space[4],
+    paddingHorizontal: space[5],
+    borderRadius: radius.lg,
+    borderWidth: 1,
   },
   suffixSavingText: {
-    color: "#fff",
-    fontSize: 14,
+    marginLeft: space[1],
   },
 });

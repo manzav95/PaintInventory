@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Button, Text, TextInput, useTheme } from "react-native-paper";
@@ -56,10 +56,33 @@ function fromHtmlTimeValue(hhmm) {
 }
 
 /**
- * Time field: scrollable hour / minute / AM·PM wheels on mobile;
- * native time input on web.
+ * Time field: native picker on iOS/Android; transparent overlay input on web
+ * so mobile browsers can open the time picker reliably.
  * Value format: "3:00 PM"
  */
+
+const webOverlayInputStyle = {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
+  width: "100%",
+  height: "100%",
+  // Not fully 0 — iOS Safari ignores taps on opacity:0 controls.
+  opacity: 0.011,
+  zIndex: 5,
+  border: "none",
+  padding: 0,
+  margin: 0,
+  cursor: "pointer",
+  fontSize: 16,
+  color: "transparent",
+  backgroundColor: "transparent",
+  WebkitAppearance: "none",
+  appearance: "none",
+};
+
 export default function TimeField({
   label = "Time",
   value,
@@ -72,7 +95,6 @@ export default function TimeField({
   const [show, setShow] = useState(false);
   const [draft, setDraft] = useState(() => toDateWithTime(value));
   const theme = useTheme();
-  const hiddenRef = useRef(null);
 
   const displayValue = useMemo(() => {
     const parts = parseTimeParts(value);
@@ -88,66 +110,41 @@ export default function TimeField({
     setShow(true);
   };
 
-  const openWebPicker = () => {
-    if (disabled) return;
-    const el = hiddenRef.current;
-    if (!el) return;
-    try {
-      if (typeof el.showPicker === "function") {
-        el.showPicker();
-        return;
-      }
-    } catch (_) {
-      /* fall through */
-    }
-    el.focus();
-    el.click();
-  };
-
   const confirm = () => {
     onChange?.(format12h(draft));
     setShow(false);
   };
 
+  const field = (
+    <TextInput
+      label={label}
+      value={displayValue}
+      mode={mode}
+      editable={false}
+      disabled={disabled}
+      style={styles.nativeInput}
+      outlineColor={theme.colors?.outlineVariant ?? theme.colors?.outline}
+      activeOutlineColor={theme.colors?.primary}
+      textColor={theme.colors?.onSurface}
+      right={<TextInput.Icon icon="clock-outline" disabled={disabled} />}
+    />
+  );
+
   if (isWeb) {
     return (
       <View style={[styles.wrap, style]}>
+        <View pointerEvents="none">{field}</View>
         <input
-          ref={hiddenRef}
           type="time"
           value={toHtmlTimeValue(value)}
           disabled={disabled}
-          tabIndex={-1}
-          aria-hidden="true"
+          aria-label={label || "Choose time"}
           onChange={(e) => {
             const next = fromHtmlTimeValue(e.target.value);
             if (next) onChange?.(next);
           }}
-          style={styles.hiddenNative}
+          style={webOverlayInputStyle}
         />
-        <Pressable
-          onPress={openWebPicker}
-          disabled={disabled}
-          accessibilityRole="button"
-          accessibilityLabel={label || "Choose time"}
-        >
-          <View pointerEvents="none">
-            <TextInput
-              label={label}
-              value={displayValue}
-              mode={mode}
-              editable={false}
-              disabled={disabled}
-              style={styles.nativeInput}
-              outlineColor={theme.colors?.outlineVariant ?? theme.colors?.outline}
-              activeOutlineColor={theme.colors?.primary}
-              textColor={theme.colors?.onSurface}
-              right={
-                <TextInput.Icon icon="clock-outline" disabled={disabled} />
-              }
-            />
-          </View>
-        </Pressable>
       </View>
     );
   }
@@ -160,26 +157,13 @@ export default function TimeField({
         accessibilityRole="button"
         accessibilityLabel={label || "Choose time"}
       >
-        <View pointerEvents="none">
-          <TextInput
-            label={label}
-            value={displayValue}
-            mode={mode}
-            editable={false}
-            disabled={disabled}
-            style={styles.nativeInput}
-            outlineColor={theme.colors?.outlineVariant ?? theme.colors?.outline}
-            activeOutlineColor={theme.colors?.primary}
-            textColor={theme.colors?.onSurface}
-            right={<TextInput.Icon icon="clock-outline" />}
-          />
-        </View>
+        <View pointerEvents="none">{field}</View>
       </Pressable>
       {Platform.OS === "android" && show ? (
         <DateTimePicker
           value={draft}
           mode="time"
-          display="spinner"
+          display="default"
           is24Hour={false}
           themeVariant={theme.dark ? "dark" : "light"}
           onChange={(event, selectedDate) => {
@@ -255,18 +239,6 @@ const styles = StyleSheet.create({
     maxWidth: "100%",
     alignSelf: "stretch",
     backgroundColor: "transparent",
-  },
-  hiddenNative: {
-    position: "absolute",
-    opacity: 0.01,
-    width: 1,
-    height: 1,
-    left: 0,
-    top: 0,
-    zIndex: -1,
-    border: "none",
-    padding: 0,
-    margin: 0,
   },
   backdrop: {
     flex: 1,
