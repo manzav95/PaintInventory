@@ -947,7 +947,6 @@ const styles = StyleSheet.create({
     marginBottom: -4,
   },
   input: {
-    backgroundColor: "transparent",
     alignSelf: "stretch",
     maxWidth: "100%",
     minWidth: 0,

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Platform, useWindowDimensions } from "react-native";
 
 export const DESKTOP_BREAKPOINT = 700;
@@ -29,10 +30,38 @@ export function getScreenTitle(screen) {
   return SCREEN_TITLES[screen] || "Paint Inventory";
 }
 
+/** True on native, or web when the primary input is touch (iPad / phone). */
+function useIsPrimaryTouchDevice() {
+  const [touch, setTouch] = useState(Platform.OS !== "web");
+
+  useEffect(() => {
+    if (
+      Platform.OS !== "web" ||
+      typeof window === "undefined" ||
+      !window.matchMedia
+    ) {
+      return undefined;
+    }
+    const hoverNone = window.matchMedia("(hover: none)");
+    const coarse = window.matchMedia("(pointer: coarse)");
+    const sync = () => setTouch(hoverNone.matches || coarse.matches);
+    sync();
+    hoverNone.addEventListener?.("change", sync);
+    coarse.addEventListener?.("change", sync);
+    return () => {
+      hoverNone.removeEventListener?.("change", sync);
+      coarse.removeEventListener?.("change", sync);
+    };
+  }, []);
+
+  return touch;
+}
+
 export function useAppLayout() {
   const { width, height } = useWindowDimensions();
   const isWeb = Platform.OS === "web";
   const isLandscape = width > height;
+  const isPrimaryTouch = useIsPrimaryTouchDevice();
   const showPersistentSidebar =
     (isWeb && width >= DESKTOP_BREAKPOINT) ||
     (isLandscape && width >= LANDSCAPE_SIDEBAR_MIN_WIDTH);
@@ -43,17 +72,26 @@ export function useAppLayout() {
   const showCheckInOutNav =
     !isWeb || width <= CHECK_IN_OUT_HIDE_MIN_WIDTH;
 
+  // Pull-to-refresh: phones + iPad/tablet landscape. Desktop (mouse) uses the refresh button.
+  const isTabletLandscape =
+    isLandscape &&
+    width >= LANDSCAPE_SIDEBAR_MIN_WIDTH &&
+    (!isWeb || isPrimaryTouch || isNarrowDesktop);
+  const enablePullToRefresh = isPortraitStack || isTabletLandscape;
+
   return {
     width,
     height,
     isWeb,
     isLandscape,
+    isPrimaryTouch,
     showPersistentSidebar,
     isPortraitStack,
     isNarrowDesktop,
     isWebDesktop,
     isDesktop: isWebDesktop,
     showCheckInOutNav,
+    enablePullToRefresh,
   };
 }
 

@@ -514,19 +514,11 @@ export default function AddItemScreen({
   );
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-      contentContainerStyle={[
-        isDesktop && styles.webContentContainer,
-        isWideDesktop && styles.webContentContainerWide,
-      ]}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View
-        style={[
-          isDesktop && styles.webWrapper,
-          isWideDesktop && styles.webWrapperWide,
-        ]}
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      <ScrollView
+        style={{ width: "100%", maxWidth: "100%" }}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
       >
         <PageHeader
           title="Add New Paint"
@@ -536,7 +528,6 @@ export default function AddItemScreen({
         <Card
           style={[
             styles.card,
-            isDesktop && styles.webCard,
             {
               backgroundColor: theme.colors.surfaceContainerHighest,
               borderColor: theme.colors.outlineVariant,
@@ -828,16 +819,16 @@ export default function AddItemScreen({
             )}
           </Card.Content>
         </Card>
-      </View>
-      <CameraColorPickerModal
-        visible={cameraPickerVisible}
-        onClose={() => setCameraPickerVisible(false)}
-        onColorPicked={(hex) => {
-          setCameraPickerVisible(false);
-          if (hex) setHexColor(hex);
-        }}
-      />
-    </ScrollView>
+        <CameraColorPickerModal
+          visible={cameraPickerVisible}
+          onClose={() => setCameraPickerVisible(false)}
+          onColorPicked={(hex) => {
+            setCameraPickerVisible(false);
+            if (hex) setHexColor(hex);
+          }}
+        />
+      </ScrollView>
+    </View>
   );
 }
 
@@ -850,13 +841,21 @@ function FieldLabel({ theme, children }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
+  root: { flex: 1, minWidth: 0 },
+  scroll: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 48,
+    maxWidth: 720,
+    width: "100%",
+    alignSelf: "center",
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
   },
   card: {
     elevation: 2,
     borderWidth: 1,
+    alignSelf: "stretch",
+    maxWidth: "100%",
   },
   input: {
     marginBottom: 15,
@@ -904,26 +903,6 @@ const styles = StyleSheet.create({
   recycleHint: {
     fontSize: 12,
     fontStyle: "italic",
-  },
-  webContentContainer: {
-    alignItems: "center",
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  webContentContainerWide: {
-    paddingBottom: 16,
-  },
-  webWrapper: {
-    width: "100%",
-    maxWidth: 600,
-    alignSelf: "center",
-  },
-  webWrapperWide: {
-    maxWidth: 1100,
-    width: "100%",
-  },
-  webCard: {
-    width: "100%",
   },
   cardContentDesktop: {
     paddingVertical: 12,

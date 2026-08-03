@@ -5,14 +5,17 @@ import {
   Platform,
   Pressable,
   Animated,
+  Easing,
 } from "react-native";
 import { IconButton, Text, useTheme } from "react-native-paper";
 import { layout, space, colors } from "../theme/tokens";
+import { useAppLayout } from "../utils/layout";
 import UserMenuAvatar from "./UserMenuAvatar";
 import PullToRefresh from "./PullToRefresh";
 
 const DRAWER_MS = 200;
 const isWeb = Platform.OS === "web";
+const useNativeDriver = Platform.OS !== "web";
 
 /**
  * App chrome:
@@ -37,19 +40,43 @@ export default function AppShell({
   notifications,
 }) {
   const theme = useTheme();
+  const { enablePullToRefresh } = useAppLayout();
   const mobile = !showPersistentSidebar;
+  const usePullToRefresh = enablePullToRefresh && !disablePullToRefresh;
+  const showRefreshButton = !enablePullToRefresh;
   const sidebarBg = colors.dark.sidebar;
   const canvasBg = theme.dark ? colors.dark.background : theme.colors.background;
   const drawerWidth = Math.min(layout.sidebarWidth, 300);
+  const iconColor = theme.colors.onSurfaceVariant;
 
   // Stay mounted through the close animation.
   const [drawerMounted, setDrawerMounted] = useState(false);
   const [panelIn, setPanelIn] = useState(false);
   const slide = useRef(new Animated.Value(0)).current;
   const scrim = useRef(new Animated.Value(0)).current;
+  const refreshSpin = useRef(new Animated.Value(0)).current;
   const closeTimer = useRef(null);
   const mountedRef = useRef(false);
   mountedRef.current = drawerMounted;
+
+  useEffect(() => {
+    if (!isRefreshing) {
+      refreshSpin.stopAnimation();
+      refreshSpin.setValue(0);
+      return undefined;
+    }
+    refreshSpin.setValue(0);
+    const anim = Animated.loop(
+      Animated.timing(refreshSpin, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver,
+      }),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [isRefreshing, refreshSpin]);
 
   useEffect(() => {
     if (!mobile) return undefined;
@@ -128,8 +155,28 @@ export default function AppShell({
     outputRange: [-drawerWidth, 0],
   });
 
+  const refreshRotate = refreshSpin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
   const topActions = (
     <View style={styles.topActions}>
+      {showRefreshButton ? (
+        <View style={styles.topActionSlot}>
+          <Animated.View style={{ transform: [{ rotate: refreshRotate }] }}>
+            <IconButton
+              icon="refresh"
+              size={22}
+              onPress={onRefresh}
+              disabled={isRefreshing}
+              iconColor={iconColor}
+              accessibilityLabel="Refresh"
+              style={styles.topActionBtn}
+            />
+          </Animated.View>
+        </View>
+      ) : null}
       <View style={styles.topActionSlot}>{notifications}</View>
       <View style={styles.topActionSlot}>
         <UserMenuAvatar
@@ -244,7 +291,7 @@ export default function AppShell({
             }
             refreshing={isRefreshing}
             onRefresh={onRefresh}
-            disabled={drawerOpen || disablePullToRefresh}
+            disabled={drawerOpen || !usePullToRefresh}
           >
             {children}
           </PullToRefresh>
@@ -402,6 +449,9 @@ const styles = StyleSheet.create({
     height: 40,
     alignItems: "center",
     justifyContent: "center",
+  },
+  topActionBtn: {
+    margin: 0,
   },
   webMain: {
     flex: 1,

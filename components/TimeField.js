@@ -238,7 +238,6 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: "100%",
     alignSelf: "stretch",
-    backgroundColor: "transparent",
   },
   backdrop: {
     flex: 1,

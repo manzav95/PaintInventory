@@ -107,6 +107,7 @@ export default function DashboardScreen({
     backgroundColor: theme.colors.surfaceContainerHighest,
     borderColor: theme.colors.outlineVariant,
     borderWidth: 1,
+    overflow: "hidden",
   };
   const auditLogs = auditLogsFromApp;
   const auditLogsLoaded = auditLogsLoadedFromApp;
@@ -149,7 +150,10 @@ export default function DashboardScreen({
   const checkedInCardRef = useRef(null);
   const actionsCardRef = useRef(null);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const ATTENTION_PANEL_WIDTH = Math.min(340, windowWidth - 24);
+  const ATTENTION_PANEL_WIDTH = Math.min(
+    isMobileLayout ? 340 : 400,
+    Math.max(280, windowWidth - 48),
+  );
 
   // Current week (Sun–Sat) and current month date ranges + labels
   const periodRange = useMemo(() => {
@@ -1006,6 +1010,7 @@ export default function DashboardScreen({
                     styles.attentionPopupTitle,
                     { color: theme.colors.onSurface },
                   ]}
+                  numberOfLines={1}
                 >
                   {attentionKind === "recycle"
                     ? "Paint needing recycle"
@@ -1024,6 +1029,7 @@ export default function DashboardScreen({
                   styles.attentionPopupHint,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 {attentionKind === "recycle"
                   ? "Custom colors past their recycle date with stock remaining."
@@ -1205,6 +1211,7 @@ export default function DashboardScreen({
                     styles.attentionPopupTitle,
                     { color: theme.colors.onSurface },
                   ]}
+                  numberOfLines={1}
                 >
                   {activityPopupConfig?.title}
                 </Text>
@@ -1221,6 +1228,7 @@ export default function DashboardScreen({
                   styles.attentionPopupHint,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 {activityPopupConfig?.hint}
               </Text>
@@ -1350,79 +1358,117 @@ export default function DashboardScreen({
           <Pressable
             style={[
               styles.modalCard,
-              { backgroundColor: theme.colors.surface },
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
             ]}
             onPress={() => {}}
           >
             <View style={styles.modalHeaderRow}>
-              <Title style={styles.modalTitle}>
+              <Text
+                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+                numberOfLines={1}
+              >
                 Not scanned in {staleDays} days
-              </Title>
-              <Button onPress={() => setStaleListOpen(false)}>Close</Button>
+              </Text>
+              <Button compact onPress={() => setStaleListOpen(false)}>
+                Close
+              </Button>
             </View>
-            <ScrollFrame maxHeight={420}>
+            <ScrollFrame
+              maxHeight={420}
+              contentContainerStyle={styles.modalList}
+            >
               {notScannedItems.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>
                   None.
                 </Text>
               ) : (
-                notScannedItems.map((it) => (
-                  <View key={String(it.id)} style={styles.modalRow}>
-                    <View style={styles.modalRowTop}>
-                      <View style={styles.modalRowTopLeft}>
-                        <Text style={styles.modalRowTitle} numberOfLines={1}>
+                notScannedItems.map((it) => {
+                  const daysAgo = it.lastScanned
+                    ? Math.max(
+                        0,
+                        Math.floor(
+                          (Date.now() - (it.lastScannedMs || 0)) /
+                            (24 * 60 * 60 * 1000),
+                        ),
+                      )
+                    : null;
+                  return (
+                    <View
+                      key={String(it.id)}
+                      style={[
+                        styles.modalItemCard,
+                        {
+                          backgroundColor: theme.dark
+                            ? colors.dark.nested
+                            : colors.light.nested,
+                          borderColor: theme.colors.outlineVariant,
+                        },
+                      ]}
+                    >
+                      <View style={styles.modalItemHeader}>
+                        <Text
+                          style={[
+                            styles.modalItemName,
+                            { color: theme.colors.onSurface },
+                          ]}
+                          numberOfLines={1}
+                        >
                           {it.name || it.id}
                         </Text>
                         <Text
                           style={[
-                            styles.modalRowMeta,
+                            styles.modalItemValue,
+                            { color: colors.semantic.lowStockValue },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {daysAgo != null ? `${daysAgo}d` : "Never"}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.modalItemId,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        ID: {it.id}
+                      </Text>
+                      <View style={styles.modalItemMetaRow}>
+                        <Text
+                          style={[
+                            styles.modalItemMeta,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          {it.quantity ?? 0} gal
+                        </Text>
+                        <Text
+                          style={[
+                            styles.modalItemMeta,
                             { color: theme.colors.onSurfaceVariant },
                           ]}
                           numberOfLines={1}
                         >
-                          {it.id}
-                        </Text>
-                      </View>
-                      <AppBadge tone="late">
-                        {it.lastScanned
-                          ? `${Math.max(
-                              0,
-                              Math.floor(
-                                (Date.now() - (it.lastScannedMs || 0)) /
-                                  (24 * 60 * 60 * 1000),
-                              ),
-                            )} days`
-                          : "Never"}
-                      </AppBadge>
-                    </View>
-                    <View style={styles.modalRowBottom}>
-                      <Text
-                        style={[
-                          styles.modalRowSub,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Qty:{" "}
-                        <Text style={styles.modalRowSubStrong}>
-                          {it.quantity}
-                        </Text>
-                      </Text>
-                      <Text
-                        style={[
-                          styles.modalRowSub,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Last scanned:{" "}
-                        <Text style={styles.modalRowSubStrong}>
+                          Last:{" "}
                           {it.lastScanned
-                            ? new Date(it.lastScanned).toLocaleString()
+                            ? new Date(it.lastScanned).toLocaleDateString(
+                                "en-US",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                },
+                              )
                             : "never"}
                         </Text>
-                      </Text>
+                      </View>
                     </View>
-                  </View>
-                ))
+                  );
+                })
               )}
             </ScrollFrame>
           </Pressable>
@@ -1443,21 +1489,26 @@ export default function DashboardScreen({
           <Pressable
             style={[
               styles.modalCard,
-              { backgroundColor: theme.colors.surface },
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
             ]}
             onPress={() => {}}
           >
             <View style={styles.modalHeaderRow}>
-              <Title style={styles.modalTitle}>Total value</Title>
-              <Button onPress={() => setTotalValueListOpen(false)}>
+              <Text
+                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+                numberOfLines={1}
+              >
+                Total value
+              </Text>
+              <Button compact onPress={() => setTotalValueListOpen(false)}>
                 Close
               </Button>
             </View>
             <Text
-              style={[
-                styles.modalHint,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
+              style={[styles.modalHint, { color: theme.colors.primary }]}
             >
               $
               {totalValue.toLocaleString("en-US", {
@@ -1465,57 +1516,77 @@ export default function DashboardScreen({
                 maximumFractionDigits: 2,
               })}
             </Text>
-            <ScrollFrame maxHeight={420}>
+            <ScrollFrame
+              maxHeight={420}
+              contentContainerStyle={styles.modalList}
+            >
               {totalValueItems.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>
                   No items.
                 </Text>
               ) : (
                 totalValueItems.map((it) => (
-                  <View key={String(it.id)} style={styles.modalRow}>
-                    <View style={styles.modalRowTop}>
-                      <View style={styles.modalRowTopLeft}>
-                        <Text style={styles.modalRowTitle} numberOfLines={1}>
-                          {it.name || it.id}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.modalRowMeta,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {it.id}
-                        </Text>
-                      </View>
-                      <AppBadge tone="info">
+                  <View
+                    key={String(it.id)}
+                    style={[
+                      styles.modalItemCard,
+                      {
+                        backgroundColor: theme.dark
+                          ? colors.dark.nested
+                          : colors.light.nested,
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  >
+                    <View style={styles.modalItemHeader}>
+                      <Text
+                        style={[
+                          styles.modalItemName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {it.name || it.id}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.modalItemValue,
+                          { color: theme.colors.primary },
+                        ]}
+                        numberOfLines={1}
+                      >
                         $
                         {it.value.toLocaleString("en-US", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
-                      </AppBadge>
+                      </Text>
                     </View>
-                    <View style={styles.modalRowBottom}>
+                    <Text
+                      style={[
+                        styles.modalItemId,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      ID: {it.id}
+                    </Text>
+                    <View style={styles.modalItemMetaRow}>
                       <Text
                         style={[
-                          styles.modalRowSub,
+                          styles.modalItemMeta,
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        Qty:{" "}
-                        <Text style={styles.modalRowSubStrong}>{it.qty}</Text>
+                        {it.qty} gal
                       </Text>
                       <Text
                         style={[
-                          styles.modalRowSub,
+                          styles.modalItemMeta,
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        Price:{" "}
-                        <Text style={styles.modalRowSubStrong}>
-                          ${it.price.toFixed(2)}
-                        </Text>
+                        ${it.price.toFixed(2)} / gal
                       </Text>
                     </View>
                   </View>
@@ -1540,21 +1611,27 @@ export default function DashboardScreen({
           <Pressable
             style={[
               styles.modalCard,
-              { backgroundColor: theme.colors.surface },
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
             ]}
             onPress={() => {}}
           >
             <View style={styles.modalHeaderRow}>
-              <Title style={styles.modalTitle}>
+              <Text
+                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
+                numberOfLines={1}
+              >
                 Checked out this {checkedOutListIsWeek ? "week" : "month"}
-              </Title>
-              <Button onPress={() => setCheckedOutListOpen(false)}>
+              </Text>
+              <Button compact onPress={() => setCheckedOutListOpen(false)}>
                 Close
               </Button>
             </View>
             <Text
               style={[
-                styles.modalHint,
+                styles.modalSubhint,
                 { color: theme.colors.onSurfaceVariant },
               ]}
             >
@@ -1562,7 +1639,10 @@ export default function DashboardScreen({
                 ? thisWeekRange.label
                 : thisMonthRange.label}
             </Text>
-            <ScrollFrame maxHeight={420}>
+            <ScrollFrame
+              maxHeight={420}
+              contentContainerStyle={styles.modalList}
+            >
               {(checkedOutListIsWeek
                 ? checkedOutByItemWeek
                 : checkedOutByItemMonth
@@ -1575,24 +1655,47 @@ export default function DashboardScreen({
                   ? checkedOutByItemWeek
                   : checkedOutByItemMonth
                 ).map((it) => (
-                  <View key={String(it.itemId)} style={styles.modalRow}>
-                    <View style={styles.modalRowTop}>
-                      <View style={styles.modalRowTopLeft}>
-                        <Text style={styles.modalRowTitle} numberOfLines={1}>
-                          {it.name}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.modalRowMeta,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {it.itemId}
-                        </Text>
-                      </View>
-                      <AppBadge tone="success">{it.qty} gal</AppBadge>
+                  <View
+                    key={String(it.itemId)}
+                    style={[
+                      styles.modalItemCard,
+                      {
+                        backgroundColor: theme.dark
+                          ? colors.dark.nested
+                          : colors.light.nested,
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  >
+                    <View style={styles.modalItemHeader}>
+                      <Text
+                        style={[
+                          styles.modalItemName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {it.name}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.modalItemValue,
+                          { color: theme.colors.primary },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {it.qty} gal
+                      </Text>
                     </View>
+                    <Text
+                      style={[
+                        styles.modalItemId,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      ID: {it.itemId}
+                    </Text>
                   </View>
                 ))
               )}
@@ -2161,6 +2264,7 @@ export default function DashboardScreen({
                   styles.statLabel,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 Total value
               </Text>
@@ -2169,15 +2273,18 @@ export default function DashboardScreen({
                   onPress={() => setTotalValueListOpen(true)}
                   style={styles.statNumberPressable}
                 >
-                  <Title
+                  <Text
                     style={[styles.statValue, { color: theme.colors.primary }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
                   >
                     $
                     {totalValue.toLocaleString("en-US", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
-                  </Title>
+                  </Text>
                 </Pressable>
               ) : (
                 <View style={styles.statLoadingRow}>
@@ -2196,15 +2303,17 @@ export default function DashboardScreen({
                 styles.statLabel,
                 { color: theme.colors.onSurfaceVariant },
               ]}
+              numberOfLines={2}
             >
               Total Gallons
             </Text>
             {inventoryLoaded ? (
-              <Title
+              <Text
                 style={[styles.statValue, { color: theme.colors.primary }]}
+                numberOfLines={1}
               >
                 {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
-              </Title>
+              </Text>
             ) : (
               <View style={styles.statLoadingRow}>
                 <ActivityIndicator size="small" />
@@ -2213,55 +2322,6 @@ export default function DashboardScreen({
             )}
           </Card.Content>
         </Card>
-
-        {isAdmin && (
-          <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
-            <Card.Content style={styles.statCardContent}>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Total items
-              </Text>
-              {inventoryLoaded ? (
-                <>
-                  <Title
-                    style={[styles.statValue, { color: theme.colors.primary }]}
-                  >
-                    {inventory.length}
-                  </Title>
-                  <Text
-                    style={[
-                      styles.statSubtext,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    {(() => {
-                      const typeOf = (i) => String(i?.type ?? "").toLowerCase();
-                      const paintCount = inventory.filter((i) =>
-                        ["paint", "custom_paint"].includes(typeOf(i)),
-                      ).length;
-                      const stainCount = inventory.filter((i) =>
-                        ["stain", "custom_stain"].includes(typeOf(i)),
-                      ).length;
-                      const primerCount = inventory.filter(
-                        (i) => typeOf(i) === "primer",
-                      ).length;
-                      return `${paintCount} paint · ${stainCount} stain · ${primerCount} primer`;
-                    })()}
-                  </Text>
-                </>
-              ) : (
-                <View style={styles.statLoadingRow}>
-                  <ActivityIndicator size="small" />
-                  <Text style={styles.statLoadingLabel}>Loading…</Text>
-                </View>
-              )}
-            </Card.Content>
-          </Card>
-        )}
 
         <Card
           style={[styles.statCard, surfaceCardStyle]}
@@ -2274,6 +2334,7 @@ export default function DashboardScreen({
                 styles.statLabel,
                 { color: theme.colors.onSurfaceVariant },
               ]}
+              numberOfLines={2}
             >
               Checked out this {galPeriodWeek ? "week" : "month"}
             </Text>
@@ -2286,8 +2347,9 @@ export default function DashboardScreen({
                   }}
                   style={styles.statNumberPressable}
                 >
-                  <Title
+                  <Text
                     style={[styles.statValue, { color: theme.colors.primary }]}
+                    numberOfLines={1}
                   >
                     {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
                     <Text
@@ -2299,13 +2361,14 @@ export default function DashboardScreen({
                       {" "}
                       gal
                     </Text>
-                  </Title>
+                  </Text>
                 </Pressable>
                 <Text
                   style={[
                     styles.statSubtext,
                     { color: theme.colors.onSurfaceVariant },
                   ]}
+                  numberOfLines={1}
                 >
                   {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
                 </Text>
@@ -2333,6 +2396,7 @@ export default function DashboardScreen({
                   styles.statLabel,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 Not scanned in{" "}
                 <Text
@@ -2349,11 +2413,12 @@ export default function DashboardScreen({
                 onPress={() => setStaleListOpen(true)}
                 style={styles.statNumberPressable}
               >
-                <Title
+                <Text
                   style={[styles.statValue, { color: theme.colors.primary }]}
+                  numberOfLines={1}
                 >
                   {notScannedCount}
-                </Title>
+                </Text>
               </Pressable>
             </Card.Content>
           </Card>
@@ -2371,17 +2436,25 @@ export default function DashboardScreen({
                   styles.statLabel,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 Paint Need to Recycle
               </Text>
-              <Title style={[styles.statValue, { color: colors.semantic.recycleBannerText }]}>
+              <Text
+                style={[
+                  styles.statValue,
+                  { color: colors.semantic.recycleBannerText },
+                ]}
+                numberOfLines={1}
+              >
                 {recycleDueCount}
-              </Title>
+              </Text>
               <Text
                 style={[
                   styles.statSubtextHint,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={1}
               >
                 Tap to View List
               </Text>
@@ -2405,12 +2478,13 @@ export default function DashboardScreen({
                   styles.statLabel,
                   { color: theme.colors.onSurfaceVariant },
                 ]}
+                numberOfLines={2}
               >
                 Color most checked out
               </Text>
               {auditLogsLoaded && mostUsedColor ? (
                 <>
-                  <Title
+                  <Text
                     style={[
                       styles.statValue,
                       styles.statValueCompact,
@@ -2419,12 +2493,13 @@ export default function DashboardScreen({
                     numberOfLines={1}
                   >
                     {mostUsedColor.name}
-                  </Title>
+                  </Text>
                   <Text
                     style={[
                       styles.statSubtext,
                       { color: theme.colors.onSurfaceVariant },
                     ]}
+                    numberOfLines={2}
                   >
                     {mostUsedColor.totalGal} gal —{" "}
                     {mostUsedColor.isWeek
@@ -2989,6 +3064,7 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 12,
     marginBottom: 16,
+    alignItems: "stretch",
   },
   myActivityStatsRow: {
     flexWrap: "nowrap",
@@ -3120,13 +3196,13 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   attentionPopupPanel: {
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     width: "100%",
     overflow: "hidden",
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
     ...(Platform.OS === "web"
       ? {
           boxSizing: "border-box",
@@ -3144,62 +3220,70 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 2,
-    marginRight: -4,
+    gap: 8,
+    marginBottom: 4,
+    minWidth: 0,
   },
   attentionPopupClose: {
     margin: 0,
+    marginRight: -6,
+    flexShrink: 0,
   },
   attentionPopupTitle: {
     fontSize: 16,
     fontWeight: "700",
     flex: 1,
-    paddingRight: 8,
+    minWidth: 0,
+    paddingRight: 4,
   },
   attentionPopupHint: {
     fontSize: 12,
-    lineHeight: 16,
-    marginBottom: 10,
-    paddingRight: 8,
+    lineHeight: 17,
+    marginBottom: 12,
+    minWidth: 0,
   },
   attentionPopupList: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
   },
   attentionPopupDivider: {
     marginVertical: 2,
-    marginHorizontal: 6,
+    marginHorizontal: 0,
   },
   attentionPopupRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    alignItems: "flex-start",
+    gap: 12,
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    minWidth: 0,
   },
   attentionPopupPill: {
-    minWidth: 32,
-    height: 32,
-    paddingHorizontal: 6,
-    borderRadius: 16,
+    minWidth: 36,
+    height: 28,
+    paddingHorizontal: 8,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    marginTop: 1,
   },
   attentionPopupPillText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
   },
   attentionPopupRowText: {
     flex: 1,
     minWidth: 0,
+    paddingRight: 2,
   },
   attentionPopupRowTitle: {
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 2,
+    lineHeight: 18,
   },
   attentionPopupRowDetail: {
     fontSize: 12,
@@ -3209,6 +3293,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     marginTop: 12,
+    gap: 8,
   },
   attentionValue: {
     fontSize: 22,
@@ -3256,12 +3341,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   statCard: {
-    flex: 1,
-    minWidth: 180,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 200,
+    minWidth: 168,
+    maxWidth: "100%",
     borderRadius: 12,
+    overflow: "hidden",
   },
   statCardCompact: {
     minWidth: 0,
+    flexBasis: 0,
     width: "100%",
   },
   statCardWrap: {
@@ -3269,47 +3359,59 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   statCardContent: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    minWidth: 0,
+    ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
   },
   statLabel: {
     fontSize: 11,
-    marginBottom: 4,
+    marginBottom: 6,
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
+    lineHeight: 15,
+    minWidth: 0,
   },
   statLoadingRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    minHeight: 28,
   },
   statLoadingLabel: {
     fontSize: 14,
     color: colors.dark.textDim,
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 22,
+    fontWeight: "700",
     lineHeight: 28,
+    marginVertical: 0,
+    minWidth: 0,
   },
   statValueCompact: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 17,
+    lineHeight: 22,
   },
   statValueUnit: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: "600",
   },
   statSubtext: {
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 11,
+    marginTop: 4,
+    lineHeight: 14,
+    minWidth: 0,
   },
   statSubtextHint: {
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 11,
+    marginTop: 4,
+    lineHeight: 14,
     fontStyle: "italic",
   },
   statNumberPressable: {
-    alignSelf: "flex-start",
+    alignSelf: "stretch",
+    minWidth: 0,
   },
   modalOverlay: {
     flex: 1,
@@ -3319,10 +3421,13 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     borderRadius: 12,
+    borderWidth: 1,
     padding: 16,
     maxWidth: 720,
     width: "100%",
     alignSelf: "center",
+    maxHeight: "90%",
+    overflow: "hidden",
   },
   modalHeaderRow: {
     flexDirection: "row",
@@ -3330,55 +3435,71 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     marginBottom: 8,
+    minWidth: 0,
   },
   modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
     flex: 1,
+    minWidth: 0,
   },
   modalHint: {
-    fontSize: 12,
-    marginBottom: 8,
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 12,
   },
-  modalRow: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.08)",
+  modalSubhint: {
+    fontSize: 13,
+    marginBottom: 12,
   },
-  modalRowTop: {
+  modalList: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  modalItemCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 4,
+  },
+  modalItemHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-  },
-  modalRowTopLeft: {
-    flex: 1,
     minWidth: 0,
   },
-  modalRowTitle: {
+  modalItemName: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "700",
   },
-  modalRowMeta: {
+  modalItemValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    flexShrink: 0,
+  },
+  modalItemId: {
     fontSize: 12,
     fontFamily: fontFamily.mono,
     marginTop: 2,
   },
-  modalRowBottom: {
+  modalItemMetaRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    columnGap: 12,
-    rowGap: 4,
-    marginTop: 6,
+    alignItems: "center",
+    gap: 12,
+    marginTop: 4,
   },
-  modalRowSub: {
-    fontSize: 12,
-    opacity: 0.9,
-  },
-  modalRowSubStrong: {
-    fontWeight: "800",
+  modalItemMeta: {
+    fontSize: 13,
   },
   staleDaysInline: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.3,
   },
   historyCard: {
     borderRadius: 12,

@@ -17,6 +17,7 @@ import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import PullToRefresh from "../components/PullToRefresh";
+import ItemActionPopover from "../components/ItemActionPopover";
 import {
   Card,
   Text,
@@ -116,6 +117,44 @@ function RecycleDateText({ item, style, dueStyle }) {
   );
 }
 
+/** Always-red recycle date under the item name (custom inventory view) — past due only. */
+function RecycleDateUnderName({ item, style }) {
+  if (!isRecycleDue(item)) return null;
+  const formatted = formatRecycleDateDisplay(item.recycle_date);
+  if (!formatted) return null;
+  return (
+    <Text
+      style={[
+        {
+          color: kitColors.semantic.recycleDueDate,
+          fontWeight: "600",
+        },
+        style,
+      ]}
+      numberOfLines={1}
+    >
+      Recycle: {formatted}
+    </Text>
+  );
+}
+
+function getItemJobs(item, onOrderSummary) {
+  if (!item || !onOrderSummary) return [];
+  const orderInfo =
+    onOrderSummary[item.id] || onOrderSummary[String(item.id ?? "")];
+  return Array.isArray(orderInfo?.jobs) ? orderInfo.jobs : [];
+}
+
+function pressAnchorFromEvent(event, fallbackWidth) {
+  const ne = event?.nativeEvent || {};
+  const pageX =
+    ne.pageX ??
+    ne.clientX ??
+    (typeof fallbackWidth === "number" ? fallbackWidth / 2 : 0);
+  const pageY = ne.pageY ?? ne.clientY ?? 120;
+  return { pageX, pageY };
+}
+
 /** Matches App.js handleScanResult normalization for comparing typed/scanned IDs to inventory. */
 function normalizeScanLookupKey(itemId) {
   const raw = String(itemId ?? "")
@@ -173,6 +212,8 @@ export default function InventoryListScreen({
   inventory,
   minQuantity = 30,
   onItemSelect,
+  onViewItemHistory,
+  onEditItem,
   onBack,
   onRefresh,
   isRefreshing = false,
@@ -217,6 +258,7 @@ export default function InventoryListScreen({
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
+  const [itemActionMenu, setItemActionMenu] = useState(null); // { item, pageX, pageY }
   const [copiedItemId, setCopiedItemId] = useState(null);
   const copiedItemIdTimerRef = useRef(null);
   const [viewMode, setViewMode] = useState(initialViewMode || "inventory"); // 'inventory' | 'colorBook' — default to standard inventory
@@ -278,6 +320,29 @@ export default function InventoryListScreen({
       scrollOffset,
       ...next,
     });
+  };
+
+  const isCustomInventoryView =
+    viewMode === "inventory" && bookFilter === "custom";
+
+  const openItemActionMenu = (item, event) => {
+    const anchor = pressAnchorFromEvent(event, width);
+    setItemActionMenu({
+      item,
+      showRelatedJobs: isCustomInventoryView,
+      ...anchor,
+    });
+  };
+
+  const handleItemActivate = (item, event) => {
+    // Custom view: always use caret popup (jobs + transactions; edit if admin).
+    // Standard view: admin gets caret popup (transactions + edit); others go to history.
+    if (isCustomInventoryView || isAdmin) {
+      openItemActionMenu(item, event);
+      return;
+    }
+    if (onViewItemHistory) onViewItemHistory(item);
+    else onItemSelect?.(item);
   };
 
   const handleSearchSubmit = () => {
@@ -973,15 +1038,17 @@ export default function InventoryListScreen({
               >
                 {name}
               </Text>
-              {renderCopyableItemId({
-                id: it.id,
-                name,
-                prefix: true,
-                textStyle: [
-                  styles.colorModalId,
-                  { color: theme.colors.onSurfaceVariant },
-                ],
-              })}
+              {it.id ? (
+                <Text
+                  style={[
+                    styles.colorModalId,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                  numberOfLines={1}
+                >
+                  ID: {String(it.id)}
+                </Text>
+              ) : null}
             </View>
             <IconButton
               icon="close"
@@ -1036,6 +1103,36 @@ export default function InventoryListScreen({
     />
   );
 
+  const itemActionPopover = (
+    <ItemActionPopover
+      visible={!!itemActionMenu?.item}
+      anchor={itemActionMenu || { pageX: 0, pageY: 0 }}
+      itemName={itemActionMenu?.item?.name || itemActionMenu?.item?.id}
+      jobs={
+        itemActionMenu?.showRelatedJobs
+          ? getItemJobs(itemActionMenu?.item, onOrderSummary)
+          : []
+      }
+      showRelatedJobs={!!itemActionMenu?.showRelatedJobs}
+      showEditDetails={isAdmin}
+      onClose={() => setItemActionMenu(null)}
+      onViewTransactions={() => {
+        const item = itemActionMenu?.item;
+        setItemActionMenu(null);
+        if (!item) return;
+        if (onViewItemHistory) onViewItemHistory(item);
+        else onItemSelect?.(item);
+      }}
+      onEditDetails={() => {
+        const item = itemActionMenu?.item;
+        setItemActionMenu(null);
+        if (!item) return;
+        if (onEditItem) onEditItem(item);
+        else onItemSelect?.(item);
+      }}
+    />
+  );
+
   const renderItem = ({ item }) => {
     const isLowStock =
       (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
@@ -1061,14 +1158,22 @@ export default function InventoryListScreen({
         <Card.Content style={styles.itemCardContent}>
           <Pressable
             style={styles.itemCardPressable}
-            onPress={() => onItemSelect(item)}
+            onPress={(e) => handleItemActivate(item, e)}
           >
             <View style={styles.itemHeader}>
-              <Text
-                style={[styles.itemName, isLowStock && styles.lowStockText]}
-              >
-                {item.name || "Unnamed Item"}
-              </Text>
+              <View style={styles.itemNameBlock}>
+                <Text
+                  style={[styles.itemName, isLowStock && styles.lowStockText]}
+                >
+                  {item.name || "Unnamed Item"}
+                </Text>
+                {isCustomInventoryView ? (
+                  <RecycleDateUnderName
+                    item={item}
+                    style={styles.recycleDateUnderName}
+                  />
+                ) : null}
+              </View>
               <Text
                 style={[
                   styles.itemQuantity,
@@ -1089,7 +1194,9 @@ export default function InventoryListScreen({
                 )}
                 {hasOpen ? (
                   <View style={styles.itemBadgeRow}>
-                    <AppBadge tone="primary">Open</AppBadge>
+                    {!isLate && !isBackOrdered ? (
+                      <AppBadge tone="primary">Open</AppBadge>
+                    ) : null}
                     {isLate && <AppBadge tone="late">Late</AppBadge>}
                     {isBackOrdered && (
                       <AppBadge tone="backOrder">Back ordered</AppBadge>
@@ -1163,11 +1270,13 @@ export default function InventoryListScreen({
                 </Text>
               );
             })()}
-            <RecycleDateText
-              item={item}
-              style={styles.recycleDateText}
-              dueStyle={styles.recycleDateDue}
-            />
+            {!isCustomInventoryView ? (
+              <RecycleDateText
+                item={item}
+                style={styles.recycleDateText}
+                dueStyle={styles.recycleDateDue}
+              />
+            ) : null}
             <View style={styles.cardBottomRow}>
               <Text
                 style={styles.lastScanned}
@@ -1690,7 +1799,7 @@ export default function InventoryListScreen({
                             <DataTable style={styles.dataTable}>
                               <DataTable.Header>
                                 <DataTable.Title
-                                  style={styles.tableCell}
+                                  style={[styles.tableCell, styles.nameColCell]}
                                   sortDirection={
                                     getSortIcon("name")
                                       ? sortOrder === "asc"
@@ -1703,7 +1812,7 @@ export default function InventoryListScreen({
                                   Paint Name
                                 </DataTable.Title>
                                 <DataTable.Title
-                                  style={styles.tableCell}
+                                  style={[styles.tableCell, styles.qtyColCell]}
                                   sortDirection={
                                     getSortIcon("quantity")
                                       ? sortOrder === "asc"
@@ -1720,7 +1829,9 @@ export default function InventoryListScreen({
                                 >
                                   ID
                                 </DataTable.Title>
-                                <DataTable.Title style={styles.tableCell}>
+                                <DataTable.Title
+                                  style={[styles.tableCell, styles.typeColCell]}
+                                >
                                   Material Type
                                 </DataTable.Title>
                                 <DataTable.Title
@@ -1760,24 +1871,6 @@ export default function InventoryListScreen({
                                 >
                                   On order
                                 </DataTable.Title>
-                                {viewMode === "inventory" &&
-                                bookFilter === "custom" ? (
-                                  <>
-                                    <DataTable.Title
-                                      style={[styles.tableCell, styles.jobsColCell]}
-                                    >
-                                      Jobs
-                                    </DataTable.Title>
-                                    <DataTable.Title
-                                      style={[
-                                        styles.tableCell,
-                                        styles.recycleColCell,
-                                      ]}
-                                    >
-                                      Recycle
-                                    </DataTable.Title>
-                                  </>
-                                ) : null}
                               </DataTable.Header>
                             </DataTable>
                             <View
@@ -1849,7 +1942,7 @@ export default function InventoryListScreen({
                                   return (
                                     <DataTable.Row
                                       key={item.id}
-                                      onPress={() => onItemSelect(item)}
+                                      onPress={(e) => handleItemActivate(item, e)}
                                       style={
                                         isLowStock
                                           ? {
@@ -1862,23 +1955,35 @@ export default function InventoryListScreen({
                                           : undefined
                                       }
                                     >
-                                      <DataTable.Cell style={styles.tableCell}>
-                                        <Text
-                                          style={[
-                                            styles.itemNameText,
-                                            {
-                                              color:
-                                                theme.dark && !isLowStock
-                                                  ? "#fff"
-                                                  : undefined,
-                                            },
-                                            isLowStock && styles.lowStockText,
-                                          ]}
-                                        >
-                                          {item.name || "Unnamed"}
-                                        </Text>
+                                      <DataTable.Cell
+                                        style={[styles.tableCell, styles.nameColCell]}
+                                      >
+                                        <View style={styles.tableNameCellInner}>
+                                          <Text
+                                            style={[
+                                              styles.itemNameText,
+                                              {
+                                                color:
+                                                  theme.dark && !isLowStock
+                                                    ? "#fff"
+                                                    : undefined,
+                                              },
+                                              isLowStock && styles.lowStockText,
+                                            ]}
+                                          >
+                                            {item.name || "Unnamed"}
+                                          </Text>
+                                          {isCustomInventoryView ? (
+                                            <RecycleDateUnderName
+                                              item={item}
+                                              style={styles.recycleDateUnderNameTable}
+                                            />
+                                          ) : null}
+                                        </View>
                                       </DataTable.Cell>
-                                      <DataTable.Cell style={styles.tableCell}>
+                                      <DataTable.Cell
+                                        style={[styles.tableCell, styles.qtyColCell]}
+                                      >
                                         <Text
                                           style={[
                                             styles.quantityText,
@@ -1916,7 +2021,9 @@ export default function InventoryListScreen({
                                           ],
                                         })}
                                       </DataTable.Cell>
-                                      <DataTable.Cell style={styles.tableCell}>
+                                      <DataTable.Cell
+                                        style={[styles.tableCell, styles.typeColCell]}
+                                      >
                                         {(() => {
                                           const t = item.type
                                             ? String(item.type).toLowerCase()
@@ -2137,61 +2244,6 @@ export default function InventoryListScreen({
                                           return null;
                                         })()}
                                       </DataTable.Cell>
-                                      {viewMode === "inventory" &&
-                                      bookFilter === "custom" ? (
-                                        <>
-                                          <DataTable.Cell
-                                            style={[
-                                              styles.tableCell,
-                                              styles.jobsColCell,
-                                            ]}
-                                          >
-                                            {(() => {
-                                              const orderInfo =
-                                                onOrderSummary[item.id] ||
-                                                onOrderSummary[String(item.id)];
-                                              const jobs = Array.isArray(
-                                                orderInfo?.jobs,
-                                              )
-                                                ? orderInfo.jobs
-                                                : [];
-                                              if (jobs.length === 0) return null;
-                                              const shown = jobs
-                                                .slice(0, 3)
-                                                .join(", ");
-                                              const more =
-                                                jobs.length > 3
-                                                  ? ` +${jobs.length - 3}`
-                                                  : "";
-                                              return (
-                                                <Text
-                                                  style={{
-                                                    fontSize: 12,
-                                                    color:
-                                                      theme.colors.onSurfaceVariant,
-                                                  }}
-                                                  numberOfLines={2}
-                                                >
-                                                  {shown}
-                                                  {more}
-                                                </Text>
-                                              );
-                                            })()}
-                                          </DataTable.Cell>
-                                          <DataTable.Cell
-                                            style={[
-                                              styles.tableCell,
-                                              styles.recycleColCell,
-                                            ]}
-                                          >
-                                            <RecycleDateText
-                                              item={item}
-                                              style={styles.recycleDateTableText}
-                                              dueStyle={styles.recycleDateDue}
-                                            />
-                                          </DataTable.Cell>
-                                        </>
-                                      ) : null}
                                     </DataTable.Row>
                                   );
                                 })}
@@ -2220,6 +2272,7 @@ export default function InventoryListScreen({
             </View>
           )}
           {receivePoModal}
+          {itemActionPopover}
           <ColorPreviewModal />
         </View>
       </View>
@@ -2658,6 +2711,7 @@ export default function InventoryListScreen({
         ) : null}
         </View>
         {receivePoModal}
+        {itemActionPopover}
         <ColorPreviewModal />
       </>
     );
@@ -2911,6 +2965,7 @@ export default function InventoryListScreen({
         </PullToRefresh>
       </View>
       {receivePoModal}
+      {itemActionPopover}
       <ColorPreviewModal />
     </View>
   );
@@ -3223,14 +3278,18 @@ const styles = StyleSheet.create({
   itemHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "baseline",
+    alignItems: "flex-start",
     marginBottom: 4,
+    gap: 8,
+  },
+  itemNameBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   itemName: {
     fontSize: 18,
     fontWeight: "bold",
-    flex: 1,
-    marginRight: 8,
+    marginRight: 0,
   },
   itemQuantity: {
     fontSize: 16,
@@ -3368,20 +3427,45 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.9)",
   },
   locationColCell: {
+    flex: 1.1,
+    minWidth: 110,
     paddingRight: 28,
   },
+  nameColCell: {
+    flex: 2,
+    minWidth: 160,
+  },
+  tableNameCellInner: {
+    maxWidth: "100%",
+    minWidth: 0,
+  },
+  qtyColCell: {
+    flex: 0.85,
+    minWidth: 90,
+  },
   idColCell: {
+    flex: 1,
     minWidth: 130,
   },
+  typeColCell: {
+    flex: 1,
+    minWidth: 100,
+  },
   colorColHeader: {
+    flexGrow: 0,
+    flexShrink: 0,
     width: 56,
     paddingRight: 6,
   },
   colorColCell: {
+    flexGrow: 0,
+    flexShrink: 0,
     width: 56,
     paddingRight: 6,
   },
   onOrderColCell: {
+    flex: 1.15,
+    minWidth: 110,
     paddingLeft: 6,
   },
   recycleColCell: {
@@ -3393,6 +3477,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
     marginBottom: 4,
+  },
+  recycleDateUnderName: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  recycleDateUnderNameTable: {
+    fontSize: 11,
+    marginTop: 2,
   },
   recycleDateTableText: {
     fontSize: 12,
@@ -3675,6 +3767,7 @@ const styles = StyleSheet.create({
     minWidth: 100,
   },
   lastScannedCell: {
+    flex: 1.5,
     paddingVertical: 12,
     paddingHorizontal: 14,
     minWidth: 200,

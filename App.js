@@ -1292,6 +1292,16 @@ export default function App() {
                 setCurrentScreen('itemHistory');
               }
             }}
+            onViewItemHistory={(item) => {
+              setPreviousScreen('list');
+              setSelectedItem(item);
+              setCurrentScreen('itemHistory');
+            }}
+            onEditItem={(item) => {
+              setPreviousScreen('list');
+              setSelectedItem(item);
+              setCurrentScreen('detail');
+            }}
             onScanCode={(code) => {
               // Remember that scan came from the list, so cancel / completion returns here
               setPreviousScreen('list');
@@ -1467,7 +1477,8 @@ export default function App() {
           currentScreen === 'settings' ||
           currentScreen === 'checkinout' ||
           currentScreen === 'add' ||
-          (currentScreen === 'list' && !showPersistentSidebar)
+          // Inventory mobile/native list has its own pull-to-refresh.
+          (currentScreen === 'list' && !isWebDesktop)
         }
         onOpenSettings={() => navigateTo('settings')}
         onSignOut={handleSwitchUser}

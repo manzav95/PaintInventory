@@ -1385,10 +1385,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     maxWidth: "100%",
-    backgroundColor: "transparent",
   },
   input: {
-    backgroundColor: "transparent",
     alignSelf: "stretch",
     maxWidth: "100%",
     minWidth: 0,
