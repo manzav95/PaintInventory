@@ -62,6 +62,19 @@ class MaterialUsageService {
     });
   }
 
+  async update(id, entry) {
+    return _fetch(`/api/material-usage/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(entry),
+    });
+  }
+
+  async delete(id) {
+    return _fetch(`/api/material-usage/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async confirmCatalyzed(id, catalyzed) {
     return _fetch(`/api/material-usage/${id}/catalyzed`, {
       method: 'PATCH',

@@ -12,6 +12,7 @@ import {
   LayoutAnimation,
   UIManager,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import {
   Card,
   Text,
@@ -22,16 +23,22 @@ import {
   Portal,
   ActivityIndicator,
   Checkbox,
+  SegmentedButtons,
 } from "react-native-paper";
 import DateField from "../components/DateField";
 import TimeField from "../components/TimeField";
 import PageHeader from "../components/PageHeader";
 import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
+import showToast from "../utils/showToast";
+import {
+  bundleUsageByWeek,
+  formatBoothWeekUsageForExcel,
+  boothWeekCopyHint,
+} from "../utils/materialUsageWeekCopy";
 import StaggerItem from "../components/StaggerItem";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import ScrollFrame from "../components/ScrollFrame";
-import showToast from "../utils/showToast";
 import { MATERIAL_USAGE_FORM_HELP } from "../constants/formHelpContent";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { nestedSurfaceColor } from "../utils/themeColors";
@@ -43,6 +50,9 @@ import MaterialUsageService, {
 import {
   formatMonthDayYear,
   todayPacificIso,
+  weekMondayIso,
+  formatWeekRangeLabel,
+  addDaysIso,
 } from "../utils/wasteDrumConversion";
 import { getMaterialTypeColor } from "../utils/materialTypes";
 import {
@@ -50,6 +60,8 @@ import {
   mutedTextColor,
 } from "../theme/tokens";
 import { AppEmptyState } from "../components/ui";
+import OutlinedSearchInput from "../components/OutlinedSearchInput";
+import MaterialUsageEditPopover from "../components/MaterialUsageEditPopover";
 
 const STORAGE_KEYS = {
   booth: "@material_usage_booth",
@@ -226,9 +238,12 @@ const MONTH_SHORT = [
 ];
 function formatLogDate(entryDate) {
   if (!entryDate || typeof entryDate !== "string") return "—";
-  const d = new Date(entryDate.trim());
+  const key = entryDate.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return entryDate;
+  const d = new Date(`${key}T12:00:00`);
   if (Number.isNaN(d.getTime())) return entryDate;
-  return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+  const weekday = d.toLocaleDateString("en-US", { weekday: "short" });
+  return `${weekday} · ${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
 }
 
 const MATERIAL_USAGE_COLOR_TYPES = [
@@ -305,7 +320,17 @@ function formatQtyDisplay(row) {
   return `${gal} gal`;
 }
 
-const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
+function dayTotalsFromRows(rows, inventory) {
+  const t = emptyUsageTotals();
+  (rows || []).forEach((row) => {
+    addUsageQty(
+      t,
+      getResolvedMaterialType(row, inventory),
+      row.qty_gallons,
+    );
+  });
+  return t;
+}
 
 /** Parse entry_time (e.g. "3:25 PM", "15:25", "12:30 AM") to minutes since midnight. Returns NaN if unparseable. */
 function parseTimeToMinutes(entryTime) {
@@ -362,6 +387,22 @@ function getLogDate(row, isOvertime) {
   }
 }
 
+function confirmAction(title, message, { confirmLabel = "Confirm", destructive = false } = {}) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+  }
+  return new Promise((resolve) => {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      {
+        text: confirmLabel,
+        style: destructive ? "destructive" : "default",
+        onPress: () => resolve(true),
+      },
+    ]);
+  });
+}
+
 export default function MaterialUsageScreen({
   inventory = [],
   userName,
@@ -369,6 +410,7 @@ export default function MaterialUsageScreen({
   materialUsageOvertime = false,
   onBack,
   embeddedInShell = false,
+  formRefreshKey = 0,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -400,11 +442,41 @@ export default function MaterialUsageScreen({
   const [logs, setLogs] = useState([]);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [boothFilter, setBoothFilterState] = useState("all");
+  const [copiedWeek, setCopiedWeek] = useState(null);
   const [shiftFilter, setShiftFilterState] = useState("all");
   const [refreshing, setRefreshing] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [expandedDays, setExpandedDays] = useState(() => new Set());
+  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
   const daysSeededRef = useRef(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [editRow, setEditRow] = useState(null);
+  const [editAnchor, setEditAnchor] = useState({ pageX: 0, pageY: 0 });
+  const [editSaving, setEditSaving] = useState(false);
+  /** Admin: how many weeks of history are visible (1 = current week). */
+  const [weeksShown, setWeeksShown] = useState(1);
+  const [logSearchQuery, setLogSearchQuery] = useState("");
+  /** Mobile: 'form' | 'transactions' */
+  const [mobilePane, setMobilePane] = useState("form");
+
+  const todayIso = todayPacificIso();
+  const thisWeekMonday = useMemo(() => weekMondayIso(todayIso), [todayIso]);
+  const thisWeekSunday = useMemo(
+    () => addDaysIso(thisWeekMonday, 6),
+    [thisWeekMonday],
+  );
+  const thisWeekLabel = useMemo(
+    () => formatWeekRangeLabel(thisWeekMonday),
+    [thisWeekMonday],
+  );
+
+  const jobOptional = booth === "Booth 2";
+
+  const syncFormDateTime = useCallback(() => {
+    const n = new Date();
+    setEntryDate(formatDateForInput(n));
+    setEntryTime(formatTimeForInput(n));
+  }, []);
 
   const setBooth = (value) => {
     setBoothState(value);
@@ -518,21 +590,118 @@ export default function MaterialUsageScreen({
     if (boothFilter && boothFilter !== "all") {
       list = list.filter((l) => l.booth === boothFilter);
     }
-    if (isAdmin) {
-      const cutoff = Date.now() - THREE_MONTHS_MS;
+
+    if (isAdmin && shiftFilter && shiftFilter !== "all") {
+      list = list.filter(
+        (row) =>
+          getShift(row.entry_time, materialUsageOvertime) === shiftFilter,
+      );
+    }
+
+    if (isAdmin && logSearchQuery.trim()) {
+      const q = logSearchQuery.trim().toLowerCase();
       list = list.filter((row) => {
-        const d = row.entry_date ? new Date(row.entry_date) : null;
-        return d && !Number.isNaN(d.getTime()) && d.getTime() >= cutoff;
-      });
-      if (shiftFilter && shiftFilter !== "all") {
-        list = list.filter(
-          (row) =>
-            getShift(row.entry_time, materialUsageOvertime) === shiftFilter,
+        const color = String(row.color_name || "").toLowerCase();
+        const job = String(row.job_name || "").toLowerCase();
+        const user = String(row.user_name || "").toLowerCase();
+        const typeRaw = String(
+          getResolvedMaterialType(row, inventory) || "",
+        ).toLowerCase();
+        const typeLabel = formatMaterialTypeLabel(typeRaw).toLowerCase();
+        return (
+          color.includes(q) ||
+          job.includes(q) ||
+          user.includes(q) ||
+          typeLabel.includes(q) ||
+          typeRaw.includes(q)
         );
-      }
+      });
+    }
+
+    const earliestMonday = isAdmin
+      ? addDaysIso(thisWeekMonday, -(Math.max(1, weeksShown) - 1) * 7)
+      : thisWeekMonday;
+    list = list.filter((row) => {
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      const mon = weekMondayIso(d);
+      if (!mon) return false;
+      if (mon > thisWeekMonday) return false;
+      return mon >= earliestMonday;
+    });
+
+    return list;
+  }, [
+    logs,
+    boothFilter,
+    isAdmin,
+    shiftFilter,
+    materialUsageOvertime,
+    logSearchQuery,
+    inventory,
+    weeksShown,
+    thisWeekMonday,
+  ]);
+
+  /** Logs matching booth/shift/search but without the week window — for "load more". */
+  const searchableLogs = useMemo(() => {
+    let list = logs;
+    if (boothFilter && boothFilter !== "all") {
+      list = list.filter((l) => l.booth === boothFilter);
+    }
+    if (isAdmin && shiftFilter && shiftFilter !== "all") {
+      list = list.filter(
+        (row) =>
+          getShift(row.entry_time, materialUsageOvertime) === shiftFilter,
+      );
+    }
+    if (isAdmin && logSearchQuery.trim()) {
+      const q = logSearchQuery.trim().toLowerCase();
+      list = list.filter((row) => {
+        const color = String(row.color_name || "").toLowerCase();
+        const job = String(row.job_name || "").toLowerCase();
+        const user = String(row.user_name || "").toLowerCase();
+        const typeRaw = String(
+          getResolvedMaterialType(row, inventory) || "",
+        ).toLowerCase();
+        const typeLabel = formatMaterialTypeLabel(typeRaw).toLowerCase();
+        return (
+          color.includes(q) ||
+          job.includes(q) ||
+          user.includes(q) ||
+          typeLabel.includes(q) ||
+          typeRaw.includes(q)
+        );
+      });
     }
     return list;
-  }, [logs, boothFilter, isAdmin, shiftFilter, materialUsageOvertime]);
+  }, [
+    logs,
+    boothFilter,
+    isAdmin,
+    shiftFilter,
+    materialUsageOvertime,
+    logSearchQuery,
+    inventory,
+  ]);
+
+  const canLoadOlderWeek = useMemo(() => {
+    if (!isAdmin) return false;
+    const earliestMonday = addDaysIso(
+      thisWeekMonday,
+      -(Math.max(1, weeksShown) - 1) * 7,
+    );
+    return searchableLogs.some((row) => {
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      const mon = weekMondayIso(d);
+      return mon && mon < earliestMonday;
+    });
+  }, [
+    isAdmin,
+    searchableLogs,
+    thisWeekMonday,
+    weeksShown,
+    materialUsageOvertime,
+  ]);
 
   const logsByDay = useMemo(() => {
     const byDay = {};
@@ -541,37 +710,65 @@ export default function MaterialUsageScreen({
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(row);
     });
-    const dayTotals = (rows) => {
-      const t = emptyUsageTotals();
-      rows.forEach((row) => {
-        addUsageQty(
-          t,
-          getResolvedMaterialType(row, inventory),
-          row.qty_gallons,
-        );
-      });
-      return t;
-    };
     return Object.keys(byDay)
       .sort((a, b) => (b || "").localeCompare(a || ""))
       .map((date) => ({
         date,
         rows: byDay[date],
-        totals: dayTotals(byDay[date]),
+        totals: dayTotalsFromRows(byDay[date], inventory),
       }));
   }, [filteredLogs, materialUsageOvertime, inventory]);
+
+  const logsByWeekGrouped = useMemo(() => {
+    const byWeek = new Map();
+    logsByDay.forEach((day) => {
+      const monday = weekMondayIso(day.date);
+      if (!monday) return;
+      if (!byWeek.has(monday)) {
+        byWeek.set(monday, {
+          monday,
+          label: formatWeekRangeLabel(monday),
+          days: [],
+        });
+      }
+      byWeek.get(monday).days.push(day);
+    });
+    return [...byWeek.values()]
+      .sort((a, b) => (b.monday || "").localeCompare(a.monday || ""))
+      .map((week) => ({
+        ...week,
+        totals: dayTotalsFromRows(
+          week.days.flatMap((d) => d.rows),
+          inventory,
+        ),
+      }));
+  }, [logsByDay, inventory]);
 
   useEffect(() => {
     if (!logsByDay.length || daysSeededRef.current) return;
     daysSeededRef.current = true;
-    const today = todayPacificIso();
-    const seed = logsByDay.some((d) => d.date === today)
-      ? [today]
-      : logsByDay[0]
-        ? [logsByDay[0].date]
-        : [];
-    setExpandedDays(new Set(seed));
-  }, [logsByDay]);
+    const seedDay = logsByDay.some((d) => d.date === todayIso)
+      ? todayIso
+      : logsByDay[0]?.date;
+    setExpandedDays(seedDay ? new Set([seedDay]) : new Set());
+    if (thisWeekMonday) setExpandedWeeks(new Set([thisWeekMonday]));
+  }, [logsByDay, todayIso, thisWeekMonday]);
+
+  // When admin loads an older week, expand that newly included week.
+  useEffect(() => {
+    if (!isAdmin || weeksShown <= 1) return;
+    const earliestMonday = addDaysIso(
+      thisWeekMonday,
+      -(Math.max(1, weeksShown) - 1) * 7,
+    );
+    if (!earliestMonday) return;
+    setExpandedWeeks((prev) => {
+      if (prev.has(earliestMonday)) return prev;
+      const next = new Set(prev);
+      next.add(earliestMonday);
+      return next;
+    });
+  }, [isAdmin, weeksShown, thisWeekMonday]);
 
   const toggleDay = (date) => {
     setExpandedDays((prev) => {
@@ -582,22 +779,68 @@ export default function MaterialUsageScreen({
     });
   };
 
-  const totalsFilterLabel = (() => {
+  const toggleWeek = (monday) => {
+    setExpandedWeeks((prev) => {
+      const next = new Set(prev);
+      if (next.has(monday)) next.delete(monday);
+      else next.add(monday);
+      return next;
+    });
+  };
+
+  const thisWeekTotalsLabel = (() => {
     const boothPart =
       !boothFilter || boothFilter === "all" ? "All" : boothFilter;
-    if (!isAdmin) return `${boothPart} · Today`;
+    if (!isAdmin) return `${boothPart} · This week`;
     const shiftPart =
       !shiftFilter || shiftFilter === "all"
         ? null
         : shiftFilter === "day"
           ? "Day"
           : "Swing";
-    return shiftPart ? `${boothPart} · ${shiftPart}` : boothPart;
+    return shiftPart
+      ? `${boothPart} · ${shiftPart} · This week`
+      : `${boothPart} · This week`;
   })();
 
-  const logTotals = useMemo(() => {
+  const logsByWeek = useMemo(() => {
+    if (!boothFilter || boothFilter === "all") return [];
+    return bundleUsageByWeek(filteredLogs, (row) =>
+      getLogDate(row, materialUsageOvertime),
+    );
+  }, [filteredLogs, boothFilter, materialUsageOvertime]);
+
+  const handleCopyWeek = async (week) => {
+    if (!week || !boothFilter || boothFilter === "all") return;
+    const tsv = formatBoothWeekUsageForExcel(
+      week.rows,
+      week.monday,
+      boothFilter,
+      (row) => getResolvedMaterialType(row, inventory),
+      (row) => getLogDate(row, materialUsageOvertime),
+    );
+    try {
+      await Clipboard.setStringAsync(tsv);
+      setCopiedWeek(week.monday);
+      setTimeout(() => setCopiedWeek(null), 2000);
+      showToast({
+        title: "Week copied",
+        message: `Paste into Excel — ${boothWeekCopyHint(boothFilter)}.`,
+      });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Copy failed",
+        message: e?.message || "Could not copy.",
+      });
+    }
+  };
+
+  const thisWeekTotals = useMemo(() => {
     const t = emptyUsageTotals();
     filteredLogs.forEach((row) => {
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      if (!d || d < thisWeekMonday || d > thisWeekSunday) return;
       addUsageQty(
         t,
         getResolvedMaterialType(row, inventory),
@@ -605,7 +848,20 @@ export default function MaterialUsageScreen({
       );
     });
     return t;
-  }, [filteredLogs, inventory]);
+  }, [
+    filteredLogs,
+    inventory,
+    materialUsageOvertime,
+    thisWeekMonday,
+    thisWeekSunday,
+  ]);
+
+  const thisWeekHasEntries = useMemo(() => {
+    return filteredLogs.some((row) => {
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      return d >= thisWeekMonday && d <= thisWeekSunday;
+    });
+  }, [filteredLogs, materialUsageOvertime, thisWeekMonday, thisWeekSunday]);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -615,18 +871,25 @@ export default function MaterialUsageScreen({
       const list = await MaterialUsageService.list(
         null,
         limit,
-        isAdmin ? {} : { restrictToToday: true, excludeAdmin: true },
+        isAdmin
+          ? {}
+          : {
+              from: thisWeekMonday,
+              to: thisWeekSunday,
+              excludeAdmin: true,
+            },
       );
       const next = Array.isArray(list) ? list : [];
       setLogs(next);
       daysSeededRef.current = false;
+      if (isAdmin) setWeeksShown(1);
     } catch (e) {
       console.error("Material usage list:", e);
     } finally {
       setLogsLoaded(true);
       setRefreshing(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, thisWeekMonday, thisWeekSunday]);
 
   useEffect(() => {
     setLogsLoaded(false);
@@ -635,27 +898,99 @@ export default function MaterialUsageScreen({
 
   const handleRefresh = () => {
     setRefreshing(true);
+    syncFormDateTime();
     loadLogs();
+  };
+
+  // Header / shell pull-to-refresh (AppShell) — bump date & time to now.
+  useEffect(() => {
+    if (!formRefreshKey) return;
+    syncFormDateTime();
+    setRefreshing(true);
+    loadLogs();
+  }, [formRefreshKey, syncFormDateTime, loadLogs]);
+
+  const clearFormFields = () => {
+    setJobName("");
+    setSelectedItem(null);
+    setCustomColor("");
+    setColorQuery("");
+    setQty("");
+    setCupGun(false);
+    syncFormDateTime();
+  };
+
+  const startEditEntry = (row, evt) => {
+    if (!isAdmin || !row?.id) return;
+    const ne = evt?.nativeEvent || {};
+    setEditAnchor({
+      pageX: Number(ne.pageX ?? ne.clientX) || 0,
+      pageY: Number(ne.pageY ?? ne.clientY) || 120,
+    });
+    setEditRow(row);
+  };
+
+  const closeEditPopover = () => {
+    if (editSaving) return;
+    setEditRow(null);
+  };
+
+  const handleSaveEdit = async (payload) => {
+    if (!editRow?.id) return;
+    setEditSaving(true);
+    try {
+      await MaterialUsageService.update(editRow.id, payload);
+      setEditRow(null);
+      await loadLogs();
+      showToast({ title: "Updated", message: "Material usage saved." });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Update failed",
+        message: e?.message || "Could not save changes.",
+      });
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteEntry = async (row) => {
+    if (!isAdmin || !row?.id) return;
+    const ok = await confirmAction(
+      "Delete entry?",
+      `Remove ${row.color_name || "this"} log (${formatTimeDisplay(row.entry_time)})?`,
+      { confirmLabel: "Delete", destructive: true },
+    );
+    if (!ok) return;
+
+    setDeletingId(row.id);
+    try {
+      await MaterialUsageService.delete(row.id);
+      if (editRow?.id === row.id) setEditRow(null);
+      await loadLogs();
+      showToast({ title: "Deleted", message: "Material usage removed." });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Delete failed",
+        message: e?.message || "Could not delete entry.",
+      });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const submitEntry = async (entry) => {
     setSubmitting(true);
     try {
       await MaterialUsageService.create(entry);
-      setJobName("");
-      setSelectedItem(null);
-      setCustomColor("");
-      setColorQuery("");
-      setQty("");
-      const now = new Date();
-      setEntryDate(formatDateForInput(now));
-      setEntryTime(formatTimeForInput(now));
+      showToast({ title: "Saved", message: "Material usage logged." });
+      clearFormFields();
       // Show the booth that was just logged so the new row is visible
       if (entry.booth) {
         setBoothFilter(entry.booth);
       }
       await loadLogs();
-      showToast({ title: "Saved", message: "Material usage logged." });
     } catch (e) {
       console.error("Submit material usage:", e);
       showToast({
@@ -672,7 +1007,7 @@ export default function MaterialUsageScreen({
 
   const handleSubmit = () => {
     const job = (jobName || "").trim();
-    if (!job) {
+    if (!job && !jobOptional) {
       setShakeTick((n) => n + 1);
       showToast({
         type: "error",
@@ -782,7 +1117,7 @@ export default function MaterialUsageScreen({
 
   const hasColor = selectedItem || !!(customColor || colorQuery || "").trim();
   const canSubmit =
-    (jobName || "").trim() &&
+    (jobOptional || !!(jobName || "").trim()) &&
     hasColor &&
     parseFloat(String(qty).replace(/,/g, ""), 10) > 0 &&
     booth;
@@ -796,51 +1131,596 @@ export default function MaterialUsageScreen({
       <View
         key={row.id}
         style={[
-          styles.entryRow,
-          {
-            borderBottomColor: theme.colors.outlineVariant,
-          },
+          styles.entryBlock,
+          { borderBottomColor: theme.colors.outlineVariant },
         ]}
       >
-      <View style={styles.entryTimeCol}>
-        <Text
-          style={[styles.entryTime, { color: theme.colors.onSurfaceVariant }]}
-        >
-          {formatTimeDisplay(row.entry_time)}
-        </Text>
-        <Text style={[styles.entryType, { color: typeColor }]} numberOfLines={1}>
-          {formatMaterialTypeLabel(getResolvedMaterialType(row, inventory))}
-        </Text>
-      </View>
-        <View style={styles.entryMain}>
-          <Text
-            style={[styles.entryLine, { color: theme.colors.onSurface }]}
-            numberOfLines={1}
-          >
-            {row.user_name || "—"}
-            {row.booth ? ` · ${row.booth}` : ""}
-          </Text>
-          <Text
-            style={[styles.entryLine, { color: theme.colors.onSurface }]}
-            numberOfLines={1}
-          >
-            Job {row.job_name || "—"}
-          </Text>
-          <Text
-            style={[styles.entryMeta, { color: theme.colors.onSurfaceVariant }]}
-            numberOfLines={1}
-          >
-            {row.color_name || "—"}
+        <View style={styles.entryRow}>
+          <View style={styles.entryTimeCol}>
+            <Text
+              style={[
+                styles.entryTime,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {formatTimeDisplay(row.entry_time)}
+            </Text>
+            <Text
+              style={[styles.entryType, { color: typeColor }]}
+              numberOfLines={1}
+            >
+              {formatMaterialTypeLabel(
+                getResolvedMaterialType(row, inventory),
+              )}
+            </Text>
+          </View>
+          <View style={styles.entryMain}>
+            <View style={styles.entryUserBoothRow}>
+              <Text
+                style={[styles.entryUser, { color: theme.colors.onSurface }]}
+                numberOfLines={1}
+              >
+                {row.user_name || "—"}
+              </Text>
+              {row.booth ? (
+                <View
+                  style={[
+                    styles.entryBoothPill,
+                    {
+                      backgroundColor: theme.dark
+                        ? "rgba(111,149,171,0.22)"
+                        : "rgba(111,149,171,0.16)",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.entryBoothText,
+                      { color: theme.colors.primary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {row.booth}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+            <Text
+              style={[styles.entryLine, { color: theme.colors.onSurface }]}
+              numberOfLines={1}
+            >
+              Job {row.job_name || "—"}
+            </Text>
+            <Text
+              style={[
+                styles.entryMeta,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+              numberOfLines={1}
+            >
+              {row.color_name || "—"}
+            </Text>
+          </View>
+          <Text style={[styles.entryQty, { color: theme.colors.onSurface }]}>
+            {formatQtyDisplay(row)}
           </Text>
         </View>
-        <Text
-          style={[styles.entryQty, { color: theme.colors.onSurface }]}
-        >
-          {formatQtyDisplay(row)}
-        </Text>
+        {isAdmin ? (
+          <View style={styles.entryAdminActions}>
+            <Button
+              mode="text"
+              compact
+              onPress={(e) => startEditEntry(row, e)}
+              disabled={deletingId != null || submitting || editSaving}
+            >
+              Edit
+            </Button>
+            <Button
+              mode="text"
+              compact
+              textColor={theme.colors.error}
+              onPress={() => handleDeleteEntry(row)}
+              loading={deletingId === row.id}
+              disabled={deletingId != null || submitting}
+            >
+              Delete
+            </Button>
+          </View>
+        ) : null}
       </View>
     );
   };
+
+  const formCard = (
+    <Card style={surfaceCardStyle} mode="outlined">
+      <ShakeView trigger={shakeTick} style={styles.shakePad}>
+        <Card.Content style={styles.form}>
+          <View style={styles.formHeaderRow}>
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: theme.colors.onSurface },
+              ]}
+            >
+              Log mix
+            </Text>
+            <FormHelp content={MATERIAL_USAGE_FORM_HELP} />
+          </View>
+          <View style={styles.row}>
+            <DateField
+              label="Date"
+              value={entryDate}
+              onChange={setEntryDate}
+              style={styles.halfInput}
+            />
+            <TimeField
+              label="Time"
+              value={entryTime}
+              onChange={setEntryTime}
+              style={styles.halfInput}
+            />
+          </View>
+          <Text
+            style={[
+              styles.fieldLabel,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            Booth
+          </Text>
+          <View style={styles.buttonRow}>
+            {BOOTH_OPTIONS.map((opt) => (
+              <Button
+                key={opt.value}
+                mode={booth === opt.value ? "contained" : "outlined"}
+                onPress={() => setBooth(opt.value)}
+                style={styles.filterButton}
+                compact
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </View>
+          <TextInput
+            label={
+              jobOptional ? "Job Number (optional)" : "Job Number (required)"
+            }
+            value={jobName}
+            onChangeText={setJobName}
+            mode="outlined"
+            style={styles.input}
+            placeholder={jobOptional ? "Optional for Booth 2" : "e.g. 12345"}
+          />
+          <View style={styles.colorSection}>
+            <TextInput
+              label="Material"
+              value={
+                selectedItem
+                  ? selectedItem.name || selectedItem.id
+                  : customColor || colorQuery
+              }
+              onChangeText={(t) => {
+                setColorQuery(t);
+                setCustomColor("");
+                if (selectedItem) setSelectedItem(null);
+              }}
+              onFocus={() => setMaterialFocused(true)}
+              onBlur={() => {
+                // Delay so suggestion press can register before list unmounts
+                setTimeout(() => setMaterialFocused(false), 150);
+              }}
+              mode="outlined"
+              style={styles.input}
+              placeholder="Type to search or custom dye/stain/toner"
+              right={
+                selectedItem || customColor || colorQuery ? (
+                  <TextInput.Icon
+                    icon="close"
+                    onPress={() => {
+                      setSelectedItem(null);
+                      setCustomColor("");
+                      setColorQuery("");
+                    }}
+                  />
+                ) : null
+              }
+            />
+            {showMaterialSuggestions ? (
+              <ScrollFrame maxHeight={200} style={styles.suggestBox}>
+                {materialSuggestions.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      setSelectedItem(item);
+                      setCustomColor("");
+                      setColorQuery("");
+                      setMaterialFocused(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.colorRow,
+                      pressed && styles.colorRowPressed,
+                    ]}
+                  >
+                    <Text numberOfLines={1} style={styles.colorRowText}>
+                      {item.name || item.id}
+                    </Text>
+                  </Pressable>
+                ))}
+                {(colorQuery || "").trim() ? (
+                  <Pressable
+                    onPress={() => {
+                      setCustomColor((colorQuery || "").trim());
+                      setSelectedItem(null);
+                      setMaterialFocused(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.colorRow,
+                      styles.colorRowCustom,
+                      pressed && styles.colorRowPressed,
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.colorRowText, { fontStyle: "italic" }]}
+                    >
+                      Use custom: {(colorQuery || "").trim()}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {materialSuggestions.length === 0 ? (
+                  <AppEmptyState
+                    title="No inventory matches"
+                    style={styles.emptyList}
+                  />
+                ) : null}
+              </ScrollFrame>
+            ) : null}
+          </View>
+          <View style={styles.row}>
+            <TextInput
+              label={cupGun ? "Qty (oz)" : "Qty (gal)"}
+              value={qty}
+              onChangeText={setQty}
+              mode="outlined"
+              keyboardType="decimal-pad"
+              style={needsCatalyst ? styles.halfInput : styles.input}
+              placeholder={cupGun ? "ounces" : "0.25 increments"}
+            />
+            {needsCatalyst && (
+              <View style={[styles.halfInput, styles.catalystDisplay]}>
+                <Text
+                  style={[
+                    styles.catalystLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  Catalyst (4%)
+                </Text>
+                <Text
+                  style={[
+                    styles.catalystValue,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {catalystOz} oz
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.cupGunRow}>
+            <Checkbox
+              status={cupGun ? "checked" : "unchecked"}
+              onPress={() => setCupGun((prev) => !prev)}
+              color={theme.colors.primary}
+            />
+            <Text
+              style={[
+                styles.cupGunLabel,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+              onPress={() => setCupGun((prev) => !prev)}
+            >
+              Cup gun?
+            </Text>
+          </View>
+          <View style={styles.actions}>
+            <Button
+              mode="contained"
+              onPress={handleSubmit}
+              disabled={!canSubmit || submitting}
+              loading={submitting}
+              compact
+              icon="send"
+            >
+              Submit
+            </Button>
+          </View>
+        </Card.Content>
+      </ShakeView>
+    </Card>
+  );
+
+  const renderDayCard = (day, dayIndex) => {
+    const open = expandedDays.has(day.date);
+    const isToday = day.date === todayIso;
+    return (
+      <StaggerItem
+        key={day.date}
+        index={dayIndex}
+        disabled={embeddedInShell}
+      >
+        <View
+          style={[
+            styles.dayCard,
+            {
+              backgroundColor: theme.colors.surfaceContainerHighest,
+              borderColor: theme.colors.outlineVariant,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={() => toggleDay(day.date)}
+            style={styles.dayHeaderPress}
+          >
+            <View style={styles.dayHeaderTop}>
+              <Text
+                style={[styles.dayTitle, { color: theme.colors.onSurface }]}
+              >
+                {open ? "▾ " : "▸ "}
+                {formatLogDate(day.date)}
+                {isToday ? " · Today" : ""}
+              </Text>
+              <Text
+                style={[styles.dayTotalGal, { color: theme.colors.onSurface }]}
+              >
+                {day.totals.total.toFixed(2)} gal
+              </Text>
+            </View>
+            <Text
+              style={[
+                styles.dayDateFull,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {formatMonthDayYear(day.date)}
+            </Text>
+            <UsageTypeChips totals={day.totals} theme={theme} compact />
+            <Text
+              style={[
+                styles.dayToggleHint,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {open
+                ? "Tap to collapse"
+                : `Tap to expand · ${day.rows.length} entr${day.rows.length === 1 ? "y" : "ies"}`}
+            </Text>
+          </Pressable>
+          {open ? (
+            <View style={styles.dayExpanded}>
+              {day.rows.map((row) => renderUsageEntry(row))}
+            </View>
+          ) : null}
+        </View>
+      </StaggerItem>
+    );
+  };
+
+  const renderWeekGroup = (week, weekIndex) => {
+    const open = expandedWeeks.has(week.monday);
+    const isThisWeek = week.monday === thisWeekMonday;
+    return (
+      <View
+        key={week.monday}
+        style={[
+          styles.groupCard,
+          {
+            backgroundColor: nestedSurfaceColor(theme),
+            borderColor: theme.colors.outlineVariant,
+          },
+        ]}
+      >
+        <Pressable
+          onPress={() => toggleWeek(week.monday)}
+          style={styles.groupHeaderPress}
+        >
+          <View style={styles.dayHeaderTop}>
+            <Text
+              style={[styles.groupTitle, { color: theme.colors.onSurface }]}
+              numberOfLines={2}
+            >
+              {open ? "▾ " : "▸ "}
+              {week.label}
+              {isThisWeek ? " · This week" : ""}
+            </Text>
+            <Text
+              style={[styles.dayTotalGal, { color: theme.colors.onSurface }]}
+            >
+              {week.totals.total.toFixed(2)} gal
+            </Text>
+          </View>
+        </Pressable>
+        {open ? (
+          <View style={styles.groupExpanded}>
+            {week.days.map((day, i) => renderDayCard(day, weekIndex * 10 + i))}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  const logCard = (
+    <Card style={surfaceCardStyle} mode="outlined">
+      <Card.Content style={styles.form}>
+        <View style={styles.logHeaderRow}>
+          <View style={styles.logHeaderLeft}>
+            <Text
+              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+            >
+              {isAdmin ? "Transaction log" : "This week's usage"}
+            </Text>
+            <Text
+              style={[styles.logDateBanner, { color: theme.colors.onSurface }]}
+            >
+              {isAdmin
+                ? weeksShown <= 1
+                  ? `Showing ${thisWeekLabel}`
+                  : `Showing ${weeksShown} weeks through ${thisWeekLabel}`
+                : `${thisWeekLabel} · Today ${formatMonthDayYear(todayIso)}`}
+            </Text>
+          </View>
+          <View style={styles.logHeaderFilters}>
+            {isAdmin ? (
+              <View style={styles.shiftCornerRow}>
+                {["all", "day", "swing"].map((sf) => (
+                  <Button
+                    key={sf}
+                    mode={shiftFilter === sf ? "contained" : "outlined"}
+                    onPress={() => setShiftFilter(sf)}
+                    style={styles.shiftCornerBtn}
+                    compact
+                    labelStyle={styles.shiftCornerLabel}
+                  >
+                    {sf === "all" ? "All" : sf === "day" ? "Day" : "Swing"}
+                  </Button>
+                ))}
+              </View>
+            ) : null}
+            <View style={styles.shiftCornerRow}>
+              <Button
+                mode={boothFilter === "all" ? "contained" : "outlined"}
+                onPress={() => setBoothFilter("all")}
+                style={styles.shiftCornerBtn}
+                compact
+                labelStyle={styles.shiftCornerLabel}
+              >
+                All
+              </Button>
+              {BOOTH_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  mode={boothFilter === opt.value ? "contained" : "outlined"}
+                  onPress={() => setBoothFilter(opt.value)}
+                  style={styles.shiftCornerBtn}
+                  compact
+                  labelStyle={styles.shiftCornerLabel}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </View>
+          </View>
+        </View>
+
+        {logsLoaded && thisWeekHasEntries ? (
+          <View
+            style={[
+              styles.usageSummaryCard,
+              {
+                backgroundColor: nestedSurfaceColor(theme),
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.usageSummaryTitle,
+                { color: theme.colors.onSurface },
+              ]}
+            >
+              Totals ({thisWeekTotalsLabel})
+            </Text>
+            <UsageTypeChips totals={thisWeekTotals} theme={theme} />
+          </View>
+        ) : null}
+
+        {isAdmin ? (
+          <OutlinedSearchInput
+            placeholder="Search color, type, job, or user…"
+            value={logSearchQuery}
+            onChangeText={setLogSearchQuery}
+            style={styles.logSearch}
+          />
+        ) : null}
+
+        {!logsLoaded ? (
+          <SkeletonStack lines={5} style={{ marginTop: 8 }} />
+        ) : filteredLogs.length === 0 ? (
+          <AppEmptyState title="No entries" style={styles.emptyLogs} />
+        ) : (
+          <View style={styles.dayList}>
+            {boothFilter && boothFilter !== "all" && logsByWeek.length > 0
+              ? logsByWeek.map((week) => (
+                  <View key={week.monday} style={styles.weekCopyBar}>
+                    <Text
+                      style={[
+                        styles.weekCopyLabel,
+                        { color: theme.colors.onSurface },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {week.label}
+                    </Text>
+                    <Button
+                      mode="outlined"
+                      compact
+                      icon={
+                        copiedWeek === week.monday ? "check" : "content-copy"
+                      }
+                      onPress={() => handleCopyWeek(week)}
+                    >
+                      {copiedWeek === week.monday ? "Copied" : "Copy week"}
+                    </Button>
+                  </View>
+                ))
+              : null}
+            {!isAdmin
+              ? logsByDay.map((day, i) => renderDayCard(day, i))
+              : logsByWeekGrouped.map((week, i) => renderWeekGroup(week, i))}
+            {isAdmin && canLoadOlderWeek ? (
+              <Button
+                mode="outlined"
+                onPress={() => {
+                  animateFilterChange();
+                  setWeeksShown((w) => w + 1);
+                }}
+                style={styles.loadMoreBtn}
+                icon="history"
+              >
+                Show previous week
+              </Button>
+            ) : null}
+            {isAdmin && !canLoadOlderWeek && weeksShown > 1 ? (
+              <Text
+                style={[
+                  styles.loadMoreHint,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                Earliest available entries are shown.
+              </Text>
+            ) : null}
+          </View>
+        )}
+      </Card.Content>
+    </Card>
+  );
+
+  const pageHeader = (
+    <PageHeader
+      title="Material Usage"
+      onBack={onBack}
+      embeddedInShell={embeddedInShell}
+    />
+  );
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
+      tintColor={theme.colors.primary}
+    />
+  );
 
   return (
     <>
@@ -869,399 +1749,63 @@ export default function MaterialUsageScreen({
         </View>
       </Modal>
       <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-        <ScrollView
-          style={{ width: "100%", maxWidth: "100%" }}
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={theme.colors.primary}
-            />
-          }
-        >
-          <PageHeader
-            title="Material Usage"
-            onBack={onBack}
-            embeddedInShell={embeddedInShell}
-          />
-          <Card style={surfaceCardStyle} mode="outlined">
-            <ShakeView trigger={shakeTick} style={styles.shakePad}>
-              <Card.Content style={styles.form}>
-                <View style={styles.formHeaderRow}>
-                  <Text
-                    style={[
-                      styles.sectionLabel,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    Log mix
-                  </Text>
-                  <FormHelp content={MATERIAL_USAGE_FORM_HELP} />
-                </View>
-                <View style={styles.row}>
-                  <DateField
-                    label="Date"
-                    value={entryDate}
-                    onChange={setEntryDate}
-                    style={styles.halfInput}
-                  />
-                  <TimeField
-                    label="Time"
-                    value={entryTime}
-                    onChange={setEntryTime}
-                    style={styles.halfInput}
-                  />
-                </View>
-                <TextInput
-                  label="Job Number"
-                  value={jobName}
-                  onChangeText={setJobName}
-                  mode="outlined"
-                  style={styles.input}
-                  placeholder="e.g. 12345"
-                />
-                <View style={styles.colorSection}>
-                  <TextInput
-                    label="Material"
-                    value={
-                      selectedItem
-                        ? selectedItem.name || selectedItem.id
-                        : customColor || colorQuery
-                    }
-                    onChangeText={(t) => {
-                      setColorQuery(t);
-                      setCustomColor("");
-                      if (selectedItem) setSelectedItem(null);
-                    }}
-                    onFocus={() => setMaterialFocused(true)}
-                    onBlur={() => {
-                      // Delay so suggestion press can register before list unmounts
-                      setTimeout(() => setMaterialFocused(false), 150);
-                    }}
-                    mode="outlined"
-                    style={styles.input}
-                    placeholder="Type to search or custom dye/stain/toner"
-                    right={
-                      selectedItem || customColor || colorQuery ? (
-                        <TextInput.Icon
-                          icon="close"
-                          onPress={() => {
-                            setSelectedItem(null);
-                            setCustomColor("");
-                            setColorQuery("");
-                          }}
-                        />
-                      ) : null
-                    }
-                  />
-                  {showMaterialSuggestions ? (
-                    <ScrollFrame
-                      maxHeight={200}
-                      style={styles.suggestBox}
-                    >
-                        {materialSuggestions.map((item) => (
-                          <Pressable
-                            key={item.id}
-                            onPress={() => {
-                              setSelectedItem(item);
-                              setCustomColor("");
-                              setColorQuery("");
-                              setMaterialFocused(false);
-                            }}
-                            style={({ pressed }) => [
-                              styles.colorRow,
-                              pressed && styles.colorRowPressed,
-                            ]}
-                          >
-                            <Text numberOfLines={1} style={styles.colorRowText}>
-                              {item.name || item.id}
-                            </Text>
-                          </Pressable>
-                        ))}
-                        {(colorQuery || "").trim() ? (
-                          <Pressable
-                            onPress={() => {
-                              setCustomColor((colorQuery || "").trim());
-                              setSelectedItem(null);
-                              setMaterialFocused(false);
-                            }}
-                            style={({ pressed }) => [
-                              styles.colorRow,
-                              styles.colorRowCustom,
-                              pressed && styles.colorRowPressed,
-                            ]}
-                          >
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                styles.colorRowText,
-                                { fontStyle: "italic" },
-                              ]}
-                            >
-                              Use custom: {(colorQuery || "").trim()}
-                            </Text>
-                          </Pressable>
-                        ) : null}
-                        {materialSuggestions.length === 0 ? (
-                          <AppEmptyState
-                            title="No inventory matches"
-                            style={styles.emptyList}
-                          />
-                        ) : null}
-                    </ScrollFrame>
-                  ) : null}
-                </View>
-                <View style={styles.row}>
-                  <TextInput
-                    label={cupGun ? "Qty (oz)" : "Qty (gal)"}
-                    value={qty}
-                    onChangeText={setQty}
-                    mode="outlined"
-                    keyboardType="decimal-pad"
-                    style={needsCatalyst ? styles.halfInput : styles.input}
-                    placeholder={cupGun ? "ounces" : "0.25 increments"}
-                  />
-                  {needsCatalyst && (
-                    <View style={[styles.halfInput, styles.catalystDisplay]}>
-                      <Text
-                        style={[
-                          styles.catalystLabel,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Catalyst (4%)
-                      </Text>
-                      <Text
-                        style={[
-                          styles.catalystValue,
-                          { color: theme.colors.onSurface },
-                        ]}
-                      >
-                        {catalystOz} oz
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.cupGunRow}>
-                  <Checkbox
-                    status={cupGun ? "checked" : "unchecked"}
-                    onPress={() => setCupGun((prev) => !prev)}
-                    color={theme.colors.primary}
-                  />
-                  <Text
-                    style={[
-                      styles.cupGunLabel,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                    onPress={() => setCupGun((prev) => !prev)}
-                  >
-                    Cup gun?
-                  </Text>
-                </View>
-                <Text
-                  style={[
-                    styles.fieldLabel,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  Booth
-                </Text>
-                <View style={styles.buttonRow}>
-                  {BOOTH_OPTIONS.map((opt) => (
-                    <Button
-                      key={opt.value}
-                      mode={booth === opt.value ? "contained" : "outlined"}
-                      onPress={() => setBooth(opt.value)}
-                      style={styles.filterButton}
-                      compact
-                    >
-                      {opt.label}
-                    </Button>
-                  ))}
-                </View>
-                <View style={styles.actions}>
-                  <Button
-                    mode="contained"
-                    onPress={handleSubmit}
-                    disabled={!canSubmit || submitting}
-                    loading={submitting}
-                    compact
-                    icon="send"
-                  >
-                    Submit
-                  </Button>
-                </View>
-              </Card.Content>
-            </ShakeView>
-          </Card>
-
-          <Card style={surfaceCardStyle} mode="outlined">
-            <Card.Content style={styles.form}>
-              <Text
-                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+        {isDesktop && isAdmin ? (
+          <>
+            <View style={styles.pageTop}>{pageHeader}</View>
+            <View style={styles.splitRow}>
+              <ScrollView
+                style={styles.splitPane}
+                contentContainerStyle={styles.splitPaneContent}
+                keyboardShouldPersistTaps="handled"
               >
-                {isAdmin ? "Transaction log" : "Today's usage"} ·{" "}
-                {formatMonthDayYear(todayPacificIso())}
-              </Text>
-              <Text
-                style={[
-                  styles.fieldLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
+                {formCard}
+              </ScrollView>
+              <ScrollView
+                style={styles.splitPane}
+                contentContainerStyle={styles.splitPaneContent}
+                refreshControl={refreshControl}
               >
-                Filter by booth
-              </Text>
-              <View style={styles.buttonRow}>
-                <Button
-                  mode={boothFilter === "all" ? "contained" : "outlined"}
-                  onPress={() => setBoothFilter("all")}
-                  style={styles.filterButton}
-                  compact
-                >
-                  All
-                </Button>
-                {BOOTH_OPTIONS.map((opt) => (
-                  <Button
-                    key={opt.value}
-                    mode={boothFilter === opt.value ? "contained" : "outlined"}
-                    onPress={() => setBoothFilter(opt.value)}
-                    style={styles.filterButton}
-                    compact
-                  >
-                    {opt.label}
-                  </Button>
-                ))}
-              </View>
-              {isAdmin ? (
-                <>
-                  <Text
-                    style={[
-                      styles.fieldLabel,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Filter by shift
-                  </Text>
-                  <View style={styles.buttonRow}>
-                    {["all", "day", "swing"].map((sf) => (
-                      <Button
-                        key={sf}
-                        mode={shiftFilter === sf ? "contained" : "outlined"}
-                        onPress={() => setShiftFilter(sf)}
-                        style={styles.filterButton}
-                        compact
-                      >
-                        {sf === "all" ? "All" : sf === "day" ? "Day" : "Swing"}
-                      </Button>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-              {logsLoaded && filteredLogs.length > 0 ? (
-                <View
-                  style={[
-                    styles.usageSummaryCard,
+                {logCard}
+              </ScrollView>
+            </View>
+          </>
+        ) : (
+          <ScrollView
+            style={{ width: "100%", maxWidth: "100%" }}
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={refreshControl}
+          >
+            {pageHeader}
+            {!isDesktop ? (
+              <>
+                <SegmentedButtons
+                  value={mobilePane}
+                  onValueChange={setMobilePane}
+                  style={styles.mobileTabs}
+                  buttons={[
                     {
-                      backgroundColor: nestedSurfaceColor(theme),
-                      borderColor: theme.colors.outlineVariant,
+                      value: "form",
+                      label: "Log form",
+                      icon: "clipboard-edit-outline",
+                    },
+                    {
+                      value: "transactions",
+                      label: "Transactions",
+                      icon: "format-list-bulleted",
                     },
                   ]}
-                >
-                  <Text
-                    style={[
-                      styles.usageSummaryTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    Totals ({totalsFilterLabel})
-                    {isAdmin ? " · Last 3 months" : ""}
-                  </Text>
-                  <UsageTypeChips totals={logTotals} theme={theme} />
-                </View>
-              ) : null}
-
-              {!logsLoaded ? (
-                <SkeletonStack lines={5} style={{ marginTop: 8 }} />
-              ) : filteredLogs.length === 0 ? (
-                <AppEmptyState title="No entries" style={styles.emptyLogs} />
-              ) : (
-                <View style={styles.dayList}>
-                  {logsByDay.map((day, dayIndex) => {
-                    const open = expandedDays.has(day.date);
-                    const isToday = day.date === todayPacificIso();
-                    return (
-                      <StaggerItem
-                        key={day.date}
-                        index={dayIndex}
-                        disabled={embeddedInShell}
-                      >
-                        <View
-                          style={[
-                            styles.dayCard,
-                            {
-                              backgroundColor:
-                                theme.colors.surfaceContainerHighest,
-                              borderColor: theme.colors.outlineVariant,
-                            },
-                          ]}
-                        >
-                          <Pressable
-                            onPress={() => toggleDay(day.date)}
-                            style={styles.dayHeaderPress}
-                          >
-                            <View style={styles.dayHeaderTop}>
-                              <Text
-                                style={[
-                                  styles.dayTitle,
-                                  { color: theme.colors.onSurface },
-                                ]}
-                              >
-                                {open ? "▾ " : "▸ "}
-                                {formatLogDate(day.date)}
-                                {isToday ? " · Today" : ""}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.dayTotalGal,
-                                  { color: theme.colors.onSurface },
-                                ]}
-                              >
-                                {day.totals.total.toFixed(2)} gal
-                              </Text>
-                            </View>
-                            <UsageTypeChips
-                              totals={day.totals}
-                              theme={theme}
-                              compact
-                            />
-                            <Text
-                              style={[
-                                styles.dayToggleHint,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              {open
-                                ? "Tap to collapse"
-                                : `Tap to expand · ${day.rows.length} entr${day.rows.length === 1 ? "y" : "ies"}`}
-                            </Text>
-                          </Pressable>
-
-                          {open ? (
-                            <View style={styles.dayExpanded}>
-                              {day.rows.map((row) => renderUsageEntry(row))}
-                            </View>
-                          ) : null}
-                        </View>
-                      </StaggerItem>
-                    );
-                  })}
-                </View>
-              )}
-            </Card.Content>
-          </Card>
-        </ScrollView>
+                />
+                {mobilePane === "form" ? formCard : logCard}
+              </>
+            ) : (
+              <>
+                {formCard}
+                {logCard}
+              </>
+            )}
+          </ScrollView>
+        )}
 
         <Portal>
           <Dialog
@@ -1299,6 +1843,14 @@ export default function MaterialUsageScreen({
             </Dialog.Actions>
           </Dialog>
         </Portal>
+        <MaterialUsageEditPopover
+          visible={!!editRow}
+          row={editRow}
+          anchor={editAnchor}
+          onClose={closeEditPopover}
+          onSave={handleSaveEdit}
+          saving={editSaving}
+        />
       </View>
     </>
   );
@@ -1325,6 +1877,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
+  pageTop: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+    maxWidth: "100%",
+  },
+  splitRow: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    minHeight: 0,
+  },
+  splitPane: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  splitPaneContent: {
+    paddingBottom: 48,
+  },
   scroll: {
     paddingVertical: 16,
     paddingHorizontal: 16,
@@ -1333,6 +1907,10 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
     ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  mobileTabs: {
+    marginTop: 4,
+    marginBottom: 12,
   },
   card: {
     borderWidth: 1,
@@ -1367,7 +1945,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     marginTop: 0,
-    flex: 1,
     flexShrink: 1,
   },
   fieldLabel: {
@@ -1451,6 +2028,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+    justifyContent: "flex-end",
     marginTop: 8,
     marginBottom: 4,
     width: "100%",
@@ -1781,10 +2359,101 @@ const styles = StyleSheet.create({
   typeChipUnitCompact: {
     fontSize: 10,
   },
+  logDateBanner: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 2,
+    marginBottom: 0,
+  },
+  logHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+    marginBottom: 4,
+  },
+  logHeaderLeft: {
+    flex: 1,
+    minWidth: 120,
+    gap: 2,
+  },
+  logHeaderFilters: {
+    alignItems: "flex-end",
+    gap: 6,
+    flexShrink: 0,
+  },
+  shiftCornerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4,
+    flexShrink: 0,
+    flexWrap: "wrap",
+    maxWidth: "100%",
+  },
+  shiftCornerBtn: {
+    minWidth: 0,
+    margin: 0,
+  },
+  shiftCornerLabel: {
+    fontSize: 12,
+    marginHorizontal: 6,
+    marginVertical: 2,
+  },
+  logSearch: {
+    marginTop: 8,
+    marginBottom: 0,
+  },
   dayList: {
     gap: 12,
-    marginTop: 12,
+    marginTop: 10,
     width: "100%",
+  },
+  loadMoreBtn: {
+    marginTop: 4,
+    alignSelf: "stretch",
+  },
+  loadMoreHint: {
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  groupCard: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+  },
+  monthCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+  },
+  groupHeaderPress: {
+    gap: 8,
+  },
+  groupTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  monthTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "800",
+    lineHeight: 22,
+  },
+  groupExpanded: {
+    gap: 10,
+    marginTop: 4,
+  },
+  dayDateFull: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: -4,
   },
   dayCard: {
     borderWidth: 1,
@@ -1822,12 +2491,21 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(128,128,128,0.35)",
   },
+  entryBlock: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  entryAdminActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 4,
+    paddingBottom: 6,
+    paddingHorizontal: 4,
+  },
   entryRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 10,
     paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   entryTimeCol: {
     width: 72,
@@ -1845,7 +2523,40 @@ const styles = StyleSheet.create({
   entryMain: {
     flex: 1,
     minWidth: 0,
-    gap: 2,
+    gap: 3,
+  },
+  entryUserBoothRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  entryUser: {
+    fontSize: 15,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  entryBoothPill: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  entryBoothText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  weekCopyBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  weekCopyLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
   },
   entryLine: {
     fontSize: 13,

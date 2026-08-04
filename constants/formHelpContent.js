@@ -22,8 +22,6 @@ export const WASTE_FORM_HELP = {
         "Press Enter / Next to jump to the next material field.",
         "Leave a field blank or 0 if that material was not measured.",
       ],
-      // image: require("../assets/help/waste-stick.png"),
-      // caption: "Read the stick at the liquid line, not the foam.",
     },
     {
       heading: "3. Total & Save",
@@ -35,6 +33,7 @@ export const WASTE_FORM_HELP = {
         "Measure with the drum on level ground.",
         "Wipe the stick between materials if drums are separate.",
         "If a number looks off vs last week, double-check the stick reading before saving.",
+        "Pull to refresh updates the date to today.",
       ],
     },
   ],
@@ -43,18 +42,22 @@ export const WASTE_FORM_HELP = {
 export const MATERIAL_USAGE_FORM_HELP = {
   title: "How to log material usage",
   intro:
-    "Log each mix you spray: when, which job, which material, how much, and which booth.",
+    "Log each mix you spray: when, which booth, which job, which material, and how much.",
   sections: [
     {
       heading: "1. Date & time",
-      body: "Set when the mix was used. On phones, tap Time to scroll hour, minute, and AM/PM.",
+      body: "Set when the mix was used. On phones, tap Time to scroll hour, minute, and AM/PM. Pull to refresh resets these to now.",
     },
     {
-      heading: "2. Job number",
-      body: "Enter the job / work order number for this spray.",
+      heading: "2. Booth",
+      body: "Select the booth where you sprayed (Booth 1&3, Booth 2, or Booth 4). Do this before filling the rest of the form.",
     },
     {
-      heading: "3. Material",
+      heading: "3. Job number",
+      body: "Enter the job / work order number for this spray. For Booth 2, the job number is optional.",
+    },
+    {
+      heading: "4. Material",
       body: "Type in the Material field to search inventory live.",
       bullets: [
         "After 2+ letters, up to 5 matching paints / clears / primers appear — tap one to select.",
@@ -64,17 +67,14 @@ export const MATERIAL_USAGE_FORM_HELP = {
       ],
     },
     {
-      heading: "4. Quantity & cup gun",
-      body: "Enter how much material you mixed.",
+      heading: "5. Quantity & Submit",
+      body: "Enter how much material you mixed, then Submit.",
       bullets: [
         "Normal mode: quantity in gallons (snaps to 0.25 gal steps).",
         "Cup gun: check “Cup gun?” and enter ounces instead.",
         "Paint / clear / primer show catalyst at 4% automatically — confirm when prompted.",
+        "Your entry shows in today’s log (admins see more history and filters).",
       ],
-    },
-    {
-      heading: "5. Booth & Submit",
-      body: "Pick the booth where you sprayed, then Submit. Your entry shows in today’s log (admins see more history and filters).",
     },
   ],
 };

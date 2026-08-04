@@ -32,6 +32,13 @@ class WasteTrackingService {
     });
   }
 
+  async update(id, entry) {
+    return _fetch(`/api/waste-tracking/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(entry),
+    });
+  }
+
   async delete(id) {
     return _fetch(`/api/waste-tracking/${encodeURIComponent(id)}`, {
       method: "DELETE",

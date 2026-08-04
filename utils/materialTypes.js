@@ -48,8 +48,15 @@ export function getMaterialTypeColor(type, theme) {
   if (t === "paint" || t === "custom_paint" || t === "precat") return mt.paint;
   if (t === "clear") return mt.clear;
   if (t === "stain" || t === "custom_stain") return mt.stain;
-  if (t === "primer") return theme?.dark ? mt.primerDark : mt.primerLight;
+  if (t === "primer") return mt.primer || (theme?.dark ? mt.primerDark : mt.primerLight);
   if (t === "dye") return mt.dye;
   if (t === "catalyst") return mt.catalyst;
   return theme?.dark ? "#fff" : colors.light.textMuted;
+}
+
+/** Booth chip / accent color for material-usage rows. */
+export function getBoothColor(booth) {
+  const key = String(booth || "").trim();
+  const map = colors.booth || {};
+  return map[key] || map.default || "#78909c";
 }

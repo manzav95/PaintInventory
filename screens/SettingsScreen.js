@@ -21,9 +21,11 @@ import PageHeader from "../components/PageHeader";
 import version from "../version";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import InventoryService from "../services/inventoryService";
+import UserService from "../services/userService";
 import LoginHistoryModal from "../components/LoginHistoryModal";
 import { AppSurface, AppText } from "../components/ui";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
+import showToast from "../utils/showToast";
 
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
@@ -59,6 +61,24 @@ export default function SettingsScreen({
   const [paintSuffix, setPaintSuffix] = useState("");
   const [savingSuffix, setSavingSuffix] = useState(false);
   const [loginHistoryOpen, setLoginHistoryOpen] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [newUserName, setNewUserName] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [creatingUser, setCreatingUser] = useState(false);
+
+  const loadUsers = async () => {
+    if (!isAdmin) return;
+    setUsersLoading(true);
+    try {
+      const list = await UserService.list();
+      setUsers(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error("Load users error:", e);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -70,6 +90,75 @@ export default function SettingsScreen({
       }
     })();
   }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [isAdmin]);
+
+  const handleCreateUser = async () => {
+    const name = newUserName.trim();
+    const pin = newUserPassword.trim();
+    if (!name || pin.length < 3) {
+      showToast({
+        type: "error",
+        title: "Required",
+        message: "Enter a name and a password (min 3 characters).",
+      });
+      return;
+    }
+    setCreatingUser(true);
+    try {
+      const result = await UserService.create({
+        userName: name,
+        password: pin,
+      });
+      if (!result?.success) {
+        throw new Error(result?.error || "Could not create user");
+      }
+      setNewUserName("");
+      setNewUserPassword("");
+      showToast({
+        title: "User created",
+        message: `${name} can now sign in from the login dropdown.`,
+      });
+      await loadUsers();
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Could not create user",
+        message: e?.message || "Try a different name.",
+      });
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const handleDeleteUser = (name) => {
+    Alert.alert(
+      "Delete user?",
+      `Remove ${name} from the login list?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await UserService.remove(name);
+              await loadUsers();
+              showToast({ title: "Deleted", message: `${name} removed.` });
+            } catch (e) {
+              showToast({
+                type: "error",
+                title: "Delete failed",
+                message: e?.message || "Could not delete user.",
+              });
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const canvasBg = theme.dark
     ? colors.dark.background
@@ -137,6 +226,93 @@ export default function SettingsScreen({
               Switch User
             </Button>
           </AppSurface>
+
+          {isAdmin && (
+            <AppSurface>
+              <AppText variant="sectionTitle" style={styles.sectionTitle}>
+                User accounts
+              </AppText>
+              <AppText
+                variant="caption"
+                tone="muted"
+                style={styles.settingDescription}
+              >
+                Create named accounts with a quick password (min 3 characters).
+                New users must set their own password on first login. Passwords
+                are shown below for admin reference.
+              </AppText>
+              <TextInput
+                label="New user name"
+                value={newUserName}
+                onChangeText={setNewUserName}
+                mode="outlined"
+                autoCapitalize="words"
+                autoCorrect={false}
+                style={styles.userInput}
+              />
+              <TextInput
+                label="Temporary password"
+                value={newUserPassword}
+                onChangeText={setNewUserPassword}
+                mode="outlined"
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.userInput}
+              />
+              <Button
+                mode="contained"
+                onPress={handleCreateUser}
+                loading={creatingUser}
+                disabled={creatingUser}
+                icon="account-plus"
+                style={styles.userCreateBtn}
+              >
+                Create user
+              </Button>
+              {usersLoading ? (
+                <ActivityIndicator style={{ marginTop: 12 }} />
+              ) : users.length === 0 ? (
+                <AppText
+                  variant="caption"
+                  tone="muted"
+                  style={{ marginTop: 10 }}
+                >
+                  No users yet. Created accounts appear in the login dropdown.
+                </AppText>
+              ) : (
+                <View style={styles.userList}>
+                  {users.map((u) => (
+                    <View key={u.id || u.user_name} style={styles.userRow}>
+                      <View style={styles.userRowInfo}>
+                        <AppText variant="bodyStrong">
+                          {u.user_name}
+                        </AppText>
+                        <AppText
+                          variant="caption"
+                          tone="muted"
+                          style={styles.userPasswordLine}
+                        >
+                          Password:{" "}
+                          {u.password_plain
+                            ? String(u.password_plain)
+                            : "— (unknown until next change)"}
+                          {u.must_change_password ? " · must change" : ""}
+                        </AppText>
+                      </View>
+                      <Button
+                        mode="text"
+                        compact
+                        textColor={theme.colors.error}
+                        onPress={() => handleDeleteUser(u.user_name)}
+                      >
+                        Delete
+                      </Button>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </AppSurface>
+          )}
 
           {isAdmin && (
             <AppSurface>
@@ -383,6 +559,33 @@ const styles = StyleSheet.create({
   },
   adminButton: {
     marginTop: space[2],
+  },
+  userInput: {
+    marginTop: space[2],
+  },
+  userCreateBtn: {
+    marginTop: space[3],
+  },
+  userList: {
+    marginTop: space[4],
+    gap: space[1],
+  },
+  userRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[2],
+    paddingVertical: space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(128,128,128,0.25)",
+  },
+  userRowInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  userPasswordLine: {
+    marginTop: 2,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   webWrapper: {
     width: "100%",

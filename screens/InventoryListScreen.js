@@ -40,7 +40,7 @@ import {
 } from "../utils/materialTypes";
 import showToast from "../utils/showToast";
 import { nestedSurfaceColor } from "../utils/themeColors";
-import { EdgeFade } from "../components/ScrollFrame";
+import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
   colors as kitColors,
   space,
@@ -257,6 +257,10 @@ export default function InventoryListScreen({
   const auditLogs = useCachedAudit ? auditLogsFromApp : auditLogsLocal;
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
+  const [staleDays, setStaleDays] = useState(30);
+  const [staleListOpen, setStaleListOpen] = useState(false);
+  const [totalValueListOpen, setTotalValueListOpen] = useState(false);
+  const [recycleDueOnly, setRecycleDueOnly] = useState(false);
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
   const [itemActionMenu, setItemActionMenu] = useState(null); // { item, pageX, pageY }
   const [copiedItemId, setCopiedItemId] = useState(null);
@@ -557,6 +561,7 @@ export default function InventoryListScreen({
   }, [initialStockFilter]);
 
   const handleBack = () => {
+    setRecycleDueOnly(false);
     onClearRecycleDueFilter?.();
     onClearStockFilter?.();
     onBack();
@@ -571,9 +576,36 @@ export default function InventoryListScreen({
     const lowStockCount = inventory.filter(
       (item) => (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30),
     ).length;
-    const outOfStockCount = inventory.filter(
-      (item) => (item.quantity || 0) === 0,
-    ).length;
+    // Out of stock: standard items only — customs don't matter when empty.
+    const outOfStockCount = inventory.filter((item) => {
+      const t = (item.type || "").toLowerCase();
+      if (CUSTOM_TYPES.includes(t)) return false;
+      return (item.quantity || 0) === 0;
+    }).length;
+
+    const totalValue = inventory.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.price) || 0;
+      return sum + qty * price;
+    }, 0);
+
+    const totalValueItems = inventory
+      .map((item) => {
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.price) || 0;
+        return {
+          id: item.id,
+          name: item.name,
+          qty,
+          price,
+          value: qty * price,
+        };
+      })
+      .filter((it) => it.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    const recycleDueItems = inventory.filter(isRecycleDue);
+    const recycleDueCount = recycleDueItems.length;
 
     // Group by location
     const byLocation = {};
@@ -589,9 +621,42 @@ export default function InventoryListScreen({
       totalGallons,
       lowStockCount,
       outOfStockCount,
+      totalValue,
+      totalValueItems,
+      recycleDueCount,
+      recycleDueItems,
       topLocations,
     };
   }, [inventory, minQuantity]);
+
+  const notScannedItems = useMemo(() => {
+    const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
+    return inventory
+      .filter((item) => {
+        if (!item.lastScanned) return true;
+        return new Date(item.lastScanned).getTime() < cutoff;
+      })
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        lastScanned: item.lastScanned || null,
+        lastScannedMs: item.lastScanned
+          ? new Date(item.lastScanned).getTime()
+          : 0,
+        quantity: item.quantity ?? 0,
+      }))
+      .sort((a, b) => {
+        if (!a.lastScanned && !b.lastScanned)
+          return String(a.id).localeCompare(String(b.id));
+        if (!a.lastScanned) return -1;
+        if (!b.lastScanned) return 1;
+        return a.lastScannedMs - b.lastScannedMs;
+      });
+  }, [inventory, staleDays]);
+
+  const notScannedCount = notScannedItems.length;
+
+  const effectiveRecycleDue = recycleDueFilter || recycleDueOnly;
 
   const thisWeekRange = useMemo(() => {
     const now = new Date();
@@ -843,7 +908,11 @@ export default function InventoryListScreen({
         if (item.is_mixing !== false) return false;
       }
       const qty = item.quantity || 0;
-      if (stockFilter === "outOfStock") return qty === 0;
+      if (stockFilter === "outOfStock") {
+        const itemType = (item.type || "").toLowerCase();
+        if (CUSTOM_TYPES.includes(itemType)) return false;
+        return qty === 0;
+      }
       if (stockFilter === "inStock")
         return qty > 0 && qty >= (item.minQuantity ?? min);
       if (stockFilter === "lowStock")
@@ -853,7 +922,7 @@ export default function InventoryListScreen({
         return false;
       if (bookFilter === "custom" && !CUSTOM_TYPES.includes(itemType))
         return false;
-      if (recycleDueFilter && !isRecycleDue(item)) return false;
+      if (effectiveRecycleDue && !isRecycleDue(item)) return false;
       return true;
     });
 
@@ -919,7 +988,7 @@ export default function InventoryListScreen({
     minQuantity,
     listOrderMode,
     bookFilter,
-    recycleDueFilter,
+    effectiveRecycleDue,
     isAdmin,
     apOnly,
   ]);
@@ -934,7 +1003,7 @@ export default function InventoryListScreen({
         const t = typeLower(item.type);
         if (bookFilter === "standard" && t !== "paint") return false;
         if (bookFilter === "custom" && !CUSTOM_TYPES.includes(t)) return false;
-        if (recycleDueFilter && !isRecycleDue(item)) return false;
+        if (effectiveRecycleDue && !isRecycleDue(item)) return false;
         if (!query) return true;
         return (
           item.name?.toLowerCase().includes(query) ||
@@ -946,7 +1015,7 @@ export default function InventoryListScreen({
           .toLowerCase()
           .localeCompare((b.name || "").toLowerCase()),
       );
-  }, [inventory, searchQuery, bookFilter, recycleDueFilter]);
+  }, [inventory, searchQuery, bookFilter, effectiveRecycleDue]);
 
   const renderColorCard = ({ item, desktop = false }) => {
     const bgHex = getValidHex(item.hex_color) || "#e0e0e0";
@@ -1069,6 +1138,213 @@ export default function InventoryListScreen({
       </Modal>
     );
   };
+
+  const inventoryStatModals = (
+    <>
+      <Modal
+        visible={totalValueListOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTotalValueListOpen(false)}
+      >
+        <Pressable
+          style={styles.invStatModalOverlay}
+          onPress={() => setTotalValueListOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.invStatModalCard,
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+            onPress={() => {}}
+          >
+            <View style={styles.invStatModalHeader}>
+              <Text
+                style={[
+                  styles.invStatModalTitle,
+                  { color: theme.colors.onSurface },
+                ]}
+              >
+                Total value
+              </Text>
+              <Button compact onPress={() => setTotalValueListOpen(false)}>
+                Close
+              </Button>
+            </View>
+            <Text style={[styles.invStatModalHint, { color: theme.colors.primary }]}>
+              $
+              {analytics.totalValue.toLocaleString("en-US", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </Text>
+            <ScrollFrame
+              maxHeight={420}
+              contentContainerStyle={styles.invStatModalList}
+            >
+              {analytics.totalValueItems.length === 0 ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                  No items.
+                </Text>
+              ) : (
+                analytics.totalValueItems.map((it) => (
+                  <View
+                    key={String(it.id)}
+                    style={[
+                      styles.invStatModalItem,
+                      {
+                        backgroundColor: nestedSurfaceColor(theme),
+                        borderColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  >
+                    <View style={styles.invStatModalItemHeader}>
+                      <Text
+                        style={[
+                          styles.invStatModalItemName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {it.name || it.id}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.invStatModalItemValue,
+                          { color: theme.colors.primary },
+                        ]}
+                      >
+                        $
+                        {it.value.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </View>
+                    <Text
+                      style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}
+                    >
+                      {it.qty} gal · $
+                      {Number(it.price || 0).toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                      /gal
+                    </Text>
+                  </View>
+                ))
+              )}
+            </ScrollFrame>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={staleListOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStaleListOpen(false)}
+      >
+        <Pressable
+          style={styles.invStatModalOverlay}
+          onPress={() => setStaleListOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.invStatModalCard,
+              {
+                backgroundColor: theme.colors.surfaceContainerHighest,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+            onPress={() => {}}
+          >
+            <View style={styles.invStatModalHeader}>
+              <Text
+                style={[
+                  styles.invStatModalTitle,
+                  { color: theme.colors.onSurface },
+                ]}
+              >
+                Not scanned in {staleDays} days
+              </Text>
+              <Button compact onPress={() => setStaleListOpen(false)}>
+                Close
+              </Button>
+            </View>
+            <ScrollFrame
+              maxHeight={420}
+              contentContainerStyle={styles.invStatModalList}
+            >
+              {notScannedItems.length === 0 ? (
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>
+                  None.
+                </Text>
+              ) : (
+                notScannedItems.map((it) => {
+                  const daysAgo = it.lastScanned
+                    ? Math.max(
+                        0,
+                        Math.floor(
+                          (Date.now() - (it.lastScannedMs || 0)) /
+                            (24 * 60 * 60 * 1000),
+                        ),
+                      )
+                    : null;
+                  return (
+                    <View
+                      key={String(it.id)}
+                      style={[
+                        styles.invStatModalItem,
+                        {
+                          backgroundColor: nestedSurfaceColor(theme),
+                          borderColor: theme.colors.outlineVariant,
+                        },
+                      ]}
+                    >
+                      <View style={styles.invStatModalItemHeader}>
+                        <Text
+                          style={[
+                            styles.invStatModalItemName,
+                            { color: theme.colors.onSurface },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {it.name || it.id}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.invStatModalItemValue,
+                            { color: kitColors.semantic.lowStockValue },
+                          ]}
+                        >
+                          {daysAgo != null ? `${daysAgo}d` : "Never"}
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          color: theme.colors.onSurfaceVariant,
+                          fontSize: 12,
+                        }}
+                      >
+                        ID: {it.id} · {it.quantity} gal
+                        {it.lastScanned
+                          ? ` · ${new Date(it.lastScanned).toLocaleDateString()}`
+                          : ""}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollFrame>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
 
   const backToReceivePoList = () => {
     if (receiveSubmitting) return;
@@ -1383,16 +1659,21 @@ export default function InventoryListScreen({
             }
           />
 
-          {recycleDueFilter && (
+          {effectiveRecycleDue && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
                 Showing: Paint Needing Recycle
               </Text>
-              {onClearRecycleDueFilter && (
-                <Button mode="text" compact onPress={onClearRecycleDueFilter}>
-                  Clear Filter
-                </Button>
-              )}
+              <Button
+                mode="text"
+                compact
+                onPress={() => {
+                  setRecycleDueOnly(false);
+                  onClearRecycleDueFilter?.();
+                }}
+              >
+                Clear Filter
+              </Button>
             </View>
           )}
           {initialStockFilter === "lowStock" && stockFilter === "lowStock" && (
@@ -1468,6 +1749,44 @@ export default function InventoryListScreen({
               >
                 {/* Analytics Cards */}
                 <View style={styles.analyticsRow}>
+                  {isAdmin ? (
+                    <Pressable
+                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                      onPress={() => setTotalValueListOpen(true)}
+                    >
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor:
+                              theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
+                        <Card.Content style={styles.analyticsCardContent}>
+                          <Text style={styles.analyticsLabel}>Total value</Text>
+                          <Title
+                            style={[
+                              styles.analyticsValue,
+                              { color: theme.colors.primary },
+                            ]}
+                          >
+                            $
+                            {analytics.totalValue.toLocaleString("en-US", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </Title>
+                          <Text style={styles.analyticsSubtext}>
+                            Tap for breakdown
+                          </Text>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
+                  ) : null}
                   <Card
                     style={[
                       styles.analyticsCard,
@@ -1486,6 +1805,112 @@ export default function InventoryListScreen({
                       </Title>
                     </Card.Content>
                   </Card>
+                  {isAdmin && analytics.recycleDueCount > 0 ? (
+                    <Pressable
+                      style={[
+                        styles.analyticsCard,
+                        styles.analyticsCardFilter,
+                        effectiveRecycleDue &&
+                          styles.analyticsCardFilterActive,
+                        effectiveRecycleDue && {
+                          borderColor: theme.colors.primary,
+                        },
+                      ]}
+                      onPress={() => {
+                        setRecycleDueOnly((v) => {
+                          const next = !v;
+                          if (next) {
+                            setBookFilter("custom");
+                            notifyViewState({ bookFilter: "custom" });
+                          }
+                          return next;
+                        });
+                        if (effectiveRecycleDue) {
+                          onClearRecycleDueFilter?.();
+                        }
+                      }}
+                    >
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor:
+                              theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
+                        <Card.Content style={styles.analyticsCardContent}>
+                          <Text style={styles.analyticsLabel}>
+                            Need to recycle
+                            {effectiveRecycleDue ? " (filtering)" : ""}
+                          </Text>
+                          <Title
+                            style={[
+                              styles.analyticsValue,
+                              {
+                                color: kitColors.semantic.recycleBannerText,
+                              },
+                            ]}
+                          >
+                            {analytics.recycleDueCount}
+                          </Title>
+                          <Text style={styles.analyticsSubtext}>
+                            Past due date
+                          </Text>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
+                  ) : null}
+                  {isAdmin ? (
+                    <Pressable
+                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                      onPress={() =>
+                        setStaleDays((d) =>
+                          d === 30 ? 60 : d === 60 ? 90 : 30,
+                        )
+                      }
+                    >
+                      <Card
+                        style={[
+                          styles.analyticsCardInner,
+                          {
+                            backgroundColor:
+                              theme.colors.surfaceContainerHighest,
+                            borderColor: theme.colors.outlineVariant,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        mode="outlined"
+                      >
+                        <Card.Content style={styles.analyticsCardContent}>
+                          <Text style={styles.analyticsLabel}>
+                            Not scanned in {staleDays} days
+                          </Text>
+                          <Pressable
+                            onPress={(e) => {
+                              e?.stopPropagation?.();
+                              setStaleListOpen(true);
+                            }}
+                          >
+                            <Title
+                              style={[
+                                styles.analyticsValue,
+                                { color: theme.colors.primary },
+                              ]}
+                            >
+                              {notScannedCount}
+                            </Title>
+                          </Pressable>
+                          <Text style={styles.analyticsSubtext}>
+                            Tap card for 30/60/90 · number for list
+                          </Text>
+                        </Card.Content>
+                      </Card>
+                    </Pressable>
+                  ) : null}
                   {analytics.lowStockCount > 0 && (
                     <Pressable
                       style={[
@@ -2274,6 +2699,7 @@ export default function InventoryListScreen({
           {receivePoModal}
           {itemActionPopover}
           <ColorPreviewModal />
+          {inventoryStatModals}
         </View>
       </View>
     );
@@ -2461,16 +2887,21 @@ export default function InventoryListScreen({
               </View>
             ) : null}
           </View>
-          {recycleDueFilter && (
+          {effectiveRecycleDue && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
                 Showing: Paint Needing Recycle
               </Text>
-              {onClearRecycleDueFilter && (
-                <Button mode="text" compact onPress={onClearRecycleDueFilter}>
-                  Clear Filter
-                </Button>
-              )}
+              <Button
+                mode="text"
+                compact
+                onPress={() => {
+                  setRecycleDueOnly(false);
+                  onClearRecycleDueFilter?.();
+                }}
+              >
+                Clear Filter
+              </Button>
             </View>
           )}
           {viewMode === "inventory" && (
@@ -2480,6 +2911,40 @@ export default function InventoryListScreen({
                 styles.analyticsRowMobileLandscape,
               ]}
             >
+              {isAdmin ? (
+                <Pressable
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                  ]}
+                  onPress={() => setTotalValueListOpen(true)}
+                >
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
+                      style={[
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
+                      ]}
+                    >
+                      <Text style={styles.analyticsLabelMobile}>Value</Text>
+                      <Title
+                        style={[
+                          styles.analyticsValueMobile,
+                          { color: theme.colors.primary, fontSize: 16 },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        $
+                        {Math.round(analytics.totalValue).toLocaleString(
+                          "en-US",
+                        )}
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              ) : null}
               {analytics.totalGallons > 0 && (
                 <Card
                   style={[
@@ -2503,6 +2968,84 @@ export default function InventoryListScreen({
                   </Card.Content>
                 </Card>
               )}
+              {isAdmin && analytics.recycleDueCount > 0 ? (
+                <Pressable
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                    effectiveRecycleDue && styles.analyticsCardFilterActive,
+                  ]}
+                  onPress={() => {
+                    setRecycleDueOnly((v) => {
+                      const next = !v;
+                      if (next) {
+                        setBookFilter("custom");
+                        notifyViewState({ bookFilter: "custom" });
+                      }
+                      return next;
+                    });
+                    if (effectiveRecycleDue) onClearRecycleDueFilter?.();
+                  }}
+                >
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
+                      style={[
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
+                      ]}
+                    >
+                      <Text style={styles.analyticsLabelMobile}>Recycle</Text>
+                      <Title
+                        style={[
+                          styles.analyticsValueMobile,
+                          { color: kitColors.semantic.recycleBannerText },
+                        ]}
+                      >
+                        {analytics.recycleDueCount}
+                      </Title>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              ) : null}
+              {isAdmin ? (
+                <Pressable
+                  style={[
+                    styles.analyticsCardMobile,
+                    isMobileLandscape && styles.analyticsCardMobileLandscape,
+                    styles.analyticsCardFilter,
+                  ]}
+                  onPress={() =>
+                    setStaleDays((d) => (d === 30 ? 60 : d === 60 ? 90 : 30))
+                  }
+                  onLongPress={() => setStaleListOpen(true)}
+                >
+                  <Card style={styles.analyticsCardInner}>
+                    <Card.Content
+                      style={[
+                        styles.analyticsCardMobileContent,
+                        isMobileLandscape &&
+                          styles.analyticsCardMobileContentLandscape,
+                      ]}
+                    >
+                      <Text style={styles.analyticsLabelMobile}>
+                        {staleDays}d stale
+                      </Text>
+                      <Pressable onPress={() => setStaleListOpen(true)}>
+                        <Title
+                          style={[
+                            styles.analyticsValueMobile,
+                            { color: theme.colors.primary },
+                          ]}
+                        >
+                          {notScannedCount}
+                        </Title>
+                      </Pressable>
+                    </Card.Content>
+                  </Card>
+                </Pressable>
+              ) : null}
               {analytics.lowStockCount > 0 && (
                 <Pressable
                   style={[
@@ -2713,6 +3256,7 @@ export default function InventoryListScreen({
         {receivePoModal}
         {itemActionPopover}
         <ColorPreviewModal />
+        {inventoryStatModals}
       </>
     );
   }
@@ -2838,16 +3382,21 @@ export default function InventoryListScreen({
           ) : null}
         </View>
       </View>
-      {recycleDueFilter && (
+      {effectiveRecycleDue && (
         <View style={styles.recycleDueBanner}>
           <Text style={styles.recycleDueBannerText}>
             Showing: Paint Needing Recycle
           </Text>
-          {onClearRecycleDueFilter && (
-            <Button mode="text" compact onPress={onClearRecycleDueFilter}>
-              Clear Filter
-            </Button>
-          )}
+          <Button
+            mode="text"
+            compact
+            onPress={() => {
+              setRecycleDueOnly(false);
+              onClearRecycleDueFilter?.();
+            }}
+          >
+            Clear Filter
+          </Button>
         </View>
       )}
       <View style={styles.listContent}>
@@ -2967,6 +3516,7 @@ export default function InventoryListScreen({
       {receivePoModal}
       {itemActionPopover}
       <ColorPreviewModal />
+      {inventoryStatModals}
     </View>
   );
 }
@@ -3567,6 +4117,64 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 12,
     marginBottom: 16,
+  },
+  invStatModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  invStatModalCard: {
+    width: "100%",
+    maxWidth: 480,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    maxHeight: "85%",
+  },
+  invStatModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    gap: 8,
+  },
+  invStatModalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    flex: 1,
+  },
+  invStatModalHint: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  invStatModalList: {
+    paddingBottom: 8,
+    gap: 8,
+  },
+  invStatModalItem: {
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 8,
+  },
+  invStatModalItemHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 4,
+  },
+  invStatModalItemName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  invStatModalItemValue: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   analyticsCard: {
     flex: 1,

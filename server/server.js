@@ -504,6 +504,76 @@ app.get('/api/login-log', async (req, res) => {
   }
 });
 
+// App user accounts (dropdown login + quick password)
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await db.listAppUsers();
+    res.json(users);
+  } catch (error) {
+    console.error('Error listing users:', error);
+    res.status(500).json({ error: 'Failed to list users' });
+  }
+});
+
+app.post('/api/users', async (req, res) => {
+  try {
+    const userName = req.body?.userName ?? req.body?.user_name;
+    const password = req.body?.password;
+    const role = req.body?.role;
+    const result = await db.createAppUser(userName, password, role);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to create user' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+app.post('/api/users/login', async (req, res) => {
+  try {
+    const userName = req.body?.userName ?? req.body?.user_name;
+    const password = req.body?.password;
+    const result = await db.authenticateAppUser(userName, password);
+    if (!result.success) {
+      return res.status(401).json({ error: result.error || 'Login failed' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error authenticating user:', error);
+    res.status(500).json({ error: 'Failed to authenticate' });
+  }
+});
+
+app.post('/api/users/change-password', async (req, res) => {
+  try {
+    const userName = req.body?.userName ?? req.body?.user_name;
+    const password = req.body?.password ?? req.body?.newPassword;
+    const result = await db.changeAppUserPassword(userName, password);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to change password' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+app.delete('/api/users/:userName', async (req, res) => {
+  try {
+    const result = await db.deleteAppUser(req.params.userName);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to delete user' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
 // Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {
@@ -595,6 +665,24 @@ app.delete('/api/waste-tracking/:id', async (req, res) => {
   }
 });
 
+app.put('/api/waste-tracking/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const body = req.body || {};
+    const result = await db.updateWasteTracking(id, body);
+    if (!result.success) {
+      return res.status(result.error === 'Entry not found' ? 404 : 400).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating waste tracking:', error);
+    res.status(500).json({ error: 'Failed to update waste tracking entry' });
+  }
+});
+
 // --- Material usage (admin, air quality reporting) ---
 app.get('/api/material-usage', async (req, res) => {
   try {
@@ -649,6 +737,55 @@ app.patch('/api/material-usage/:id/catalyzed', async (req, res) => {
   } catch (error) {
     console.error('Error updating material usage catalyzed:', error);
     res.status(500).json({ error: 'Failed to update' });
+  }
+});
+
+app.put('/api/material-usage/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+    const body = req.body || {};
+    const result = await db.updateMaterialUsage(id, {
+      entry_date: body.entry_date,
+      entry_time: body.entry_time,
+      job_name: body.job_name,
+      item_id: body.item_id,
+      color_name: body.color_name,
+      material_type: body.material_type,
+      qty_gallons: body.qty_gallons,
+      catalyst_gallons: body.catalyst_gallons,
+      catalyst_oz: body.catalyst_oz,
+      catalyzed_confirmed: body.catalyzed_confirmed === true,
+      booth: body.booth,
+      user_name: body.user_name || 'unknown',
+      cup_gun: body.cup_gun === true,
+    });
+    if (!result.success) {
+      return res.status(result.error === 'Not found' ? 404 : 400).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating material usage:', error);
+    res.status(500).json({ error: 'Failed to update material usage' });
+  }
+});
+
+app.delete('/api/material-usage/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const result = await db.deleteMaterialUsage(id);
+    if (!result.success) {
+      return res.status(result.error === 'Entry not found' ? 404 : 400).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting material usage:', error);
+    res.status(500).json({ error: 'Failed to delete material usage' });
   }
 });
 

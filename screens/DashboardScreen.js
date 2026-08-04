@@ -38,6 +38,12 @@ import {
 import { AppBadge, AppEmptyState } from "../components/ui";
 import { getActionColor } from "../utils/actionColors";
 import { getLowStockItems } from "../utils/inventoryAlerts";
+import { materialUsageToHistoryEvent } from "../utils/materialUsageHistory";
+import {
+  getMaterialTypeColor,
+  getMaterialTypeLabel,
+  getBoothColor,
+} from "../utils/materialTypes";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -85,6 +91,7 @@ export default function DashboardScreen({
   minQuantity = 30,
   auditLogs: auditLogsFromApp = [],
   auditLogsLoaded: auditLogsLoadedFromApp = false,
+  materialUsageLogs = [],
   onRefresh,
   isRefreshing = false,
   showTransactionTable = true,
@@ -111,17 +118,25 @@ export default function DashboardScreen({
   };
   const auditLogs = auditLogsFromApp;
   const auditLogsLoaded = auditLogsLoadedFromApp;
+
+  /** Material usage as history-shaped events (kept separate from check-in/out). */
+  const usageHistoryEvents = useMemo(
+    () =>
+      (Array.isArray(materialUsageLogs) ? materialUsageLogs : []).map(
+        materialUsageToHistoryEvent,
+      ),
+    [materialUsageLogs],
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [userFilter, setUserFilter] = useState(null);
   const [reducedHistory, setReducedHistory] = useState(false);
   const [mostUsedByWeek, setMostUsedByWeek] = useState(true);
   const [galPeriodWeek, setGalPeriodWeek] = useState(true);
-  const [staleDays, setStaleDays] = useState(30);
-  const [staleListOpen, setStaleListOpen] = useState(false);
   const [checkedOutListOpen, setCheckedOutListOpen] = useState(false);
   const [checkedOutListIsWeek, setCheckedOutListIsWeek] = useState(true);
-  const [totalValueListOpen, setTotalValueListOpen] = useState(false);
   const [shiftFilter, setShiftFilter] = useState(null);
+  /** Admin activity period: today (default) → week → last 30 days. */
+  const [activityPeriod, setActivityPeriod] = useState("today");
   /** Admin transaction history: start with ~2 weeks; "Show more" adds another 2. */
   const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
   /** Standard-user needs-attention popup */
@@ -271,43 +286,17 @@ export default function DashboardScreen({
     return total;
   }, [auditLogs, thisMonthRange]);
 
-  const notScannedCount = useMemo(() => {
-    const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
-    return inventory.filter((item) => {
-      if (!item.lastScanned) return true;
-      return new Date(item.lastScanned).getTime() < cutoff;
-    }).length;
-  }, [inventory, staleDays]);
-
-  const notScannedItems = useMemo(() => {
-    const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
-    return inventory
-      .filter((item) => {
-        if (!item.lastScanned) return true;
-        return new Date(item.lastScanned).getTime() < cutoff;
-      })
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        lastScanned: item.lastScanned || null,
-        lastScannedMs: item.lastScanned
-          ? new Date(item.lastScanned).getTime()
-          : 0,
-        quantity: item.quantity ?? 0,
-      }))
-      .sort((a, b) => {
-        // Oldest scanned (or never scanned) first
-        if (!a.lastScanned && !b.lastScanned)
-          return String(a.id).localeCompare(String(b.id));
-        if (!a.lastScanned) return -1;
-        if (!b.lastScanned) return 1;
-        return a.lastScannedMs - b.lastScannedMs;
-      });
-  }, [inventory, staleDays]);
-
   const getItemName = (itemId) => {
     const item = inventory.find((i) => i.id === itemId);
     return item?.name || itemId || "Unknown";
+  };
+
+  const getEventColorName = (log) => {
+    if (log?.action === "material_usage") {
+      const name = String(log?.details?.color_name || "").trim();
+      if (name) return name;
+    }
+    return getItemName(log?.itemId);
   };
 
   const checkedOutByItemWeek = useMemo(() => {
@@ -467,40 +456,6 @@ export default function DashboardScreen({
       });
   }, [auditLogs, inventory, userName, isAdmin]);
 
-  const totalValue = useMemo(() => {
-    return inventory.reduce((sum, item) => {
-      const qty = item.quantity ?? 0;
-      const price =
-        item.price != null && !isNaN(Number(item.price))
-          ? Number(item.price)
-          : 0;
-      return sum + qty * price;
-    }, 0);
-  }, [inventory]);
-
-  const totalValueItems = useMemo(() => {
-    return inventory
-      .map((item) => {
-        const qty = Number(item?.quantity ?? 0) || 0;
-        const price =
-          item?.price != null && !isNaN(Number(item.price))
-            ? Number(item.price)
-            : 0;
-        const value = qty * price;
-        return {
-          id: item?.id,
-          name: item?.name,
-          qty,
-          price,
-          value,
-        };
-      })
-      .filter((x) => x.id != null)
-      .sort(
-        (a, b) => b.value - a.value || String(a.id).localeCompare(String(b.id)),
-      );
-  }, [inventory]);
-
   // Most used = color with largest qty checked out in the selected period (week or month)
   const mostUsedColor = useMemo(() => {
     const isCheckOut = (log) =>
@@ -609,12 +564,16 @@ export default function DashboardScreen({
     return rows.filter((log) => {
       const item = inventory.find((i) => i.id === log.itemId);
       const itemName = item?.name?.toLowerCase() || "";
+      const colorName = String(log.details?.color_name || "").toLowerCase();
+      const booth = String(log.details?.booth || "").toLowerCase();
       const userName = (log.userName || "").toLowerCase();
       const action = log.action?.toLowerCase() || "";
       const itemId = log.itemId?.toLowerCase() || "";
 
       return (
         itemName.includes(query) ||
+        colorName.includes(query) ||
+        booth.includes(query) ||
         userName.includes(query) ||
         action.includes(query) ||
         itemId.includes(query)
@@ -638,13 +597,156 @@ export default function DashboardScreen({
     });
   }, [filteredLogs, isAdmin, historyCutoffMs]);
 
+  const isCheckInOutLog = (log) => {
+    const type = resolveActionType(log);
+    return type === "check_in" || type === "check_out";
+  };
+
+  /** Admin left column: check-in / check-out only. */
+  const visibleCheckInOutLogs = useMemo(() => {
+    return visibleHistoryLogs.filter(isCheckInOutLog);
+  }, [visibleHistoryLogs]);
+
+  /** Admin right column: material usage, same time / shift / user / search window. */
+  const visibleUsageLogs = useMemo(() => {
+    if (!isAdmin) return [];
+    let rows = usageHistoryEvents;
+    if (shiftFilter) {
+      rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
+    }
+    if (userFilter) {
+      const target = String(userFilter).trim().toLowerCase();
+      rows = rows.filter(
+        (log) =>
+          String(log.userName || "")
+            .trim()
+            .toLowerCase() === target,
+      );
+    }
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      rows = rows.filter((log) => {
+        const colorName = String(log.details?.color_name || "").toLowerCase();
+        const booth = String(log.details?.booth || "").toLowerCase();
+        const userName = String(log.userName || "").toLowerCase();
+        const job = String(log.details?.job_name || "").toLowerCase();
+        return (
+          colorName.includes(query) ||
+          booth.includes(query) ||
+          userName.includes(query) ||
+          job.includes(query)
+        );
+      });
+    }
+    return rows.filter((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t >= historyCutoffMs;
+    });
+  }, [
+    isAdmin,
+    usageHistoryEvents,
+    shiftFilter,
+    userFilter,
+    searchQuery,
+    historyCutoffMs,
+  ]);
+
+  /** Admin desktop activity: today / this week / last 30 days. */
+  const adminActivityRange = useMemo(() => {
+    const now = new Date();
+    const end = now.getTime();
+    if (activityPeriod === "week") {
+      return {
+        start: thisWeekRange.start,
+        end: thisWeekRange.end,
+        label: `This week · ${thisWeekRange.label}`,
+        shortLabel: "This week",
+      };
+    }
+    if (activityPeriod === "days30") {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - 29);
+      return {
+        start: start.getTime(),
+        end,
+        label: "Last 30 days",
+        shortLabel: "30 days",
+      };
+    }
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return {
+      start: start.getTime(),
+      end,
+      label: "Today",
+      shortLabel: "Today",
+    };
+  }, [activityPeriod, thisWeekRange]);
+
+  const adminPeriodCheckOutLogs = useMemo(() => {
+    if (!isAdmin) return [];
+    const { start, end } = adminActivityRange;
+    return auditLogs
+      .filter((log) => {
+        const type = resolveActionType(log);
+        if (type !== "check_out") return false;
+        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+        return t >= start && t <= end;
+      })
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [isAdmin, auditLogs, adminActivityRange]);
+
+  const adminPeriodCheckInLogs = useMemo(() => {
+    if (!isAdmin) return [];
+    const { start, end } = adminActivityRange;
+    return auditLogs
+      .filter((log) => {
+        const type = resolveActionType(log);
+        if (type !== "check_in") return false;
+        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+        return t >= start && t <= end;
+      })
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [isAdmin, auditLogs, adminActivityRange]);
+
+  const adminPeriodUsageLogs = useMemo(() => {
+    if (!isAdmin) return [];
+    const { start, end } = adminActivityRange;
+    return usageHistoryEvents
+      .filter((log) => {
+        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+        return t >= start && t <= end;
+      })
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [isAdmin, usageHistoryEvents, adminActivityRange]);
+
+  const adminPeriodTotals = useMemo(() => {
+    const sumQty = (logs) =>
+      logs.reduce((sum, log) => sum + logQtyAbs(log), 0);
+    return {
+      checkOut: sumQty(adminPeriodCheckOutLogs),
+      checkIn: sumQty(adminPeriodCheckInLogs),
+      usage: sumQty(adminPeriodUsageLogs),
+    };
+  }, [
+    adminPeriodCheckOutLogs,
+    adminPeriodCheckInLogs,
+    adminPeriodUsageLogs,
+  ]);
+
   const hasMoreHistory = useMemo(() => {
     if (!isAdmin) return false;
-    return filteredLogs.some((log) => {
+    const auditOlder = filteredLogs.some((log) => {
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       return t > 0 && t < historyCutoffMs;
     });
-  }, [filteredLogs, isAdmin, historyCutoffMs]);
+    if (auditOlder) return true;
+    return usageHistoryEvents.some((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t > 0 && t < historyCutoffMs;
+    });
+  }, [filteredLogs, usageHistoryEvents, isAdmin, historyCutoffMs]);
 
   const handleUserPress = (log) => {
     if (!isAdmin) return;
@@ -698,6 +800,9 @@ export default function DashboardScreen({
       return "ID Changed";
     } else if (action === "set_next_id") {
       return "Next ID Set";
+    } else if (action === "material_usage") {
+      const booth = details?.booth ? ` · ${details.booth}` : "";
+      return `Material usage${booth}`;
     }
     return action;
   };
@@ -711,13 +816,16 @@ export default function DashboardScreen({
     if (type === "recycled") return "recycled";
     if (type === "add") return "added";
     if (type === "delete") return "deleted";
+    if (type === "material_usage") {
+      return "used";
+    }
     return formatAction(log.action, log.details, log.itemId).toLowerCase();
   };
 
   const formatBriefSummary = (log) => {
     const actionLabel = formatBriefVerb(log);
     const qty = getQuantity(log.action, log.details, log.itemId);
-    const colorName = getItemName(log.itemId);
+    const colorName = getEventColorName(log);
     const qtyPart =
       qty !== "-" && qty != null && qty !== "" ? `${qty} gal ` : "";
     return `${actionLabel} ${qtyPart}${colorName}`.replace(/\s+/g, " ").trim();
@@ -730,13 +838,187 @@ export default function DashboardScreen({
     return source.slice(0, 10);
   }, [visibleHistoryLogs, isAdmin]);
 
-  // Mobile: brief stacked list (legible, no horizontal scroll). Desktop: full table.
-  const showFullHistoryTable = showTransactionTable && !isMobileLayout;
+  // Admin desktop: two-column brief (check-in/out | material usage).
+  // Mobile: stacked brief list. Non-admin desktop: full table.
+  const showAdminDualBrief =
+    showTransactionTable && !isMobileLayout && isAdmin;
+  const showFullHistoryTable =
+    showTransactionTable && !isMobileLayout && !isAdmin;
   const showBriefRecent = showTransactionTable && isMobileLayout;
+
+  const formatBriefTime = (timestamp) => {
+    if (!timestamp) return "—";
+    return new Date(timestamp).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const renderBriefLogRow = (log, index, { showBooth = false } = {}) => {
+    const materialType = showBooth
+      ? String(log.details?.material_type || "").trim()
+      : "";
+    const accent = showBooth
+      ? getMaterialTypeColor(materialType, theme)
+      : getActionColor(log.action, log.details);
+    const user = getDisplayUserName(log);
+    const actionLabel = formatBriefVerb(log);
+    const qty = logQtyAbs(log);
+    const colorName = getEventColorName(log);
+    const booth = showBooth ? String(log.details?.booth || "").trim() : "";
+    const job = showBooth ? String(log.details?.job_name || "").trim() : "";
+    const boothColor = booth ? getBoothColor(booth) : null;
+    const typeLabel = materialType ? getMaterialTypeLabel(materialType) : "";
+    const isPrimer =
+      String(materialType).toLowerCase() === "primer";
+    return (
+      <View
+        key={`${log.id || log.timestamp}-${log.itemId}-${index}`}
+        style={[
+          styles.briefHistoryRow,
+          index > 0 && {
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.outlineVariant,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.briefHistoryAccent,
+            {
+              backgroundColor: accent,
+              borderWidth: isPrimer ? 1 : 0,
+              borderColor: isPrimer ? "rgba(0,0,0,0.2)" : "transparent",
+            },
+          ]}
+        />
+        <View style={styles.briefHistoryBody}>
+          <View style={styles.briefHistoryTop}>
+            <Text
+              style={[
+                styles.briefHistoryTime,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+              numberOfLines={1}
+            >
+              {formatBriefTime(log.timestamp)}
+            </Text>
+            <Text
+              style={[
+                styles.briefHistoryUser,
+                { color: theme.colors.onSurface },
+              ]}
+              numberOfLines={1}
+            >
+              {user}
+            </Text>
+          </View>
+          {booth ? (
+            <View style={styles.briefMetaRow}>
+              <View
+                style={[
+                  styles.briefBoothPill,
+                  {
+                    backgroundColor: boothColor
+                      ? `${boothColor}22`
+                      : "rgba(38,166,154,0.14)",
+                    borderWidth: 1,
+                    borderColor: boothColor || colors.action.materialUsage,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.briefBoothText,
+                    { color: boothColor || colors.action.materialUsage },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {booth}
+                </Text>
+              </View>
+              {typeLabel ? (
+                <Text
+                  style={[
+                    styles.briefJobText,
+                    {
+                      color: isPrimer
+                        ? theme.dark
+                          ? "#eceff1"
+                          : "#546e7a"
+                        : accent,
+                      fontWeight: "700",
+                      ...(isPrimer
+                        ? {
+                            backgroundColor: theme.dark
+                              ? "rgba(255,255,255,0.12)"
+                              : "rgba(0,0,0,0.06)",
+                            paddingHorizontal: 6,
+                            paddingVertical: 1,
+                            borderRadius: 4,
+                            overflow: "hidden",
+                          }
+                        : {}),
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {typeLabel}
+                </Text>
+              ) : null}
+              {job ? (
+                <Text
+                  style={[
+                    styles.briefJobText,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Job {job}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          <Text
+            style={[
+              styles.briefHistorySummary,
+              { color: theme.colors.onSurface },
+            ]}
+            numberOfLines={2}
+          >
+            <Text
+              style={{
+                color: showBooth
+                  ? isPrimer
+                    ? theme.dark
+                      ? "#eceff1"
+                      : "#546e7a"
+                    : accent
+                  : accent,
+                fontWeight: "700",
+              }}
+            >
+              {actionLabel}
+            </Text>
+            {qty > 0 ? ` ${qty} gal ` : " "}
+            <Text style={{ fontWeight: "700" }}>{colorName}</Text>
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
   const getQuantity = (action, details, itemId) => {
     // Return the amount of gallons that were manipulated (changed)
     if (details) {
+      if (
+        action === "material_usage" &&
+        typeof details.quantityChange === "number"
+      ) {
+        return Math.abs(details.quantityChange);
+      }
       // Handle old records with _actionType in details (for backward compatibility)
       const isCheckInOut =
         action === "check_in" ||
@@ -944,6 +1226,7 @@ export default function DashboardScreen({
       style={[
         styles.dashboardContainer,
         showFullHistoryTable && styles.dashboardContainerWeb,
+        showAdminDualBrief && styles.dashboardContainerWeb,
       ]}
     >
       {/* Needs attention — notification-style anchored popup */}
@@ -1254,7 +1537,7 @@ export default function DashboardScreen({
                         })
                       : "—";
                     const qty = logQtyAbs(log);
-                    const name = getItemName(log.itemId);
+                    const name = getEventColorName(log);
                     const verb = formatBriefVerb(log);
                     const showVerb = activityKind === "actions";
                     return (
@@ -1342,259 +1625,6 @@ export default function DashboardScreen({
             ) : null}
           </View>
         </View>
-      </Modal>
-
-      {/* Not scanned list modal */}
-      <Modal
-        visible={staleListOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setStaleListOpen(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setStaleListOpen(false)}
-        >
-          <Pressable
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: theme.colors.surfaceContainerHighest,
-                borderColor: theme.colors.outlineVariant,
-              },
-            ]}
-            onPress={() => {}}
-          >
-            <View style={styles.modalHeaderRow}>
-              <Text
-                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
-                numberOfLines={1}
-              >
-                Not scanned in {staleDays} days
-              </Text>
-              <Button compact onPress={() => setStaleListOpen(false)}>
-                Close
-              </Button>
-            </View>
-            <ScrollFrame
-              maxHeight={420}
-              contentContainerStyle={styles.modalList}
-            >
-              {notScannedItems.length === 0 ? (
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                  None.
-                </Text>
-              ) : (
-                notScannedItems.map((it) => {
-                  const daysAgo = it.lastScanned
-                    ? Math.max(
-                        0,
-                        Math.floor(
-                          (Date.now() - (it.lastScannedMs || 0)) /
-                            (24 * 60 * 60 * 1000),
-                        ),
-                      )
-                    : null;
-                  return (
-                    <View
-                      key={String(it.id)}
-                      style={[
-                        styles.modalItemCard,
-                        {
-                          backgroundColor: theme.dark
-                            ? colors.dark.nested
-                            : colors.light.nested,
-                          borderColor: theme.colors.outlineVariant,
-                        },
-                      ]}
-                    >
-                      <View style={styles.modalItemHeader}>
-                        <Text
-                          style={[
-                            styles.modalItemName,
-                            { color: theme.colors.onSurface },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {it.name || it.id}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.modalItemValue,
-                            { color: colors.semantic.lowStockValue },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {daysAgo != null ? `${daysAgo}d` : "Never"}
-                        </Text>
-                      </View>
-                      <Text
-                        style={[
-                          styles.modalItemId,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        ID: {it.id}
-                      </Text>
-                      <View style={styles.modalItemMetaRow}>
-                        <Text
-                          style={[
-                            styles.modalItemMeta,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          {it.quantity ?? 0} gal
-                        </Text>
-                        <Text
-                          style={[
-                            styles.modalItemMeta,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          Last:{" "}
-                          {it.lastScanned
-                            ? new Date(it.lastScanned).toLocaleDateString(
-                                "en-US",
-                                {
-                                  month: "short",
-                                  day: "numeric",
-                                  year: "numeric",
-                                },
-                              )
-                            : "never"}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </ScrollFrame>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Total value list modal */}
-      <Modal
-        visible={totalValueListOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTotalValueListOpen(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setTotalValueListOpen(false)}
-        >
-          <Pressable
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: theme.colors.surfaceContainerHighest,
-                borderColor: theme.colors.outlineVariant,
-              },
-            ]}
-            onPress={() => {}}
-          >
-            <View style={styles.modalHeaderRow}>
-              <Text
-                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
-                numberOfLines={1}
-              >
-                Total value
-              </Text>
-              <Button compact onPress={() => setTotalValueListOpen(false)}>
-                Close
-              </Button>
-            </View>
-            <Text
-              style={[styles.modalHint, { color: theme.colors.primary }]}
-            >
-              $
-              {totalValue.toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </Text>
-            <ScrollFrame
-              maxHeight={420}
-              contentContainerStyle={styles.modalList}
-            >
-              {totalValueItems.length === 0 ? (
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                  No items.
-                </Text>
-              ) : (
-                totalValueItems.map((it) => (
-                  <View
-                    key={String(it.id)}
-                    style={[
-                      styles.modalItemCard,
-                      {
-                        backgroundColor: theme.dark
-                          ? colors.dark.nested
-                          : colors.light.nested,
-                        borderColor: theme.colors.outlineVariant,
-                      },
-                    ]}
-                  >
-                    <View style={styles.modalItemHeader}>
-                      <Text
-                        style={[
-                          styles.modalItemName,
-                          { color: theme.colors.onSurface },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {it.name || it.id}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.modalItemValue,
-                          { color: theme.colors.primary },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        $
-                        {it.value.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.modalItemId,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      ID: {it.id}
-                    </Text>
-                    <View style={styles.modalItemMetaRow}>
-                      <Text
-                        style={[
-                          styles.modalItemMeta,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {it.qty} gal
-                      </Text>
-                      <Text
-                        style={[
-                          styles.modalItemMeta,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        ${it.price.toFixed(2)} / gal
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
-            </ScrollFrame>
-          </Pressable>
-        </Pressable>
       </Modal>
 
       {/* Checked out list modal */}
@@ -2253,49 +2283,9 @@ export default function DashboardScreen({
         </View>
       ) : null}
 
-      {/* Stats Cards — desktop / wide only */}
-      {!isMobileLayout ? (
+      {/* Stats Cards — non-admin desktop / wide only (admin stats moved to Inventory) */}
+      {!isMobileLayout && !isAdmin ? (
       <View style={styles.statsRow}>
-        {isAdmin && (
-          <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
-            <Card.Content style={styles.statCardContent}>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={2}
-              >
-                Total value
-              </Text>
-              {inventoryLoaded ? (
-                <Pressable
-                  onPress={() => setTotalValueListOpen(true)}
-                  style={styles.statNumberPressable}
-                >
-                  <Text
-                    style={[styles.statValue, { color: theme.colors.primary }]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
-                  >
-                    $
-                    {totalValue.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </Text>
-                </Pressable>
-              ) : (
-                <View style={styles.statLoadingRow}>
-                  <ActivityIndicator size="small" />
-                  <Text style={styles.statLoadingLabel}>Loading…</Text>
-                </View>
-              )}
-            </Card.Content>
-          </Card>
-        )}
-
         <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
           <Card.Content style={styles.statCardContent}>
             <Text
@@ -2381,86 +2371,6 @@ export default function DashboardScreen({
             )}
           </Card.Content>
         </Card>
-
-        {isAdmin && (
-          <Card
-            style={[styles.statCard, surfaceCardStyle]}
-            mode="outlined"
-            onPress={() =>
-              setStaleDays((d) => (d === 30 ? 60 : d === 60 ? 90 : 30))
-            }
-          >
-            <Card.Content style={styles.statCardContent}>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={2}
-              >
-                Not scanned in{" "}
-                <Text
-                  style={[
-                    styles.staleDaysInline,
-                    { color: theme.colors.onSurface },
-                  ]}
-                >
-                  {staleDays}
-                </Text>{" "}
-                days
-              </Text>
-              <Pressable
-                onPress={() => setStaleListOpen(true)}
-                style={styles.statNumberPressable}
-              >
-                <Text
-                  style={[styles.statValue, { color: theme.colors.primary }]}
-                  numberOfLines={1}
-                >
-                  {notScannedCount}
-                </Text>
-              </Pressable>
-            </Card.Content>
-          </Card>
-        )}
-
-        {recycleDueCount > 0 && onOpenRecycleDue && (
-          <Card
-            style={[styles.statCard, surfaceCardStyle]}
-            mode="outlined"
-            onPress={onOpenRecycleDue}
-          >
-            <Card.Content style={styles.statCardContent}>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={2}
-              >
-                Paint Need to Recycle
-              </Text>
-              <Text
-                style={[
-                  styles.statValue,
-                  { color: colors.semantic.recycleBannerText },
-                ]}
-                numberOfLines={1}
-              >
-                {recycleDueCount}
-              </Text>
-              <Text
-                style={[
-                  styles.statSubtextHint,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={1}
-              >
-                Tap to View List
-              </Text>
-            </Card.Content>
-          </Card>
-        )}
 
         {(!auditLogsLoaded || mostUsedColor) && (
           <Card
@@ -2559,7 +2469,7 @@ export default function DashboardScreen({
                   const user = getDisplayUserName(log);
                   const actionLabel = formatBriefVerb(log);
                   const qty = logQtyAbs(log);
-                  const colorName = getItemName(log.itemId);
+                  const colorName = getEventColorName(log);
                   return (
                     <View
                       key={`${log.timestamp}-${log.itemId}-${index}`}
@@ -2626,6 +2536,326 @@ export default function DashboardScreen({
                   Show more
                 </Button>
               ) : null}
+            </>
+          )}
+        </View>
+      ) : null}
+
+      {showAdminDualBrief ? (
+        <View style={styles.dualBriefBlock}>
+          <View style={styles.historyHeader}>
+            <Title
+              style={[
+                styles.historyTitle,
+                { color: theme.colors.onBackground },
+              ]}
+            >
+              Activity
+            </Title>
+            <View style={styles.activityPeriodRow}>
+              {[
+                { key: "today", label: "Today" },
+                { key: "week", label: "This week" },
+                { key: "days30", label: "30 days" },
+              ].map((opt) => (
+                <Button
+                  key={opt.key}
+                  mode={activityPeriod === opt.key ? "contained" : "outlined"}
+                  compact
+                  onPress={() => setActivityPeriod(opt.key)}
+                  style={styles.historyToggleBtn}
+                  contentStyle={styles.historyToggleContent}
+                  labelStyle={styles.historyToggleLabel}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </View>
+            <Text
+              style={[
+                styles.activityPeriodHint,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {adminActivityRange.label}
+            </Text>
+          </View>
+
+          {!auditLogsLoaded ? (
+            <View style={styles.statLoadingRow}>
+              <ActivityIndicator size="small" />
+              <Text style={styles.statLoadingLabel}>Loading…</Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.activityTotalsRow}>
+                <View
+                  style={[
+                    styles.activityTotalCard,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.activityTotalLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Checked out
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalValue,
+                      { color: colors.action.checkOut },
+                    ]}
+                  >
+                    {adminPeriodTotals.checkOut}
+                    <Text style={styles.activityTotalUnit}> gal</Text>
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalCount,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {adminPeriodCheckOutLogs.length} txn
+                    {adminPeriodCheckOutLogs.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.activityTotalCard,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.activityTotalLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Checked in
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalValue,
+                      { color: colors.action.checkIn },
+                    ]}
+                  >
+                    {adminPeriodTotals.checkIn}
+                    <Text style={styles.activityTotalUnit}> gal</Text>
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalCount,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {adminPeriodCheckInLogs.length} txn
+                    {adminPeriodCheckInLogs.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.activityTotalCard,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.activityTotalLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Material used
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalValue,
+                      { color: colors.action.materialUsage },
+                    ]}
+                  >
+                    {adminPeriodTotals.usage}
+                    <Text style={styles.activityTotalUnit}> gal</Text>
+                  </Text>
+                  <Text
+                    style={[
+                      styles.activityTotalCount,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {adminPeriodUsageLogs.length} txn
+                    {adminPeriodUsageLogs.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.dualBriefRow}>
+                <View
+                  style={[
+                    styles.dualBriefCol,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <View style={styles.dualBriefColHeader}>
+                    <View
+                      style={[
+                        styles.dualBriefDot,
+                        { backgroundColor: colors.action.checkOut },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.dualBriefColTitle,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      Checked out
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dualBriefCount,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      {adminPeriodCheckOutLogs.length}
+                    </Text>
+                  </View>
+                  {adminPeriodCheckOutLogs.length === 0 ? (
+                    <Text
+                      style={[
+                        styles.briefHistoryEmpty,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      No check-outs in this period.
+                    </Text>
+                  ) : (
+                    <ScrollFrame
+                      fill
+                      maxHeight={420}
+                      contentContainerStyle={styles.dualBriefListContent}
+                      style={styles.dualBriefScroll}
+                    >
+                      {adminPeriodCheckOutLogs.map((log, index) =>
+                        renderBriefLogRow(log, index),
+                      )}
+                    </ScrollFrame>
+                  )}
+                </View>
+
+                <View
+                  style={[
+                    styles.dualBriefCol,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <View style={styles.dualBriefColHeader}>
+                    <View
+                      style={[
+                        styles.dualBriefDot,
+                        { backgroundColor: colors.action.checkIn },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.dualBriefColTitle,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      Checked in
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dualBriefCount,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      {adminPeriodCheckInLogs.length}
+                    </Text>
+                  </View>
+                  {adminPeriodCheckInLogs.length === 0 ? (
+                    <Text
+                      style={[
+                        styles.briefHistoryEmpty,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      No check-ins in this period.
+                    </Text>
+                  ) : (
+                    <ScrollFrame
+                      fill
+                      maxHeight={420}
+                      contentContainerStyle={styles.dualBriefListContent}
+                      style={styles.dualBriefScroll}
+                    >
+                      {adminPeriodCheckInLogs.map((log, index) =>
+                        renderBriefLogRow(log, index),
+                      )}
+                    </ScrollFrame>
+                  )}
+                </View>
+
+                <View
+                  style={[
+                    styles.dualBriefCol,
+                    surfaceCardStyle,
+                    { borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <View style={styles.dualBriefColHeader}>
+                    <View
+                      style={[
+                        styles.dualBriefDot,
+                        { backgroundColor: colors.action.materialUsage },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.dualBriefColTitle,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      Material usage
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dualBriefCount,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      {adminPeriodUsageLogs.length}
+                    </Text>
+                  </View>
+                  {adminPeriodUsageLogs.length === 0 ? (
+                    <Text
+                      style={[
+                        styles.briefHistoryEmpty,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      No material usage in this period.
+                    </Text>
+                  ) : (
+                    <ScrollFrame
+                      fill
+                      maxHeight={420}
+                      contentContainerStyle={styles.dualBriefListContent}
+                      style={styles.dualBriefScroll}
+                    >
+                      {adminPeriodUsageLogs.map((log, index) =>
+                        renderBriefLogRow(log, index, { showBooth: true }),
+                      )}
+                    </ScrollFrame>
+                  )}
+                </View>
+              </View>
             </>
           )}
         </View>
@@ -2812,7 +3042,7 @@ export default function DashboardScreen({
                           log.details,
                           log.itemId,
                         );
-                        const colorName = getItemName(log.itemId);
+                        const colorName = getEventColorName(log);
                         const totalQuantity = getTotalQuantity(
                           log.action,
                           log.details,
@@ -2993,7 +3223,7 @@ export default function DashboardScreen({
   );
 
   if (isWeb) {
-    if (!showFullHistoryTable) {
+    if (!showFullHistoryTable && !showAdminDualBrief) {
       return (
         <ScrollView
           style={[
@@ -3095,24 +3325,26 @@ const styles = StyleSheet.create({
   },
   quickActionsRow: {
     flexDirection: "row",
-    flexWrap: "nowrap",
-    gap: space[1],
+    flexWrap: "wrap",
+    gap: space[2],
     alignItems: "stretch",
   },
   quickAction: {
     borderRadius: radius.sm,
     borderWidth: 1,
-    flex: 1,
-    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: "47%",
+    maxWidth: "48.5%",
+    minWidth: "47%",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
   },
   quickActionLabel: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: "600",
     flexShrink: 1,
   },
@@ -3558,6 +3790,128 @@ const styles = StyleSheet.create({
   briefHistoryMoreBtn: {
     marginTop: space[3],
     alignSelf: "stretch",
+  },
+  dualBriefBlock: {
+    flex: 1,
+    minHeight: 0,
+    marginBottom: space[5],
+    gap: space[3],
+  },
+  dualBriefSearch: {
+    minWidth: 180,
+    flex: 1,
+    maxWidth: 280,
+  },
+  activityPeriodRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  activityPeriodHint: {
+    fontSize: 12,
+    marginTop: 6,
+    fontWeight: "500",
+  },
+  activityTotalsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 4,
+  },
+  activityTotalCard: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  activityTotalLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  activityTotalValue: {
+    fontSize: 26,
+    fontWeight: "700",
+    lineHeight: 32,
+  },
+  activityTotalUnit: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  activityTotalCount: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  dualBriefRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 14,
+    flex: 1,
+    minHeight: 0,
+  },
+  dualBriefCol: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: "hidden",
+    paddingBottom: 4,
+  },
+  dualBriefColHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(128,128,128,0.25)",
+  },
+  dualBriefDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  dualBriefDotPair: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  dualBriefColTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  dualBriefCount: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  dualBriefScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  dualBriefListContent: {
+    paddingBottom: 8,
+  },
+  briefMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  briefBoothPill: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  briefBoothText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  briefJobText: {
+    fontSize: 12,
+    fontWeight: "500",
   },
   showMoreHistoryLink: {
     paddingVertical: 14,

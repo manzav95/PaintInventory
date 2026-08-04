@@ -69,13 +69,22 @@ export const colors = {
   },
   /** Material-type label colors (matches Inventory / materialTypes). */
   materialType: {
-    paint: "#1565c0",
-    clear: "#e65100",
+    paint: "#1976d2",
+    clear: "#ef6c00",
     stain: "#2e7d32",
+    /** Near-white; pair with dark text / outline for contrast on light surfaces. */
+    primer: "#eceff1",
     primerLight: "#5d4037",
-    primerDark: "#f5f5dc",
-    dye: "#7e57c2",
+    primerDark: "#eceff1",
+    dye: "#8e24aa",
     catalyst: "#9a7b00",
+  },
+  /** Material-usage booth accents. */
+  booth: {
+    "Booth 1&3": "#5c6bc0",
+    "Booth 2": "#00897b",
+    "Booth 4": "#f9a825",
+    default: "#78909c",
   },
   /** Audit / transaction action accents used on Home + Dashboard. */
   action: {
@@ -86,6 +95,7 @@ export const colors = {
     delete: "#f44336",
     create: "#ba68c8",
     update: "#ff5722",
+    materialUsage: "#26a69a",
     unknown: "#757575",
   },
 };

@@ -30,5 +30,6 @@ export function getActionColor(action, details) {
   if (action === "delete") return map.delete;
   if (action === "change_id") return map.update;
   if (action === "update") return map.create;
+  if (action === "material_usage") return map.materialUsage || map.adjust;
   return map.unknown;
 }

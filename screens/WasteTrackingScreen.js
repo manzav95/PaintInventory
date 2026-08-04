@@ -7,6 +7,7 @@ import {
   Alert,
   RefreshControl,
   Pressable,
+  useWindowDimensions,
 } from "react-native";
 import {
   Text,
@@ -14,6 +15,7 @@ import {
   Button,
   Card,
   useTheme,
+  SegmentedButtons,
 } from "react-native-paper";
 import * as Clipboard from "expo-clipboard";
 import DateField from "../components/DateField";
@@ -26,6 +28,7 @@ import showToast from "../utils/showToast";
 import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { nestedSurfaceColor } from "../utils/themeColors";
+import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import {
   WASTE_MATERIALS,
   inchesToGallons,
@@ -93,10 +96,14 @@ export default function WasteTrackingScreen({
   userName = "",
   isAdmin = false,
   embeddedInShell = false,
+  formRefreshKey = 0,
   onBack,
 }) {
   const theme = useTheme();
   const inputRefs = useRef({});
+  const isWeb = Platform.OS === "web";
+  const { width } = useWindowDimensions();
+  const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
 
   const [entryDate, setEntryDate] = useState(todayPacificIso());
   const [name, setName] = useState(userName || "");
@@ -108,6 +115,7 @@ export default function WasteTrackingScreen({
   });
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
   const [copiedWeek, setCopiedWeek] = useState(null);
   const [records, setRecords] = useState([]);
@@ -116,6 +124,8 @@ export default function WasteTrackingScreen({
   const [shakeTick, setShakeTick] = useState(0);
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
   const weeksSeededRef = useRef(false);
+  /** Mobile: 'form' | 'totals' */
+  const [mobilePane, setMobilePane] = useState("form");
 
   useEffect(() => {
     if (userName && !name) setName(userName);
@@ -279,7 +289,7 @@ export default function WasteTrackingScreen({
       return;
     }
 
-    const summary = [
+    const summaryLines = [
       `Date: ${formatMonthDayYear(entryDate)}`,
       `Name: ${trimmedName}`,
       `Paint: ${formatGallonsTenths(gallons.paint)} gal`,
@@ -290,28 +300,35 @@ export default function WasteTrackingScreen({
     ].join("\n");
 
     const ok = await confirmAction(
-      "Save waste entry?",
-      `${summary}\n\nSave this waste record?`,
-      { confirmLabel: "Save" },
+      editingId ? "Update waste entry?" : "Save waste entry?",
+      `${summaryLines}\n\n${editingId ? "Save these changes?" : "Save this waste record?"}`,
+      { confirmLabel: editingId ? "Save changes" : "Save" },
     );
     if (!ok) return;
 
+    const payload = {
+      entry_date: entryDate,
+      user_name: trimmedName,
+      paint_inches: parseInches(inches.paint),
+      clear_toner_inches: parseInches(inches.clear_toner),
+      primer_inches: parseInches(inches.primer),
+      acetone_inches: parseInches(inches.acetone),
+      paint_gallons: gallons.paint,
+      clear_toner_gallons: gallons.clear_toner,
+      primer_gallons: gallons.primer,
+      acetone_gallons: gallons.acetone,
+    };
+
     setSubmitting(true);
     try {
-      await WasteTrackingService.create({
-        entry_date: entryDate,
-        user_name: trimmedName,
-        paint_inches: parseInches(inches.paint),
-        clear_toner_inches: parseInches(inches.clear_toner),
-        primer_inches: parseInches(inches.primer),
-        acetone_inches: parseInches(inches.acetone),
-        paint_gallons: gallons.paint,
-        clear_toner_gallons: gallons.clear_toner,
-        primer_gallons: gallons.primer,
-        acetone_gallons: gallons.acetone,
-      });
-
-      showToast({ title: "Saved", message: "Waste record saved." });
+      if (editingId) {
+        await WasteTrackingService.update(editingId, payload);
+        showToast({ title: "Updated", message: "Waste record updated." });
+        setEditingId(null);
+      } else {
+        await WasteTrackingService.create(payload);
+        showToast({ title: "Saved", message: "Waste record saved." });
+      }
 
       setInches({
         paint: "",
@@ -319,6 +336,7 @@ export default function WasteTrackingScreen({
         primer: "",
         acetone: "",
       });
+      setEntryDate(todayPacificIso());
       await loadRecords();
     } catch (e) {
       showToast({
@@ -330,6 +348,61 @@ export default function WasteTrackingScreen({
       setSubmitting(false);
     }
   };
+
+  const startEdit = (row) => {
+    if (!isAdmin || !row?.id) return;
+    setEditingId(row.id);
+    setEntryDate(row.entry_date || todayPacificIso());
+    setName(row.user_name || "");
+    setInches({
+      paint:
+        row.paint_inches != null && row.paint_inches !== ""
+          ? String(row.paint_inches)
+          : "",
+      clear_toner:
+        row.clear_toner_inches != null && row.clear_toner_inches !== ""
+          ? String(row.clear_toner_inches)
+          : "",
+      primer:
+        row.primer_inches != null && row.primer_inches !== ""
+          ? String(row.primer_inches)
+          : "",
+      acetone:
+        row.acetone_inches != null && row.acetone_inches !== ""
+          ? String(row.acetone_inches)
+          : "",
+    });
+    showToast({
+      title: "Editing entry",
+      message: "Update the form and tap Save changes.",
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setInches({
+      paint: "",
+      clear_toner: "",
+      primer: "",
+      acetone: "",
+    });
+    setEntryDate(todayPacificIso());
+    if (userName) setName(userName);
+  };
+
+  const handleRefresh = () => {
+    if (!editingId) setEntryDate(todayPacificIso());
+    loadRecords(true);
+  };
+
+  // Header / shell pull-to-refresh — reset date to today (when not editing).
+  useEffect(() => {
+    if (!formRefreshKey) return;
+    if (!editingId) setEntryDate(todayPacificIso());
+    loadRecords(true);
+    // editingId intentionally omitted — only react to shell refresh ticks
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formRefreshKey]);
 
   const handleDelete = async (row) => {
     if (!isAdmin || !row?.id) return;
@@ -349,6 +422,7 @@ export default function WasteTrackingScreen({
     setDeletingId(row.id);
     try {
       await WasteTrackingService.delete(row.id);
+      if (editingId === row.id) cancelEdit();
       await loadRecords();
     } catch (e) {
       showToast({
@@ -361,553 +435,632 @@ export default function WasteTrackingScreen({
     }
   };
 
-  return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      <ScrollView
-        style={{ width: "100%", maxWidth: "100%" }}
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => loadRecords(true)}
+  const surfaceCardStyle = [
+    styles.card,
+    {
+      backgroundColor: theme.colors.surfaceContainerHighest,
+      borderColor: theme.colors.outlineVariant,
+    },
+  ];
+
+  const formCard = (
+    <Card style={surfaceCardStyle} mode="outlined">
+      <ShakeView trigger={shakeTick} style={styles.shakePad}>
+        <Card.Content style={styles.form}>
+          <View style={styles.formHeaderRow}>
+            <Text
+              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+            >
+              {editingId ? "Edit waste" : "Log waste"}
+            </Text>
+            <FormHelp content={WASTE_FORM_HELP} />
+          </View>
+          <DateField
+            label="Date"
+            value={entryDate}
+            onChange={setEntryDate}
+            style={styles.input}
           />
-        }
-      >
-        <PageHeader
-          title="Waste Tracking"
-          onBack={onBack}
-          embeddedInShell={embeddedInShell}
-        />
-
-        <Card
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.surfaceContainerHighest,
-              borderColor: theme.colors.outlineVariant,
-            },
-          ]}
-          mode="outlined"
-        >
-          <ShakeView trigger={shakeTick} style={styles.shakePad}>
-          <Card.Content style={styles.form}>
-            <View style={styles.formHeaderRow}>
-              <Text
-                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-              >
-                Log waste
-              </Text>
-              <FormHelp content={WASTE_FORM_HELP} />
-            </View>
-            <DateField
-              label="Date"
-              value={entryDate}
-              onChange={setEntryDate}
-              style={styles.input}
-            />
-            <TextInput
-              label="Name"
-              value={name}
-              onChangeText={setName}
-              mode="outlined"
-              autoCorrect={false}
-              style={styles.input}
-            />
-
-            <Text
-              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-            >
-              Stick measure (inches)
-            </Text>
-            <Text
-              style={[
-                styles.hint,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Enter inches → auto converts to gal ({GALLONS_PER_INCH} gal/in).
-              Enter moves to the next field.
-            </Text>
-
-            <View style={styles.inchGrid}>
-              {Array.from(
-                { length: Math.ceil(WASTE_MATERIALS.length / 2) },
-                (_, rowIdx) => {
-                  const pair = WASTE_MATERIALS.slice(rowIdx * 2, rowIdx * 2 + 2);
-                  return (
-                    <View key={`inch-row-${rowIdx}`} style={styles.inchRow}>
-                      {pair.map((m) => {
-                        const idx = WASTE_MATERIALS.findIndex(
-                          (x) => x.key === m.key,
-                        );
-                        const isLast = idx === WASTE_MATERIALS.length - 1;
-                        return (
-                          <View key={m.key} style={styles.inchField}>
-                            <TextInput
-                              ref={(r) => {
-                                inputRefs.current[m.key] = r;
-                              }}
-                              label={m.label}
-                              value={inches[m.key]}
-                              onChangeText={(v) => setInchField(m.key, v)}
-                              mode="outlined"
-                              keyboardType={
-                                Platform.OS === "ios"
-                                  ? "decimal-pad"
-                                  : "numeric"
-                              }
-                              inputMode="decimal"
-                              returnKeyType={isLast ? "done" : "next"}
-                              blurOnSubmit={isLast}
-                              onSubmitEditing={() => {
-                                if (!isLast) focusNext(m.key);
-                              }}
-                              style={styles.input}
-                              dense
-                            />
-                            <Text
-                              style={[
-                                styles.galOut,
-                                { color: theme.colors.primary },
-                              ]}
-                            >
-                              {formatGallonsTenths(gallons[m.key])} gal
-                            </Text>
-                          </View>
-                        );
-                      })}
-                      {pair.length === 1 ? (
-                        <View style={styles.inchField} />
-                      ) : null}
-                    </View>
-                  );
-                },
-              )}
-            </View>
-
-            <Text
-              style={[styles.total, { color: theme.colors.onSurface }]}
-            >
-              Total: {formatGallonsTenths(totalGal)} gal
-            </Text>
-
-            <View style={styles.actions}>
-              <Button
-                mode="contained"
-                onPress={handleSubmit}
-                loading={submitting}
-                disabled={submitting}
-                compact
-              >
-                Save
-              </Button>
-            </View>
-          </Card.Content>
-          </ShakeView>
-        </Card>
-
-        {isAdmin ? (
-          <Card
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.colors.surfaceContainerHighest,
-                borderColor: theme.colors.outlineVariant,
-              },
-            ]}
+          <TextInput
+            label="Name"
+            value={name}
+            onChangeText={setName}
             mode="outlined"
-          >
-            <Card.Content>
-              <Text
-                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-              >
-                Conversion chart (5-gal bucket)
-              </Text>
-              <View style={styles.chartGrid}>
-                {chart.map((row) => (
-                  <View key={row.inches} style={styles.chartCell}>
-                    <Text
-                      style={[
-                        styles.chartText,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      {row.inches}" = {formatGallonsTenths(row.gallons)} gal
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </Card.Content>
-          </Card>
-        ) : null}
+            autoCorrect={false}
+            style={styles.input}
+          />
 
-        <Card
-          style={[
-            styles.card,
-            {
-              backgroundColor: theme.colors.surfaceContainerHighest,
-              borderColor: theme.colors.outlineVariant,
-            },
-          ]}
-          mode="outlined"
-        >
-          <Card.Content style={styles.form}>
-            <Text
-              style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-            >
-              Waste totals
-            </Text>
-            {loading && records.length === 0 ? (
-              <SkeletonStack lines={3} />
-            ) : (
-              <>
-                <View style={styles.statBlock}>
-                  <Text
-                    style={[
-                      styles.statTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    YTD {summary.today.slice(0, 4)} ·{" "}
-                    {formatGallonsTenths(summary.ytd.total)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statMeta,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    {formatTotalsBreakdown(summary.ytd)}
-                  </Text>
-                </View>
-                <View style={styles.statBlock}>
-                  <Text
-                    style={[
-                      styles.statTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    This month ({formatMonthLabel(summary.month)}) ·{" "}
-                    {formatGallonsTenths(summary.thisMonth.total)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statMeta,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    {formatTotalsBreakdown(summary.thisMonth)}
-                  </Text>
-                </View>
-                <View style={styles.statBlock}>
-                  <Text
-                    style={[
-                      styles.statTitle,
-                      { color: theme.colors.onSurface },
-                    ]}
-                  >
-                    This week · {formatGallonsTenths(summary.thisWeek.total)} gal
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statMeta,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    {formatTotalsBreakdown(summary.thisWeek)}
-                  </Text>
-                </View>
-                {summary.months.length > 0 ? (
-                  <View style={styles.monthList}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      By month
-                    </Text>
-                    {summary.months.map((m) => (
-                      <Text
-                        key={m.key}
-                        style={[
-                          styles.monthRow,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        {m.label}: {formatGallonsTenths(m.totals.total)} gal
-                      </Text>
-                    ))}
-                  </View>
-                ) : null}
-              </>
-            )}
-          </Card.Content>
-        </Card>
-
-        {alerts.length > 0 ? (
-          <Card
-            style={[
-              styles.card,
-              {
-                backgroundColor: colors.semantic.recycleBannerBg,
-                borderColor: theme.dark
-                  ? colors.semantic.warning
-                  : colors.semantic.recycleBannerText,
-              },
-            ]}
-            mode="outlined"
-          >
-            <Card.Content style={styles.form}>
-              <Text
-                style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
-              >
-                Data alerts
-              </Text>
-              <Text
-                style={[
-                  styles.hint,
-                  { color: theme.colors.onSurfaceVariant, marginTop: 0 },
-                ]}
-              >
-                Unusual increase vs the previous week or month (≥50% and +0.8
-                gal).
-              </Text>
-              {alerts.map((a) => (
-                <Text
-                  key={a.id}
-                  style={[styles.alertLine, { color: theme.colors.onSurface }]}
-                >
-                  · {a.message}
-                </Text>
-              ))}
-            </Card.Content>
-          </Card>
-        ) : null}
-
-        <View style={styles.recordsSection}>
           <Text
             style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
           >
-            Waste records by week (gal)
+            Stick measure (inches)
           </Text>
           <Text
             style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
           >
-            Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
-            Primer, Acetone).
+            Enter inches → auto converts to gal ({GALLONS_PER_INCH} gal/in).
+            Enter moves to the next field.
           </Text>
-          {loading && records.length === 0 ? (
-            <SkeletonStack lines={4} style={{ marginTop: 8 }} />
-          ) : weeks.length === 0 ? (
-            <AppEmptyState
-              title="No records yet."
-              style={styles.emptyRecords}
-            />
-          ) : (
-            weeks.map((week, wIdx) => {
-              const open = expandedWeeks.has(week.monday);
-              const isThisWeek = week.monday === thisWeekMonday;
-              const recordSurface = nestedSurfaceColor(theme);
-              return (
-                <StaggerItem key={week.monday} index={wIdx}>
-                  <Card
-                    style={[
-                      styles.card,
-                      styles.weekCard,
-                      {
-                        backgroundColor: theme.colors.surfaceContainerHighest,
-                        borderColor: theme.colors.outlineVariant,
-                      },
-                    ]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.weekCardContent}>
-                      <View style={styles.weekHeader}>
-                        <Pressable
-                          onPress={() => toggleWeek(week.monday)}
-                          style={styles.weekTogglePress}
-                        >
+
+          <View style={styles.inchGrid}>
+            {Array.from(
+              { length: Math.ceil(WASTE_MATERIALS.length / 2) },
+              (_, rowIdx) => {
+                const pair = WASTE_MATERIALS.slice(rowIdx * 2, rowIdx * 2 + 2);
+                return (
+                  <View key={`inch-row-${rowIdx}`} style={styles.inchRow}>
+                    {pair.map((m) => {
+                      const idx = WASTE_MATERIALS.findIndex(
+                        (x) => x.key === m.key,
+                      );
+                      const isLast = idx === WASTE_MATERIALS.length - 1;
+                      return (
+                        <View key={m.key} style={styles.inchField}>
+                          <TextInput
+                            ref={(r) => {
+                              inputRefs.current[m.key] = r;
+                            }}
+                            label={m.label}
+                            value={inches[m.key]}
+                            onChangeText={(v) => setInchField(m.key, v)}
+                            mode="outlined"
+                            keyboardType={
+                              Platform.OS === "ios" ? "decimal-pad" : "numeric"
+                            }
+                            inputMode="decimal"
+                            returnKeyType={isLast ? "done" : "next"}
+                            blurOnSubmit={isLast}
+                            onSubmitEditing={() => {
+                              if (!isLast) focusNext(m.key);
+                            }}
+                            style={styles.input}
+                            dense
+                          />
                           <Text
                             style={[
-                              styles.weekToggleLabel,
-                              { color: theme.colors.onSurface },
+                              styles.galOut,
+                              { color: theme.colors.primary },
                             ]}
                           >
-                            {open ? "▾ " : "▸ "}
-                            {week.label}
-                            {isThisWeek ? " · This week" : ""}
+                            {formatGallonsTenths(gallons[m.key])} gal
                           </Text>
-                        </Pressable>
-                        <View style={styles.weekHeaderRight}>
-                          <Text
-                            style={[
-                              styles.weekTotal,
-                              { color: theme.colors.onSurface },
-                            ]}
-                          >
-                            {formatGallonsTenths(week.totals.total)} gal
-                          </Text>
-                          {isAdmin ? (
-                            <Button
-                              mode="outlined"
-                              compact
-                              icon={
-                                copiedWeek === week.monday
-                                  ? "check"
-                                  : "content-copy"
-                              }
-                              onPress={() => handleCopyWeek(week)}
-                              style={styles.weekCopyBtn}
-                            >
-                              {copiedWeek === week.monday
-                                ? "Copied"
-                                : "Copy week"}
-                            </Button>
-                          ) : null}
                         </View>
-                      </View>
+                      );
+                    })}
+                    {pair.length === 1 ? (
+                      <View style={styles.inchField} />
+                    ) : null}
+                  </View>
+                );
+              },
+            )}
+          </View>
+
+          <Text style={[styles.total, { color: theme.colors.onSurface }]}>
+            Total: {formatGallonsTenths(totalGal)} gal
+          </Text>
+
+          <View style={styles.actions}>
+            {editingId ? (
+              <Button
+                mode="outlined"
+                onPress={cancelEdit}
+                disabled={submitting}
+                compact
+              >
+                Cancel
+              </Button>
+            ) : null}
+            <Button
+              mode="contained"
+              onPress={handleSubmit}
+              loading={submitting}
+              disabled={submitting}
+              compact
+              {...(editingId ? { icon: "content-save" } : null)}
+            >
+              {editingId ? "Save changes" : "Save"}
+            </Button>
+          </View>
+        </Card.Content>
+      </ShakeView>
+    </Card>
+  );
+
+  const chartCard = isAdmin ? (
+    <Card style={surfaceCardStyle} mode="outlined">
+      <Card.Content>
+        <Text
+          style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+        >
+          Conversion chart (5-gal bucket)
+        </Text>
+        <View style={styles.chartGrid}>
+          {chart.map((row) => (
+            <View key={row.inches} style={styles.chartCell}>
+              <Text
+                style={[
+                  styles.chartText,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {row.inches}" = {formatGallonsTenths(row.gallons)} gal
+              </Text>
+            </View>
+          ))}
+        </View>
+      </Card.Content>
+    </Card>
+  ) : null;
+
+  const summaryCard = (
+    <Card style={surfaceCardStyle} mode="outlined">
+      <Card.Content style={styles.form}>
+        <Text
+          style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+        >
+          Waste totals
+        </Text>
+        {loading && records.length === 0 ? (
+          <SkeletonStack lines={3} />
+        ) : (
+          <>
+            <View style={styles.statBlock}>
+              <Text
+                style={[styles.statTitle, { color: theme.colors.onSurface }]}
+              >
+                YTD {summary.today.slice(0, 4)} ·{" "}
+                {formatGallonsTenths(summary.ytd.total)} gal
+              </Text>
+              <Text
+                style={[
+                  styles.statMeta,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {formatTotalsBreakdown(summary.ytd)}
+              </Text>
+            </View>
+            <View style={styles.statBlock}>
+              <Text
+                style={[styles.statTitle, { color: theme.colors.onSurface }]}
+              >
+                This month ({formatMonthLabel(summary.month)}) ·{" "}
+                {formatGallonsTenths(summary.thisMonth.total)} gal
+              </Text>
+              <Text
+                style={[
+                  styles.statMeta,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {formatTotalsBreakdown(summary.thisMonth)}
+              </Text>
+            </View>
+            <View style={styles.statBlock}>
+              <Text
+                style={[styles.statTitle, { color: theme.colors.onSurface }]}
+              >
+                This week · {formatGallonsTenths(summary.thisWeek.total)} gal
+              </Text>
+              <Text
+                style={[
+                  styles.statMeta,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {formatTotalsBreakdown(summary.thisWeek)}
+              </Text>
+            </View>
+            {summary.months.length > 0 ? (
+              <View style={styles.monthList}>
+                <Text
+                  style={[
+                    styles.fieldLabel,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  By month
+                </Text>
+                {summary.months.map((m) => (
+                  <Text
+                    key={m.key}
+                    style={[
+                      styles.monthRow,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {m.label}: {formatGallonsTenths(m.totals.total)} gal
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
+      </Card.Content>
+    </Card>
+  );
+
+  const alertsCard =
+    alerts.length > 0 ? (
+      <Card
+        style={[
+          styles.card,
+          {
+            backgroundColor: colors.semantic.recycleBannerBg,
+            borderColor: theme.dark
+              ? colors.semantic.warning
+              : colors.semantic.recycleBannerText,
+          },
+        ]}
+        mode="outlined"
+      >
+        <Card.Content style={styles.form}>
+          <Text
+            style={[styles.sectionLabel, { color: theme.colors.onSurface }]}
+          >
+            Data alerts
+          </Text>
+          <Text
+            style={[
+              styles.hint,
+              { color: theme.colors.onSurfaceVariant, marginTop: 0 },
+            ]}
+          >
+            Unusual increase vs the previous week or month (≥50% and +0.8
+            gal).
+          </Text>
+          {alerts.map((a) => (
+            <Text
+              key={a.id}
+              style={[styles.alertLine, { color: theme.colors.onSurface }]}
+            >
+              · {a.message}
+            </Text>
+          ))}
+        </Card.Content>
+      </Card>
+    ) : null;
+
+  const recordsSection = (
+    <View style={styles.recordsSection}>
+      <Text style={[styles.sectionLabel, { color: theme.colors.onSurface }]}>
+        Waste records by week (gal)
+      </Text>
+      <Text style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
+        Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
+        Primer, Acetone).
+      </Text>
+      {loading && records.length === 0 ? (
+        <SkeletonStack lines={4} style={{ marginTop: 8 }} />
+      ) : weeks.length === 0 ? (
+        <AppEmptyState title="No records yet." style={styles.emptyRecords} />
+      ) : (
+        weeks.map((week, wIdx) => {
+          const open = expandedWeeks.has(week.monday);
+          const isThisWeek = week.monday === thisWeekMonday;
+          const recordSurface = nestedSurfaceColor(theme);
+          return (
+            <StaggerItem key={week.monday} index={wIdx}>
+              <Card
+                style={[
+                  styles.card,
+                  styles.weekCard,
+                  {
+                    backgroundColor: theme.colors.surfaceContainerHighest,
+                    borderColor: theme.colors.outlineVariant,
+                  },
+                ]}
+                mode="outlined"
+              >
+                <Card.Content style={styles.weekCardContent}>
+                  <View style={styles.weekHeader}>
+                    <Pressable
+                      onPress={() => toggleWeek(week.monday)}
+                      style={styles.weekTogglePress}
+                    >
                       <Text
                         style={[
-                          styles.statMeta,
-                          { color: theme.colors.onSurfaceVariant },
+                          styles.weekToggleLabel,
+                          { color: theme.colors.onSurface },
                         ]}
                       >
-                        {formatTotalsBreakdown(week.totals)}
+                        {open ? "▾ " : "▸ "}
+                        {week.label}
+                        {isThisWeek ? " · This week" : ""}
                       </Text>
-                      {open ? (
-                        <View style={styles.recordList}>
-                          {week.rows.map((r) => {
-                            const paint = formatGallonsTenths(r.paint_gallons);
-                            const clear = formatGallonsTenths(
-                              r.clear_toner_gallons,
-                            );
-                            const primer = formatGallonsTenths(
-                              r.primer_gallons,
-                            );
-                            const acetone = formatGallonsTenths(
-                              r.acetone_gallons,
-                            );
-                            const total = formatGallonsTenths(
-                              roundGallonsTenths(
-                                (Number(r.paint_gallons) || 0) +
-                                  (Number(r.clear_toner_gallons) || 0) +
-                                  (Number(r.primer_gallons) || 0) +
-                                  (Number(r.acetone_gallons) || 0),
-                              ),
-                            );
-                            const dateParts = formatRecordDateParts(
-                              r.entry_date,
-                            );
-                            return (
-                              <View
-                                key={r.id}
-                                style={[
-                                  styles.recordCard,
-                                  {
-                                    backgroundColor: recordSurface,
-                                    borderColor: theme.colors.outlineVariant,
-                                  },
-                                ]}
-                              >
-                                <View style={styles.recordCardInner}>
-                                  <View style={styles.recordDateCol}>
-                                    <Text
-                                      style={[
-                                        styles.recordWeekday,
-                                        { color: theme.colors.primary },
-                                      ]}
-                                    >
-                                      {dateParts.weekday}
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.recordDateLine,
-                                        {
-                                          color: theme.colors.onSurfaceVariant,
-                                        },
-                                      ]}
-                                    >
-                                      {dateParts.dateLine}
-                                    </Text>
-                                  </View>
-                                  <View style={styles.recordMain}>
-                                    <Text
-                                      style={[
-                                        styles.recordTitle,
-                                        { color: theme.colors.onSurface },
-                                      ]}
-                                    >
-                                      {r.user_name || "—"}
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.recordMeta,
-                                        {
-                                          color: theme.colors.onSurfaceVariant,
-                                        },
-                                      ]}
-                                    >
-                                      Paint {paint} · Clear {clear} · Primer{" "}
-                                      {primer} · Acetone {acetone}
-                                    </Text>
-                                    <Text
-                                      style={[
-                                        styles.recordTotal,
-                                        { color: theme.colors.onSurface },
-                                      ]}
-                                    >
-                                      Total {total} gal
-                                    </Text>
-                                    {isAdmin ? (
-                                      <View style={styles.recordActions}>
-                                        <Button
-                                          mode="outlined"
-                                          compact
-                                          icon={
-                                            copiedId === r.id
-                                              ? "check"
-                                              : "content-copy"
-                                          }
-                                          onPress={() => handleCopyRecord(r)}
-                                        >
-                                          {copiedId === r.id
-                                            ? "Copied"
-                                            : "Copy"}
-                                        </Button>
-                                        <Button
-                                          mode="outlined"
-                                          compact
-                                          textColor={theme.colors.error}
-                                          onPress={() => handleDelete(r)}
-                                          loading={deletingId === r.id}
-                                          disabled={deletingId != null}
-                                        >
-                                          Delete
-                                        </Button>
-                                      </View>
-                                    ) : null}
-                                  </View>
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
+                    </Pressable>
+                    <View style={styles.weekHeaderRight}>
+                      <Text
+                        style={[
+                          styles.weekTotal,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {formatGallonsTenths(week.totals.total)} gal
+                      </Text>
+                      {isAdmin ? (
+                        <Button
+                          mode="outlined"
+                          compact
+                          icon={
+                            copiedWeek === week.monday
+                              ? "check"
+                              : "content-copy"
+                          }
+                          onPress={() => handleCopyWeek(week)}
+                          style={styles.weekCopyBtn}
+                        >
+                          {copiedWeek === week.monday ? "Copied" : "Copy week"}
+                        </Button>
                       ) : null}
-                    </Card.Content>
-                  </Card>
-                </StaggerItem>
-              );
-            })
+                    </View>
+                  </View>
+                  <Text
+                    style={[
+                      styles.statMeta,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    {formatTotalsBreakdown(week.totals)}
+                  </Text>
+                  {open ? (
+                    <View style={styles.recordList}>
+                      {week.rows.map((r) => {
+                        const paint = formatGallonsTenths(r.paint_gallons);
+                        const clear = formatGallonsTenths(
+                          r.clear_toner_gallons,
+                        );
+                        const primer = formatGallonsTenths(r.primer_gallons);
+                        const acetone = formatGallonsTenths(
+                          r.acetone_gallons,
+                        );
+                        const total = formatGallonsTenths(
+                          roundGallonsTenths(
+                            (Number(r.paint_gallons) || 0) +
+                              (Number(r.clear_toner_gallons) || 0) +
+                              (Number(r.primer_gallons) || 0) +
+                              (Number(r.acetone_gallons) || 0),
+                          ),
+                        );
+                        const dateParts = formatRecordDateParts(r.entry_date);
+                        return (
+                          <View
+                            key={r.id}
+                            style={[
+                              styles.recordCard,
+                              {
+                                backgroundColor: recordSurface,
+                                borderColor: theme.colors.outlineVariant,
+                              },
+                            ]}
+                          >
+                            <View style={styles.recordCardInner}>
+                              <View style={styles.recordDateCol}>
+                                <Text
+                                  style={[
+                                    styles.recordWeekday,
+                                    { color: theme.colors.primary },
+                                  ]}
+                                >
+                                  {dateParts.weekday}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.recordDateLine,
+                                    {
+                                      color: theme.colors.onSurfaceVariant,
+                                    },
+                                  ]}
+                                >
+                                  {dateParts.dateLine}
+                                </Text>
+                              </View>
+                              <View style={styles.recordMain}>
+                                <Text
+                                  style={[
+                                    styles.recordTitle,
+                                    { color: theme.colors.onSurface },
+                                  ]}
+                                >
+                                  {r.user_name || "—"}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.recordMeta,
+                                    {
+                                      color: theme.colors.onSurfaceVariant,
+                                    },
+                                  ]}
+                                >
+                                  Paint {paint} · Clear {clear} · Primer{" "}
+                                  {primer} · Acetone {acetone}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.recordTotal,
+                                    { color: theme.colors.onSurface },
+                                  ]}
+                                >
+                                  Total {total} gal
+                                </Text>
+                                {isAdmin ? (
+                                  <View style={styles.recordActions}>
+                                    <Button
+                                      mode="outlined"
+                                      compact
+                                      icon={
+                                        copiedId === r.id
+                                          ? "check"
+                                          : "content-copy"
+                                      }
+                                      onPress={() => handleCopyRecord(r)}
+                                    >
+                                      {copiedId === r.id ? "Copied" : "Copy"}
+                                    </Button>
+                                    <Button
+                                      mode="outlined"
+                                      compact
+                                      onPress={() => startEdit(r)}
+                                      disabled={
+                                        deletingId != null || submitting
+                                      }
+                                    >
+                                      Edit
+                                    </Button>
+                                    <Button
+                                      mode="outlined"
+                                      compact
+                                      textColor={theme.colors.error}
+                                      onPress={() => handleDelete(r)}
+                                      loading={deletingId === r.id}
+                                      disabled={
+                                        deletingId != null || submitting
+                                      }
+                                    >
+                                      Delete
+                                    </Button>
+                                  </View>
+                                ) : null}
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </Card.Content>
+              </Card>
+            </StaggerItem>
+          );
+        })
+      )}
+    </View>
+  );
+
+  const pageHeader = (
+    <PageHeader
+      title="Waste Tracking"
+      onBack={onBack}
+      embeddedInShell={embeddedInShell}
+    />
+  );
+
+  const refreshControl = (
+    <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+  );
+
+  const leftColumn = (
+    <>
+      {formCard}
+      {chartCard}
+      {summaryCard}
+      {alertsCard}
+    </>
+  );
+
+  const formPane = (
+    <>
+      {formCard}
+      {chartCard}
+    </>
+  );
+
+  const totalsPane = (
+    <>
+      {summaryCard}
+      {alertsCard}
+      {recordsSection}
+    </>
+  );
+
+  return (
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+      {isDesktop && isAdmin ? (
+        <>
+          <View style={styles.pageTop}>{pageHeader}</View>
+          <View style={styles.splitRow}>
+            <ScrollView
+              style={styles.splitPane}
+              contentContainerStyle={styles.splitPaneContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {leftColumn}
+            </ScrollView>
+            <ScrollView
+              style={styles.splitPane}
+              contentContainerStyle={styles.splitPaneContent}
+              refreshControl={refreshControl}
+            >
+              {recordsSection}
+            </ScrollView>
+          </View>
+        </>
+      ) : (
+        <ScrollView
+          style={{ width: "100%", maxWidth: "100%" }}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={refreshControl}
+        >
+          {pageHeader}
+          {!isDesktop ? (
+            <>
+              <SegmentedButtons
+                value={mobilePane}
+                onValueChange={setMobilePane}
+                style={styles.mobileTabs}
+                buttons={[
+                  {
+                    value: "form",
+                    label: "Log form",
+                    icon: "clipboard-edit-outline",
+                  },
+                  {
+                    value: "totals",
+                    label: "Totals & records",
+                    icon: "chart-box-outline",
+                  },
+                ]}
+              />
+              {mobilePane === "form" ? formPane : totalsPane}
+            </>
+          ) : (
+            <>
+              {leftColumn}
+              {recordsSection}
+            </>
           )}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      )}
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 0 },
+  pageTop: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 4,
+    maxWidth: "100%",
+  },
+  splitRow: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    minHeight: 0,
+  },
+  splitPane: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  splitPaneContent: {
+    paddingBottom: 48,
+  },
   scroll: {
     paddingVertical: 16,
     paddingHorizontal: 16,
@@ -916,6 +1069,10 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
     ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
+  },
+  mobileTabs: {
+    marginTop: 4,
+    marginBottom: 12,
   },
   card: {
     borderWidth: 1,
@@ -998,6 +1155,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
+    justifyContent: "flex-end",
     marginTop: 8,
     marginBottom: 4,
   },

@@ -159,6 +159,8 @@ function addDaysIso(iso, days) {
   return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`;
 }
 
+export { addDaysIso };
+
 export function emptyWasteTotals() {
   return {
     paint: 0,

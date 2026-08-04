@@ -379,6 +379,38 @@ class Database {
     console.log("Login log table ready");
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS app_users (
+        id SERIAL PRIMARY KEY,
+        user_name TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        password_plain TEXT,
+        role TEXT NOT NULL DEFAULT 'user',
+        must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'app_users' AND column_name = 'password_plain'
+        ) THEN
+          ALTER TABLE app_users ADD COLUMN password_plain TEXT;
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'app_users' AND column_name = 'must_change_password'
+        ) THEN
+          ALTER TABLE app_users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_app_users_user_name ON app_users (user_name)
+    `);
+    console.log("App users table ready");
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         po_number TEXT NOT NULL,
@@ -966,6 +998,125 @@ class Database {
     return result.rows;
   }
 
+  _hashPassword(password) {
+    const crypto = require("crypto");
+    return crypto
+      .createHash("sha256")
+      .update(String(password ?? ""))
+      .digest("hex");
+  }
+
+  async listAppUsers() {
+    const result = await this.pool.query(
+      `SELECT id, user_name, role, password_plain, must_change_password, created_at
+       FROM app_users
+       ORDER BY LOWER(user_name) ASC`,
+    );
+    return result.rows;
+  }
+
+  async createAppUser(userName, password, role = "user") {
+    const name = String(userName ?? "").trim();
+    const pin = String(password ?? "").trim();
+    if (!name) return { success: false, error: "userName required" };
+    if (pin.length < 3) {
+      return { success: false, error: "Password must be at least 3 characters" };
+    }
+    const safeRole = role === "admin" ? "admin" : "user";
+    try {
+      const result = await this.pool.query(
+        `INSERT INTO app_users (user_name, password_hash, password_plain, role, must_change_password)
+         VALUES ($1, $2, $3, $4, TRUE)
+         RETURNING id, user_name, role, password_plain, must_change_password, created_at`,
+        [name, this._hashPassword(pin), pin, safeRole],
+      );
+      return { success: true, user: result.rows[0] };
+    } catch (e) {
+      if (e && e.code === "23505") {
+        return { success: false, error: "User already exists" };
+      }
+      throw e;
+    }
+  }
+
+  async authenticateAppUser(userName, password) {
+    const name = String(userName ?? "").trim();
+    const pin = String(password ?? "").trim();
+    if (!name || !pin) {
+      return { success: false, error: "Name and password required" };
+    }
+    // Legacy admin bootstrap (no row required).
+    if (name === "admin123" && pin === "admin123") {
+      return {
+        success: true,
+        user: {
+          user_name: "admin123",
+          role: "admin",
+          must_change_password: false,
+        },
+      };
+    }
+    const result = await this.pool.query(
+      `SELECT id, user_name, role, password_hash, must_change_password
+       FROM app_users
+       WHERE LOWER(user_name) = LOWER($1)
+       LIMIT 1`,
+      [name],
+    );
+    const row = result.rows[0];
+    if (!row) return { success: false, error: "Invalid name or password" };
+    if (row.password_hash !== this._hashPassword(pin)) {
+      return { success: false, error: "Invalid name or password" };
+    }
+    return {
+      success: true,
+      user: {
+        id: row.id,
+        user_name: row.user_name,
+        role: row.role,
+        must_change_password: !!row.must_change_password,
+      },
+    };
+  }
+
+  async changeAppUserPassword(userName, newPassword) {
+    const name = String(userName ?? "").trim();
+    const pin = String(newPassword ?? "").trim();
+    if (!name) return { success: false, error: "userName required" };
+    if (pin.length < 3) {
+      return { success: false, error: "Password must be at least 3 characters" };
+    }
+    if (name.toLowerCase() === "admin123") {
+      return { success: false, error: "Cannot change the legacy admin password here" };
+    }
+    const result = await this.pool.query(
+      `UPDATE app_users
+       SET password_hash = $2,
+           password_plain = $3,
+           must_change_password = FALSE
+       WHERE LOWER(user_name) = LOWER($1)
+       RETURNING id, user_name, role, password_plain, must_change_password`,
+      [name, this._hashPassword(pin), pin],
+    );
+    if (!result.rows[0]) {
+      return { success: false, error: "User not found" };
+    }
+    return { success: true, user: result.rows[0] };
+  }
+
+  async deleteAppUser(userName) {
+    const name = String(userName ?? "").trim();
+    if (!name) return { success: false, error: "userName required" };
+    if (name.toLowerCase() === "admin123") {
+      return { success: false, error: "Cannot delete the admin account" };
+    }
+    const result = await this.pool.query(
+      `DELETE FROM app_users WHERE LOWER(user_name) = LOWER($1)`,
+      [name],
+    );
+    return { success: true, deleted: result.rowCount || 0 };
+  }
+
   async upsertItemJobHistory(itemId, jobName) {
     const item = itemId != null ? String(itemId).trim() : "";
     const job = jobName != null ? String(jobName).trim() : "";
@@ -1527,13 +1678,83 @@ class Database {
       return { success: false, error: "Invalid entry ID" };
     }
     const result = await this.pool.query(
-      "DELETE FROM waste_tracking WHERE id = $1 RETURNING id",
+      `DELETE FROM waste_tracking WHERE id = $1`,
       [entryId],
     );
     if (result.rowCount === 0) {
       return { success: false, error: "Entry not found" };
     }
-    return { success: true, id: entryId };
+    return { success: true, deleted: result.rowCount };
+  }
+
+  async updateWasteTracking(id, entry) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const toNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    };
+    const paintIn = toNum(entry.paint_inches);
+    const clearIn = toNum(entry.clear_toner_inches);
+    const primerIn = toNum(entry.primer_inches);
+    const acetoneIn = toNum(entry.acetone_inches);
+    const GALLONS_PER_INCH = 0.37;
+    const toGal = (inches) => Math.round(inches * GALLONS_PER_INCH * 100) / 100;
+    const paintGal =
+      entry.paint_gallons != null ? toNum(entry.paint_gallons) : toGal(paintIn);
+    const clearGal =
+      entry.clear_toner_gallons != null
+        ? toNum(entry.clear_toner_gallons)
+        : toGal(clearIn);
+    const primerGal =
+      entry.primer_gallons != null
+        ? toNum(entry.primer_gallons)
+        : toGal(primerIn);
+    const acetoneGal =
+      entry.acetone_gallons != null
+        ? toNum(entry.acetone_gallons)
+        : toGal(acetoneIn);
+
+    const result = await this.pool.query(
+      `UPDATE waste_tracking SET
+         entry_date = $1,
+         user_name = $2,
+         paint_inches = $3,
+         clear_toner_inches = $4,
+         primer_inches = $5,
+         acetone_inches = $6,
+         paint_gallons = $7,
+         clear_toner_gallons = $8,
+         primer_gallons = $9,
+         acetone_gallons = $10
+       WHERE id = $11
+       RETURNING *`,
+      [
+        entry.entry_date ||
+          new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Los_Angeles",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date()),
+        entry.user_name != null ? String(entry.user_name).trim() : "",
+        paintIn,
+        clearIn,
+        primerIn,
+        acetoneIn,
+        paintGal,
+        clearGal,
+        primerGal,
+        acetoneGal,
+        entryId,
+      ],
+    );
+    if (result.rowCount === 0) {
+      return { success: false, error: "Entry not found" };
+    }
+    return { success: true, entry: result.rows[0] };
   }
 
   async getWasteTrackingUnreadCount() {
@@ -1622,6 +1843,73 @@ class Database {
     );
     if (result.rowCount === 0) return { success: false, error: "Not found" };
     return { success: true };
+  }
+
+  async updateMaterialUsage(id, entry) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const qtyGallons = Number(entry.qty_gallons) || 0;
+    const catalystOz =
+      entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz))
+        ? Number(entry.catalyst_oz)
+        : qtyGallons * 0.04 * 128;
+    const catalystGallons = catalystOz / 128;
+    const materialType =
+      entry.material_type != null ? String(entry.material_type).trim() : null;
+    const cupGun = entry.cup_gun === true;
+    const result = await this.pool.query(
+      `UPDATE material_usage SET
+         entry_date = $1,
+         entry_time = $2,
+         job_name = $3,
+         item_id = $4,
+         color_name = $5,
+         qty_gallons = $6,
+         catalyst_gallons = $7,
+         catalyst_oz = $8,
+         catalyzed_confirmed = $9,
+         booth = $10,
+         user_name = $11,
+         material_type = $12,
+         cup_gun = $13
+       WHERE id = $14
+       RETURNING *`,
+      [
+        entry.entry_date || null,
+        entry.entry_time || null,
+        entry.job_name != null ? String(entry.job_name).trim() : "",
+        entry.item_id != null ? String(entry.item_id).trim() : "",
+        entry.color_name != null ? String(entry.color_name).trim() : "",
+        qtyGallons,
+        catalystGallons,
+        catalystOz,
+        entry.catalyzed_confirmed === true,
+        entry.booth != null ? String(entry.booth).trim() : "",
+        entry.user_name != null ? String(entry.user_name).trim() : "",
+        materialType || null,
+        cupGun,
+        entryId,
+      ],
+    );
+    if (result.rowCount === 0) return { success: false, error: "Not found" };
+    return { success: true, entry: result.rows[0] };
+  }
+
+  async deleteMaterialUsage(id) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const result = await this.pool.query(
+      `DELETE FROM material_usage WHERE id = $1`,
+      [entryId],
+    );
+    if (result.rowCount === 0) {
+      return { success: false, error: "Entry not found" };
+    }
+    return { success: true, deleted: result.rowCount };
   }
 
   /** Custom paint/stain recycle due = lot date + 9 months. */

@@ -81,6 +81,8 @@ export default function App() {
   const idleLogoutTriggeredRef = useRef(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
+  /** Bumped on shell refresh so form screens can reset date/time inputs to now. */
+  const [formRefreshKey, setFormRefreshKey] = useState(0);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionLoadingMessage, setActionLoadingMessage] = useState('');
   const [scanLookupLoading, setScanLookupLoading] = useState(false);
@@ -93,6 +95,7 @@ export default function App() {
   /** Cached audit logs (dashboard stats, inventory analytics, transaction history). */
   const [auditLogsCache, setAuditLogsCache] = useState(null);
   const [auditLogsLoading, setAuditLogsLoading] = useState(false);
+  const [materialUsageLogsCache, setMaterialUsageLogsCache] = useState([]);
   const recycleSyncInFlight = useRef(false);
   const jobHistorySyncInFlight = useRef(false);
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
@@ -432,9 +435,13 @@ export default function App() {
     if (!force && auditLogsCache !== null) return;
     setAuditLogsLoading(true);
     try {
-      const logs = await AuditService.list(AUDIT_LOGS_FETCH_LIMIT);
+      const [logs, usage] = await Promise.all([
+        AuditService.list(AUDIT_LOGS_FETCH_LIMIT),
+        MaterialUsageService.list(null, 2000).catch(() => []),
+      ]);
       const next = Array.isArray(logs) ? logs : [];
       setAuditLogsCache(next);
+      setMaterialUsageLogsCache(Array.isArray(usage) ? usage : []);
       AsyncStorage.setItem(AUDIT_LOGS_CACHE_KEY, JSON.stringify(next)).catch(
         () => {},
       );
@@ -573,6 +580,7 @@ export default function App() {
   };
 
   const handleRefresh = () => {
+    setFormRefreshKey((k) => k + 1);
     loadInventory(true, { refreshCaches: true });
   };
 
@@ -1370,6 +1378,7 @@ export default function App() {
             userName={actorName}
             isAdmin={isAdmin}
             embeddedInShell={embeddedInShell}
+            formRefreshKey={formRefreshKey}
             onBack={() => navigateTo('home')}
           />
         );
@@ -1405,6 +1414,7 @@ export default function App() {
           minQuantity={30}
           auditLogs={auditLogsCache ?? []}
           auditLogsLoaded={auditLogsCache !== null}
+          materialUsageLogs={materialUsageLogsCache}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
           showTransactionTable={true}
@@ -1442,6 +1452,7 @@ export default function App() {
           isAdmin={isAdmin}
           materialUsageOvertime={materialUsageOvertime}
           embeddedInShell
+          formRefreshKey={formRefreshKey}
           onBack={() => navigateTo('home')}
         />
       </KeepAlivePane>
