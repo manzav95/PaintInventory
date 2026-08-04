@@ -518,7 +518,8 @@ app.get('/api/users', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   try {
     const userName = req.body?.userName ?? req.body?.user_name;
-    const password = req.body?.password;
+    // New accounts always start with the default password; first login forces a change.
+    const password = "password";
     const role = req.body?.role;
     const result = await db.createAppUser(userName, password, role);
     if (!result.success) {
@@ -558,6 +559,19 @@ app.post('/api/users/change-password', async (req, res) => {
   } catch (error) {
     console.error('Error changing password:', error);
     res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+app.post('/api/users/:userName/reset-password', async (req, res) => {
+  try {
+    const result = await db.resetAppUserPassword(req.params.userName);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to reset password' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 

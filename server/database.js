@@ -1006,6 +1006,9 @@ class Database {
       .digest("hex");
   }
 
+  /** Default password for newly created accounts (forced change on first login). */
+  static DEFAULT_APP_USER_PASSWORD = "password";
+
   async listAppUsers() {
     const result = await this.pool.query(
       `SELECT id, user_name, role, password_plain, must_change_password, created_at
@@ -1017,7 +1020,8 @@ class Database {
 
   async createAppUser(userName, password, role = "user") {
     const name = String(userName ?? "").trim();
-    const pin = String(password ?? "").trim();
+    const pin =
+      String(password ?? "").trim() || Database.DEFAULT_APP_USER_PASSWORD;
     if (!name) return { success: false, error: "userName required" };
     if (pin.length < 3) {
       return { success: false, error: "Password must be at least 3 characters" };
@@ -1086,6 +1090,12 @@ class Database {
     if (pin.length < 3) {
       return { success: false, error: "Password must be at least 3 characters" };
     }
+    if (pin === Database.DEFAULT_APP_USER_PASSWORD) {
+      return {
+        success: false,
+        error: 'Choose a different password than the default "password"',
+      };
+    }
     if (name.toLowerCase() === "admin123") {
       return { success: false, error: "Cannot change the legacy admin password here" };
     }
@@ -1094,6 +1104,29 @@ class Database {
        SET password_hash = $2,
            password_plain = $3,
            must_change_password = FALSE
+       WHERE LOWER(user_name) = LOWER($1)
+       RETURNING id, user_name, role, password_plain, must_change_password`,
+      [name, this._hashPassword(pin), pin],
+    );
+    if (!result.rows[0]) {
+      return { success: false, error: "User not found" };
+    }
+    return { success: true, user: result.rows[0] };
+  }
+
+  /** Admin reset: back to default "password" and force change on next login. */
+  async resetAppUserPassword(userName) {
+    const name = String(userName ?? "").trim();
+    if (!name) return { success: false, error: "userName required" };
+    if (name.toLowerCase() === "admin123") {
+      return { success: false, error: "Cannot reset the legacy admin password here" };
+    }
+    const pin = Database.DEFAULT_APP_USER_PASSWORD;
+    const result = await this.pool.query(
+      `UPDATE app_users
+       SET password_hash = $2,
+           password_plain = $3,
+           must_change_password = TRUE
        WHERE LOWER(user_name) = LOWER($1)
        RETURNING id, user_name, role, password_plain, must_change_password`,
       [name, this._hashPassword(pin), pin],

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -22,6 +22,13 @@ import UserService from "../services/userService";
 import { colors, space } from "../theme/tokens";
 import { AppText } from "../components/ui";
 
+const HIDDEN_ADMIN_NAME = "admin123";
+const TRACKER_DOUBLE_TAP_MS = 450;
+
+function isHiddenAdminName(name) {
+  return String(name || "").trim().toLowerCase() === HIDDEN_ADMIN_NAME;
+}
+
 export default function LoginScreen({ onLogin }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -39,6 +46,9 @@ export default function LoginScreen({ onLogin }) {
   const [pendingUser, setPendingUser] = useState(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  /** Double-tap "Tracker" unlocks hidden admin password gate. */
+  const [adminGate, setAdminGate] = useState(false);
+  const lastTrackerTapRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,16 +58,12 @@ export default function LoginScreen({ onLogin }) {
         if (!cancelled) {
           const names = (list || [])
             .map((u) => u.user_name)
-            .filter(Boolean);
-          // Always offer legacy admin in the list.
-          if (!names.some((n) => n.toLowerCase() === "admin123")) {
-            names.unshift("admin123");
-          }
+            .filter((n) => n && !isHiddenAdminName(n));
           setUsers(names);
         }
       } catch (e) {
         if (!cancelled) {
-          setUsers(["admin123"]);
+          setUsers([]);
         }
       } finally {
         if (!cancelled) setUsersLoading(false);
@@ -72,10 +78,26 @@ export default function LoginScreen({ onLogin }) {
     onLogin(userName);
   };
 
+  const changingPassword = !!pendingUser;
+
+  const handleTrackerPress = () => {
+    if (changingPassword) return;
+    const now = Date.now();
+    if (now - lastTrackerTapRef.current < TRACKER_DOUBLE_TAP_MS) {
+      lastTrackerTapRef.current = 0;
+      setAdminGate(true);
+      setSelectedName("");
+      setPassword("");
+      setMenuOpen(false);
+      return;
+    }
+    lastTrackerTapRef.current = now;
+  };
+
   const submit = async () => {
-    const name = selectedName.trim();
+    const name = adminGate ? HIDDEN_ADMIN_NAME : selectedName.trim();
     const pin = password.trim();
-    if (!name) {
+    if (!adminGate && !name) {
       setShakeTick((n) => n + 1);
       showToast({
         type: "error",
@@ -89,7 +111,9 @@ export default function LoginScreen({ onLogin }) {
       showToast({
         type: "error",
         title: "Password required",
-        message: "Enter your quick password.",
+        message: adminGate
+          ? "Enter the admin password."
+          : "Enter your quick password.",
       });
       return;
     }
@@ -104,6 +128,7 @@ export default function LoginScreen({ onLogin }) {
         setNewPassword("");
         setConfirmPassword("");
         setPassword("");
+        setAdminGate(false);
         return;
       }
       finishLogin(result.user.user_name);
@@ -130,6 +155,15 @@ export default function LoginScreen({ onLogin }) {
         type: "error",
         title: "Password too short",
         message: "Use at least 3 characters.",
+      });
+      return;
+    }
+    if (pin === "password") {
+      setShakeTick((n) => n + 1);
+      showToast({
+        type: "error",
+        title: "Choose a new password",
+        message: 'Pick something other than the default "password".',
       });
       return;
     }
@@ -171,7 +205,10 @@ export default function LoginScreen({ onLogin }) {
     setConfirmPassword("");
   };
 
-  const changingPassword = !!pendingUser;
+  const exitAdminGate = () => {
+    setAdminGate(false);
+    setPassword("");
+  };
 
   return (
     <View
@@ -185,15 +222,28 @@ export default function LoginScreen({ onLogin }) {
         <ShakeView trigger={shakeTick}>
           <Card style={[styles.card, isDesktop && styles.webCard]}>
             <Card.Content>
-              <AppText variant="pageTitle" style={styles.title}>
-                Paint Inventory Tracker
-              </AppText>
+              <View style={styles.titleRow}>
+                <AppText variant="pageTitle" style={styles.title}>
+                  Paint Inventory{" "}
+                </AppText>
+                <Pressable
+                  onPress={handleTrackerPress}
+                  hitSlop={8}
+                  accessibilityRole="text"
+                  accessibilityLabel="Tracker"
+                >
+                  <AppText variant="pageTitle" style={styles.title}>
+                    Tracker
+                  </AppText>
+                </Pressable>
+              </View>
 
               {changingPassword ? (
                 <>
                   <AppText variant="body" tone="muted" style={styles.subtitle}>
-                    Welcome, {pendingUser.user_name}. Choose a new password
-                    before continuing (min 3 characters).
+                    Welcome, {pendingUser.user_name}. You signed in with the
+                    default password — choose a new one before continuing (min 3
+                    characters; not "password").
                   </AppText>
                   <TextInput
                     label="New password"
@@ -239,6 +289,42 @@ export default function LoginScreen({ onLogin }) {
                     Back to login
                   </Button>
                 </>
+              ) : adminGate ? (
+                <>
+                  <AppText variant="body" tone="muted" style={styles.subtitle}>
+                    Enter the admin password to continue.
+                  </AppText>
+                  <TextInput
+                    label="Admin password"
+                    value={password}
+                    onChangeText={setPassword}
+                    mode="outlined"
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoFocus
+                    style={styles.input}
+                    onSubmitEditing={submit}
+                    error={shakeTick > 0 && !password.trim()}
+                  />
+                  <Button
+                    mode="contained"
+                    onPress={submit}
+                    style={styles.button}
+                    loading={submitting}
+                    disabled={submitting}
+                  >
+                    Continue
+                  </Button>
+                  <Button
+                    mode="text"
+                    onPress={exitAdminGate}
+                    disabled={submitting}
+                    style={styles.cancelBtn}
+                  >
+                    Back to login
+                  </Button>
+                </>
               ) : (
                 <>
                   <AppText variant="body" tone="muted" style={styles.subtitle}>
@@ -276,7 +362,7 @@ export default function LoginScreen({ onLogin }) {
                             setSelectedName(name);
                             setMenuOpen(false);
                           }}
-                          title={name === "admin123" ? "Admin" : name}
+                          title={name}
                         />
                       ))}
                     </Menu>
@@ -305,15 +391,15 @@ export default function LoginScreen({ onLogin }) {
                     Continue
                   </Button>
 
-                  {users.length <= 1 ? (
+                  {users.length === 0 && !usersLoading ? (
                     <Text
                       style={[
                         styles.hint,
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Admin can create user accounts in Settings after signing
-                      in.
+                      No user accounts yet. An admin can create them in Settings
+                      after signing in.
                     </Text>
                   ) : null}
                 </>
@@ -336,8 +422,15 @@ const styles = StyleSheet.create({
   card: {
     elevation: 4,
   },
-  title: {
+  titleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: space[2],
+  },
+  title: {
+    marginBottom: 0,
     textAlign: "center",
   },
   subtitle: {

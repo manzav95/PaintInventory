@@ -27,6 +27,22 @@ import { AppSurface, AppText } from "../components/ui";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
 
+function confirmAction(title, message, { confirmLabel = "Confirm", destructive = false } = {}) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+  }
+  return new Promise((resolve) => {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+      {
+        text: confirmLabel,
+        style: destructive ? "destructive" : "default",
+        onPress: () => resolve(true),
+      },
+    ]);
+  });
+}
+
 function formatDateForInput(d) {
   const date = d instanceof Date ? d : new Date(d);
   const y = date.getFullYear();
@@ -64,7 +80,6 @@ export default function SettingsScreen({
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [newUserName, setNewUserName] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
   const [creatingUser, setCreatingUser] = useState(false);
 
   const loadUsers = async () => {
@@ -97,12 +112,11 @@ export default function SettingsScreen({
 
   const handleCreateUser = async () => {
     const name = newUserName.trim();
-    const pin = newUserPassword.trim();
-    if (!name || pin.length < 3) {
+    if (!name) {
       showToast({
         type: "error",
         title: "Required",
-        message: "Enter a name and a password (min 3 characters).",
+        message: "Enter a user name.",
       });
       return;
     }
@@ -110,16 +124,14 @@ export default function SettingsScreen({
     try {
       const result = await UserService.create({
         userName: name,
-        password: pin,
       });
       if (!result?.success) {
         throw new Error(result?.error || "Could not create user");
       }
       setNewUserName("");
-      setNewUserPassword("");
       showToast({
         title: "User created",
-        message: `${name} can now sign in from the login dropdown.`,
+        message: `${name} signs in with password "password", then must set a new one.`,
       });
       await loadUsers();
     } catch (e) {
@@ -133,31 +145,50 @@ export default function SettingsScreen({
     }
   };
 
-  const handleDeleteUser = (name) => {
-    Alert.alert(
+  const handleDeleteUser = async (name) => {
+    const ok = await confirmAction(
       "Delete user?",
-      `Remove ${name} from the login list?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await UserService.remove(name);
-              await loadUsers();
-              showToast({ title: "Deleted", message: `${name} removed.` });
-            } catch (e) {
-              showToast({
-                type: "error",
-                title: "Delete failed",
-                message: e?.message || "Could not delete user.",
-              });
-            }
-          },
-        },
-      ],
+      `Remove ${name} from the login list? This cannot be undone.`,
+      { confirmLabel: "Delete", destructive: true },
     );
+    if (!ok) return;
+    try {
+      await UserService.remove(name);
+      await loadUsers();
+      showToast({ title: "Deleted", message: `${name} removed.` });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Delete failed",
+        message: e?.message || "Could not delete user.",
+      });
+    }
+  };
+
+  const handleResetPassword = async (name) => {
+    const ok = await confirmAction(
+      "Reset password?",
+      `Set ${name}'s password back to "password"? They will be prompted to choose a new one on next login.`,
+      { confirmLabel: "Reset" },
+    );
+    if (!ok) return;
+    try {
+      const result = await UserService.resetPassword(name);
+      if (!result?.success) {
+        throw new Error(result?.error || "Could not reset password");
+      }
+      await loadUsers();
+      showToast({
+        title: "Password reset",
+        message: `${name} can sign in with "password", then must change it.`,
+      });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Reset failed",
+        message: e?.message || "Could not reset password.",
+      });
+    }
   };
 
   const canvasBg = theme.dark
@@ -237,9 +268,10 @@ export default function SettingsScreen({
                 tone="muted"
                 style={styles.settingDescription}
               >
-                Create named accounts with a quick password (min 3 characters).
-                New users must set their own password on first login. Passwords
-                are shown below for admin reference.
+                Create named accounts. Default password is "password"; on first
+                login they must choose a new one. Reset sets it back to
+                "password" and requires a change on next login. Current
+                passwords are shown below for admin reference.
               </AppText>
               <TextInput
                 label="New user name"
@@ -250,20 +282,11 @@ export default function SettingsScreen({
                 autoCorrect={false}
                 style={styles.userInput}
               />
-              <TextInput
-                label="Temporary password"
-                value={newUserPassword}
-                onChangeText={setNewUserPassword}
-                mode="outlined"
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={styles.userInput}
-              />
               <Button
                 mode="contained"
                 onPress={handleCreateUser}
                 loading={creatingUser}
-                disabled={creatingUser}
+                disabled={creatingUser || !newUserName.trim()}
                 icon="account-plus"
                 style={styles.userCreateBtn}
               >
@@ -299,14 +322,23 @@ export default function SettingsScreen({
                           {u.must_change_password ? " · must change" : ""}
                         </AppText>
                       </View>
-                      <Button
-                        mode="text"
-                        compact
-                        textColor={theme.colors.error}
-                        onPress={() => handleDeleteUser(u.user_name)}
-                      >
-                        Delete
-                      </Button>
+                      <View style={styles.userRowActions}>
+                        <Button
+                          mode="text"
+                          compact
+                          onPress={() => handleResetPassword(u.user_name)}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          mode="text"
+                          compact
+                          textColor={theme.colors.error}
+                          onPress={() => handleDeleteUser(u.user_name)}
+                        >
+                          Delete
+                        </Button>
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -581,6 +613,11 @@ const styles = StyleSheet.create({
   userRowInfo: {
     flex: 1,
     minWidth: 0,
+  },
+  userRowActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
   },
   userPasswordLine: {
     marginTop: 2,

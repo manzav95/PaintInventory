@@ -27,10 +27,10 @@ class UserService {
     return Array.isArray(data) ? data : [];
   }
 
-  async create({ userName, password, role = "user" }) {
+  async create({ userName, role = "user" }) {
     return _fetch("/api/users", {
       method: "POST",
-      body: JSON.stringify({ userName, password, role }),
+      body: JSON.stringify({ userName, role }),
     });
   }
 
@@ -46,6 +46,13 @@ class UserService {
       method: "POST",
       body: JSON.stringify({ userName, password }),
     });
+  }
+
+  async resetPassword(userName) {
+    return _fetch(
+      `/api/users/${encodeURIComponent(userName)}/reset-password`,
+      { method: "POST" },
+    );
   }
 
   async remove(userName) {
