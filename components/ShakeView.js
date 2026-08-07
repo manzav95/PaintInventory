@@ -6,9 +6,10 @@ const useNative = Platform.OS !== "web";
 
 /**
  * Horizontal shake when `trigger` changes to a truthy / new value.
- * Clipped so the animation cannot spill outside the parent card.
+ * Clipped by default so the animation cannot spill outside the parent card;
+ * pass `clip={false}` when children need to overflow (e.g. dropdowns).
  */
-export default function ShakeView({ children, trigger, style }) {
+export default function ShakeView({ children, trigger, style, clip = true }) {
   const translateX = useRef(new Animated.Value(0)).current;
   const last = useRef(trigger);
 
@@ -49,7 +50,7 @@ export default function ShakeView({ children, trigger, style }) {
   }, [trigger, translateX]);
 
   return (
-    <View style={[styles.clip, style]}>
+    <View style={[clip ? styles.clip : styles.noClip, style]}>
       <Animated.View style={{ transform: [{ translateX }], width: "100%" }}>
         {children}
       </Animated.View>
@@ -62,5 +63,10 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: "100%",
     overflow: "hidden",
+  },
+  noClip: {
+    width: "100%",
+    maxWidth: "100%",
+    overflow: "visible",
   },
 });

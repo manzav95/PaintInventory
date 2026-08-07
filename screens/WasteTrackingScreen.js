@@ -4,7 +4,6 @@ import {
   StyleSheet,
   ScrollView,
   Platform,
-  Alert,
   RefreshControl,
   Pressable,
   useWindowDimensions,
@@ -25,6 +24,7 @@ import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import showToast from "../utils/showToast";
+import confirmAction from "../utils/confirmAction";
 import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { nestedSurfaceColor } from "../utils/themeColors";
@@ -74,22 +74,6 @@ function parseInches(raw) {
   if (!t) return 0;
   const n = parseFloat(t);
   return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function confirmAction(title, message, { confirmLabel = "Confirm", destructive = false } = {}) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
-  }
-  return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: destructive ? "destructive" : "default",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
 }
 
 export default function WasteTrackingScreen({

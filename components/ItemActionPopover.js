@@ -323,9 +323,9 @@ const styles = StyleSheet.create({
   panel: {
     borderRadius: 10,
     borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingTop: 4,
-    paddingBottom: 8,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
     width: "100%",
     overflow: "hidden",
     ...(Platform.OS === "web"
@@ -344,8 +344,9 @@ const styles = StyleSheet.create({
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 4,
-    marginBottom: 2,
+    paddingHorizontal: 0,
+    marginBottom: 4,
+    minHeight: 36,
   },
   headerBtn: {
     margin: 0,

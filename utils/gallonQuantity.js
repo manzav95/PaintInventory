@@ -65,6 +65,66 @@ export function formatGallonQuantity(n) {
   return String(Math.round(v * 2) / 2);
 }
 
+/** Floor gallons to whole 0.25 increments (no rounding up). */
+export function floorQuarterGallons(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.floor(v * 4 + 1e-9) / 4;
+}
+
+/** @deprecated Prefer floorQuarterGallons for display math. */
+export function roundQuarterGallons(n) {
+  return floorQuarterGallons(n);
+}
+
+/** Format a quarter-gallon value (e.g. 1, 0.25, 1.5). */
+export function formatQuarterGallons(n) {
+  const q = Number(n);
+  if (!Number.isFinite(q) || q <= 0) return "0";
+  if (Math.abs(q - Math.round(q)) < 1e-9) return String(Math.round(q));
+  const s = q.toFixed(2);
+  return s.endsWith("0") ? s.slice(0, -1) : s;
+}
+
+/**
+ * Dashboard material-usage qty from an exact stored gallon amount:
+ * - Whole 0.25-gal chunks shown as gallons (floored, never rounded up)
+ * - Leftover under 0.25 gal shown as ounces
+ *
+ * Examples: 0.35 → "0.25 gal (12.8 oz)"; 0.1 → "12.8 oz"; 0.5 → "0.5 gal"
+ *
+ * @param {number} gal
+ * @param {{ unit?: boolean }} [opts] unit=true → append " gal" on the gallon part
+ */
+export function formatMaterialUsageQtyDisplay(gal, { unit = true } = {}) {
+  const raw = Number(gal);
+  if (!Number.isFinite(raw) || raw <= 0) return "";
+
+  const whole = floorQuarterGallons(raw);
+  const remGal = Math.max(0, raw - whole);
+  const oz = Math.round(remGal * 128 * 10) / 10;
+
+  const formatOz = (v) =>
+    Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(1);
+
+  const hasGal = whole > 1e-9;
+  const hasOz = oz > 1e-6;
+
+  if (hasGal && hasOz) {
+    const galNum = formatQuarterGallons(whole);
+    const galPart = unit ? `${galNum} gal` : galNum;
+    return `${galPart}, ${formatOz(oz)} oz`;
+  }
+  if (hasGal) {
+    const galNum = formatQuarterGallons(whole);
+    return unit ? `${galNum} gal` : galNum;
+  }
+  if (hasOz) {
+    return `${formatOz(oz)} oz`;
+  }
+  return "";
+}
+
 /** Sanitize text input while typing (digits + optional single decimal). */
 export function sanitizeGallonInput(text, allowHalf) {
   let s = String(text ?? "").replace(/[^\d.]/g, "");

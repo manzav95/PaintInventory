@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -21,6 +21,7 @@ import {
   Icon,
   IconButton,
   Divider,
+  SegmentedButtons,
 } from "react-native-paper";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import DashboardGreeting from "../components/DashboardGreeting";
@@ -39,6 +40,8 @@ import { AppBadge, AppEmptyState } from "../components/ui";
 import { getActionColor } from "../utils/actionColors";
 import { getLowStockItems } from "../utils/inventoryAlerts";
 import { materialUsageToHistoryEvent } from "../utils/materialUsageHistory";
+import { formatTenths } from "../utils/catalyst";
+import { formatMaterialUsageQtyDisplay } from "../utils/gallonQuantity";
 import {
   getMaterialTypeColor,
   getMaterialTypeLabel,
@@ -58,6 +61,21 @@ function logQtyAbs(log) {
   const d = log?.details || {};
   const q = d.quantityChange ?? d._quantityChange;
   return typeof q === "number" ? Math.abs(q) : 0;
+}
+
+function formatQtyTenths(n) {
+  return formatTenths(n);
+}
+
+/** Qty label for a history row (usage → 0.25 gal steps + oz when ≤ 0.25). */
+function formatHistoryQtyLabel(log, qty, { withGalUnit = true } = {}) {
+  const n = Number(qty);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (resolveActionType(log) === "material_usage") {
+    return formatMaterialUsageQtyDisplay(n, { unit: withGalUnit });
+  }
+  const t = formatQtyTenths(n);
+  return withGalUnit ? `${t} gal` : t;
 }
 
 function logBelongsToUser(log, userName) {
@@ -137,6 +155,10 @@ export default function DashboardScreen({
   const [shiftFilter, setShiftFilter] = useState(null);
   /** Admin activity period: today (default) → week → last 30 days. */
   const [activityPeriod, setActivityPeriod] = useState("today");
+  /** Mobile history: 'all' | 'checks' | 'usage' */
+  const [mobileHistoryTab, setMobileHistoryTab] = useState("all");
+  /** Standard user: personal (default) vs all shop activity. */
+  const [historyScope, setHistoryScope] = useState("personal");
   /** Admin transaction history: start with ~2 weeks; "Show more" adds another 2. */
   const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
   /** Standard-user needs-attention popup */
@@ -399,7 +421,7 @@ export default function DashboardScreen({
         checkedOut += qty;
         checkOutLogs.push(log);
       }
-      if (type === "check_in") {
+      if (type === "check_in" || type === "receiving") {
         checkedIn += qty;
         checkInLogs.push(log);
       }
@@ -599,7 +621,7 @@ export default function DashboardScreen({
 
   const isCheckInOutLog = (log) => {
     const type = resolveActionType(log);
-    return type === "check_in" || type === "check_out";
+    return type === "check_in" || type === "check_out" || type === "receiving";
   };
 
   /** Admin left column: check-in / check-out only. */
@@ -607,41 +629,47 @@ export default function DashboardScreen({
     return visibleHistoryLogs.filter(isCheckInOutLog);
   }, [visibleHistoryLogs]);
 
-  /** Admin right column: material usage, same time / shift / user / search window. */
+  /** Admin right column / standard usage column. */
   const visibleUsageLogs = useMemo(() => {
-    if (!isAdmin) return [];
     let rows = usageHistoryEvents;
-    if (shiftFilter) {
-      rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
-    }
-    if (userFilter) {
-      const target = String(userFilter).trim().toLowerCase();
-      rows = rows.filter(
-        (log) =>
-          String(log.userName || "")
-            .trim()
-            .toLowerCase() === target,
-      );
+    if (isAdmin) {
+      if (shiftFilter) {
+        rows = rows.filter((log) => logMatchesShift(log.timestamp, shiftFilter));
+      }
+      if (userFilter) {
+        const target = String(userFilter).trim().toLowerCase();
+        rows = rows.filter(
+          (log) =>
+            String(log.userName || "")
+              .trim()
+              .toLowerCase() === target,
+        );
+      }
+    } else if (historyScope === "personal") {
+      rows = rows.filter((log) => logBelongsToUser(log, userName));
     }
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       rows = rows.filter((log) => {
         const colorName = String(log.details?.color_name || "").toLowerCase();
         const booth = String(log.details?.booth || "").toLowerCase();
-        const userName = String(log.userName || "").toLowerCase();
+        const userNameL = String(log.userName || "").toLowerCase();
         const job = String(log.details?.job_name || "").toLowerCase();
         return (
           colorName.includes(query) ||
           booth.includes(query) ||
-          userName.includes(query) ||
+          userNameL.includes(query) ||
           job.includes(query)
         );
       });
     }
-    return rows.filter((log) => {
-      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-      return t >= historyCutoffMs;
-    });
+    if (isAdmin) {
+      return rows.filter((log) => {
+        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+        return t >= historyCutoffMs;
+      });
+    }
+    return rows;
   }, [
     isAdmin,
     usageHistoryEvents,
@@ -649,9 +677,11 @@ export default function DashboardScreen({
     userFilter,
     searchQuery,
     historyCutoffMs,
+    historyScope,
+    userName,
   ]);
 
-  /** Admin desktop activity: today / this week / last 30 days. */
+  /** Desktop activity period: today / this week / last 30 days (admin + standard). */
   const adminActivityRange = useMemo(() => {
     const now = new Date();
     const end = now.getTime();
@@ -684,50 +714,63 @@ export default function DashboardScreen({
     };
   }, [activityPeriod, thisWeekRange]);
 
+  const inActivityPeriod = useCallback(
+    (log) => {
+      const { start, end } = adminActivityRange;
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t >= start && t <= end;
+    },
+    [adminActivityRange],
+  );
+
+  const matchesStandardScope = useCallback(
+    (log) => {
+      if (isAdmin) return true;
+      if (historyScope === "all") return true;
+      return logBelongsToUser(log, userName);
+    },
+    [isAdmin, historyScope, userName],
+  );
+
   const adminPeriodCheckOutLogs = useMemo(() => {
-    if (!isAdmin) return [];
-    const { start, end } = adminActivityRange;
     return auditLogs
       .filter((log) => {
-        const type = resolveActionType(log);
-        if (type !== "check_out") return false;
-        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-        return t >= start && t <= end;
+        if (resolveActionType(log) !== "check_out") return false;
+        if (!inActivityPeriod(log)) return false;
+        return matchesStandardScope(log);
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  }, [isAdmin, auditLogs, adminActivityRange]);
+  }, [auditLogs, inActivityPeriod, matchesStandardScope]);
 
   const adminPeriodCheckInLogs = useMemo(() => {
-    if (!isAdmin) return [];
-    const { start, end } = adminActivityRange;
     return auditLogs
       .filter((log) => {
         const type = resolveActionType(log);
-        if (type !== "check_in") return false;
-        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-        return t >= start && t <= end;
+        if (type !== "check_in" && type !== "receiving") return false;
+        if (!inActivityPeriod(log)) return false;
+        return matchesStandardScope(log);
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  }, [isAdmin, auditLogs, adminActivityRange]);
+  }, [auditLogs, inActivityPeriod, matchesStandardScope]);
 
   const adminPeriodUsageLogs = useMemo(() => {
-    if (!isAdmin) return [];
-    const { start, end } = adminActivityRange;
     return usageHistoryEvents
       .filter((log) => {
-        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-        return t >= start && t <= end;
+        if (!inActivityPeriod(log)) return false;
+        return matchesStandardScope(log);
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  }, [isAdmin, usageHistoryEvents, adminActivityRange]);
+  }, [usageHistoryEvents, inActivityPeriod, matchesStandardScope]);
 
   const adminPeriodTotals = useMemo(() => {
     const sumQty = (logs) =>
       logs.reduce((sum, log) => sum + logQtyAbs(log), 0);
     return {
-      checkOut: sumQty(adminPeriodCheckOutLogs),
-      checkIn: sumQty(adminPeriodCheckInLogs),
-      usage: sumQty(adminPeriodUsageLogs),
+      checkOut: formatQtyTenths(sumQty(adminPeriodCheckOutLogs)),
+      checkIn: formatQtyTenths(sumQty(adminPeriodCheckInLogs)),
+      usage: formatMaterialUsageQtyDisplay(sumQty(adminPeriodUsageLogs), {
+        unit: true,
+      }),
     };
   }, [
     adminPeriodCheckOutLogs,
@@ -827,24 +870,47 @@ export default function DashboardScreen({
     const qty = getQuantity(log.action, log.details, log.itemId);
     const colorName = getEventColorName(log);
     const qtyPart =
-      qty !== "-" && qty != null && qty !== "" ? `${qty} gal ` : "";
+      qty !== "-" && qty != null && qty !== ""
+        ? `${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
+        : "";
     return `${actionLabel} ${qtyPart}${colorName}`.replace(/\s+/g, " ").trim();
   };
 
-  const briefRecentLogs = useMemo(() => {
-    const source = Array.isArray(visibleHistoryLogs) ? visibleHistoryLogs : [];
-    // Admin mobile: full week window (same as desktop table). Standard: last 10.
-    if (isAdmin) return source;
-    return source.slice(0, 10);
-  }, [visibleHistoryLogs, isAdmin]);
+  const mobileHistoryLogs = useMemo(() => {
+    const byNewest = (a, b) =>
+      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
+      (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    const checks = [...adminPeriodCheckOutLogs, ...adminPeriodCheckInLogs].sort(
+      byNewest,
+    );
+    if (mobileHistoryTab === "checks") return checks;
+    if (mobileHistoryTab === "usage") return adminPeriodUsageLogs;
+    return [...checks, ...adminPeriodUsageLogs].sort(byNewest);
+  }, [
+    mobileHistoryTab,
+    adminPeriodCheckOutLogs,
+    adminPeriodCheckInLogs,
+    adminPeriodUsageLogs,
+  ]);
 
-  // Admin desktop: two-column brief (check-in/out | material usage).
-  // Mobile: stacked brief list. Non-admin desktop: full table.
-  const showAdminDualBrief =
-    showTransactionTable && !isMobileLayout && isAdmin;
-  const showFullHistoryTable =
-    showTransactionTable && !isMobileLayout && !isAdmin;
+  // Desktop: 3-column activity brief for admin and standard users.
+  // Mobile: stacked brief list. (Standard no longer uses the wide history table.)
+  const showDualBriefActivity = showTransactionTable && !isMobileLayout;
+  const showFullHistoryTable = false;
   const showBriefRecent = showTransactionTable && isMobileLayout;
+
+  const renderDualBriefEmpty = (message) => (
+    <View style={styles.dualBriefEmptyWrap}>
+      <Text
+        style={[
+          styles.dualBriefEmptyText,
+          { color: theme.colors.onSurface },
+        ]}
+      >
+        {message}
+      </Text>
+    </View>
+  );
 
   const formatBriefTime = (timestamp) => {
     if (!timestamp) return "—";
@@ -1002,7 +1068,9 @@ export default function DashboardScreen({
             >
               {actionLabel}
             </Text>
-            {qty > 0 ? ` ${qty} gal ` : " "}
+            {qty > 0
+              ? ` ${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
+              : " "}
             <Text style={{ fontWeight: "700" }}>{colorName}</Text>
           </Text>
         </View>
@@ -1226,7 +1294,7 @@ export default function DashboardScreen({
       style={[
         styles.dashboardContainer,
         showFullHistoryTable && styles.dashboardContainerWeb,
-        showAdminDualBrief && styles.dashboardContainerWeb,
+        showDualBriefActivity && styles.dashboardContainerWeb,
       ]}
     >
       {/* Needs attention — notification-style anchored popup */}
@@ -1572,7 +1640,11 @@ export default function DashboardScreen({
                                 </Text>
                               ) : null}
                               {showVerb && qty > 0 ? " " : null}
-                              {qty > 0 ? `${qty} gal ` : showVerb ? " " : ""}
+                              {qty > 0
+                                ? `${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
+                                : showVerb
+                                  ? " "
+                                  : ""}
                               <Text style={{ fontWeight: "700" }}>{name}</Text>
                             </Text>
                             <Text
@@ -1850,320 +1922,6 @@ export default function DashboardScreen({
         </View>
       )}
 
-      {!isAdmin && myActivityToday ? (
-        <View style={styles.myActivityBlock}>
-          <Text
-            style={[
-              styles.sectionEyebrow,
-              { color: theme.colors.onSurfaceVariant },
-            ]}
-          >
-            My activity today
-          </Text>
-          {isMobileLayout ? (
-            <View style={styles.myActivityGrid}>
-              <View style={styles.myActivityTopRow}>
-                <View
-                  ref={checkedOutCardRef}
-                  collapsable={false}
-                  style={styles.statCardWrap}
-                >
-                  <Pressable
-                    onPress={() =>
-                      openActivityPanel("checkedOut", checkedOutCardRef)
-                    }
-                  >
-                    <Card
-                      style={[
-                        styles.statCard,
-                        styles.statCardCompact,
-                        surfaceCardStyle,
-                      ]}
-                      mode="outlined"
-                    >
-                      <Card.Content style={styles.statCardContent}>
-                        <Text
-                          style={[
-                            styles.statLabel,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          Checked out
-                        </Text>
-                        <Title
-                          style={[
-                            styles.statValue,
-                            { color: colors.action.checkOut },
-                          ]}
-                        >
-                          {myActivityToday.checkedOut}
-                          <Text
-                            style={[
-                              styles.statValueUnit,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            {" "}
-                            gal
-                          </Text>
-                        </Title>
-                      </Card.Content>
-                    </Card>
-                  </Pressable>
-                </View>
-                <View
-                  ref={checkedInCardRef}
-                  collapsable={false}
-                  style={styles.statCardWrap}
-                >
-                  <Pressable
-                    onPress={() =>
-                      openActivityPanel("checkedIn", checkedInCardRef)
-                    }
-                  >
-                    <Card
-                      style={[
-                        styles.statCard,
-                        styles.statCardCompact,
-                        surfaceCardStyle,
-                      ]}
-                      mode="outlined"
-                    >
-                      <Card.Content style={styles.statCardContent}>
-                        <Text
-                          style={[
-                            styles.statLabel,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          Checked in
-                        </Text>
-                        <Title
-                          style={[
-                            styles.statValue,
-                            { color: colors.action.checkIn },
-                          ]}
-                        >
-                          {myActivityToday.checkedIn}
-                          <Text
-                            style={[
-                              styles.statValueUnit,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            {" "}
-                            gal
-                          </Text>
-                        </Title>
-                      </Card.Content>
-                    </Card>
-                  </Pressable>
-                </View>
-              </View>
-              <View
-                ref={actionsCardRef}
-                collapsable={false}
-                style={styles.myActivityActionsWrap}
-              >
-                <Pressable
-                  onPress={() => openActivityPanel("actions", actionsCardRef)}
-                >
-                  <Card
-                    style={[
-                      styles.statCard,
-                      styles.statCardCompact,
-                      surfaceCardStyle,
-                    ]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.statCardContent}>
-                      <Text
-                        style={[
-                          styles.statLabel,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Actions
-                      </Text>
-                      <Title
-                        style={[
-                          styles.statValue,
-                          { color: theme.colors.primary },
-                        ]}
-                      >
-                        {myActivityToday.actions}
-                      </Title>
-                      {myActivityToday.lastLabel ? (
-                        <Text
-                          style={[
-                            styles.statSubtext,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          Last at {myActivityToday.lastLabel}
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[
-                            styles.statSubtext,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          No activity yet
-                        </Text>
-                      )}
-                    </Card.Content>
-                  </Card>
-                </Pressable>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.statsRow}>
-              <View
-                ref={checkedOutCardRef}
-                collapsable={false}
-                style={styles.statCardWrap}
-              >
-                <Pressable
-                  onPress={() =>
-                    openActivityPanel("checkedOut", checkedOutCardRef)
-                  }
-                >
-                  <Card
-                    style={[styles.statCard, surfaceCardStyle]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.statCardContent}>
-                      <Text
-                        style={[
-                          styles.statLabel,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Checked out
-                      </Text>
-                      <Title
-                        style={[
-                          styles.statValue,
-                          { color: colors.action.checkOut },
-                        ]}
-                      >
-                        {myActivityToday.checkedOut}
-                        <Text
-                          style={[
-                            styles.statValueUnit,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          {" "}
-                          gal
-                        </Text>
-                      </Title>
-                    </Card.Content>
-                  </Card>
-                </Pressable>
-              </View>
-              <View
-                ref={checkedInCardRef}
-                collapsable={false}
-                style={styles.statCardWrap}
-              >
-                <Pressable
-                  onPress={() =>
-                    openActivityPanel("checkedIn", checkedInCardRef)
-                  }
-                >
-                  <Card
-                    style={[styles.statCard, surfaceCardStyle]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.statCardContent}>
-                      <Text
-                        style={[
-                          styles.statLabel,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Checked in
-                      </Text>
-                      <Title
-                        style={[
-                          styles.statValue,
-                          { color: colors.action.checkIn },
-                        ]}
-                      >
-                        {myActivityToday.checkedIn}
-                        <Text
-                          style={[
-                            styles.statValueUnit,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          {" "}
-                          gal
-                        </Text>
-                      </Title>
-                    </Card.Content>
-                  </Card>
-                </Pressable>
-              </View>
-              <View
-                ref={actionsCardRef}
-                collapsable={false}
-                style={styles.statCardWrap}
-              >
-                <Pressable
-                  onPress={() => openActivityPanel("actions", actionsCardRef)}
-                >
-                  <Card
-                    style={[styles.statCard, surfaceCardStyle]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.statCardContent}>
-                      <Text
-                        style={[
-                          styles.statLabel,
-                          { color: theme.colors.onSurfaceVariant },
-                        ]}
-                      >
-                        Actions
-                      </Text>
-                      <Title
-                        style={[
-                          styles.statValue,
-                          { color: theme.colors.primary },
-                        ]}
-                      >
-                        {myActivityToday.actions}
-                      </Title>
-                      {myActivityToday.lastLabel ? (
-                        <Text
-                          style={[
-                            styles.statSubtext,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          Last at {myActivityToday.lastLabel}
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[
-                            styles.statSubtext,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          No activity yet
-                        </Text>
-                      )}
-                    </Card.Content>
-                  </Card>
-                </Pressable>
-              </View>
-            </View>
-          )}
-        </View>
-      ) : null}
-
       {!isAdmin && (lowStockCount > 0 || recycleDueCount > 0) ? (
         <View style={styles.attentionBlock}>
           <Text
@@ -2283,152 +2041,6 @@ export default function DashboardScreen({
         </View>
       ) : null}
 
-      {/* Stats Cards — non-admin desktop / wide only (admin stats moved to Inventory) */}
-      {!isMobileLayout && !isAdmin ? (
-      <View style={styles.statsRow}>
-        <Card style={[styles.statCard, surfaceCardStyle]} mode="outlined">
-          <Card.Content style={styles.statCardContent}>
-            <Text
-              style={[
-                styles.statLabel,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-              numberOfLines={2}
-            >
-              Total Gallons
-            </Text>
-            {inventoryLoaded ? (
-              <Text
-                style={[styles.statValue, { color: theme.colors.primary }]}
-                numberOfLines={1}
-              >
-                {inventory.reduce((sum, item) => sum + (item.quantity || 0), 0)}
-              </Text>
-            ) : (
-              <View style={styles.statLoadingRow}>
-                <ActivityIndicator size="small" />
-                <Text style={styles.statLoadingLabel}>Loading…</Text>
-              </View>
-            )}
-          </Card.Content>
-        </Card>
-
-        <Card
-          style={[styles.statCard, surfaceCardStyle]}
-          mode="outlined"
-          onPress={() => setGalPeriodWeek((prev) => !prev)}
-        >
-          <Card.Content style={styles.statCardContent}>
-            <Text
-              style={[
-                styles.statLabel,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-              numberOfLines={2}
-            >
-              Checked out this {galPeriodWeek ? "week" : "month"}
-            </Text>
-            {auditLogsLoaded ? (
-              <>
-                <Pressable
-                  onPress={() => {
-                    setCheckedOutListIsWeek(galPeriodWeek);
-                    setCheckedOutListOpen(true);
-                  }}
-                  style={styles.statNumberPressable}
-                >
-                  <Text
-                    style={[styles.statValue, { color: theme.colors.primary }]}
-                    numberOfLines={1}
-                  >
-                    {galPeriodWeek ? gallonsUsedThisWeek : gallonsUsedThisMonth}
-                    <Text
-                      style={[
-                        styles.statValueUnit,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      {" "}
-                      gal
-                    </Text>
-                  </Text>
-                </Pressable>
-                <Text
-                  style={[
-                    styles.statSubtext,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {galPeriodWeek ? thisWeekRange.label : thisMonthRange.label}
-                </Text>
-              </>
-            ) : (
-              <View style={styles.statLoadingRow}>
-                <ActivityIndicator size="small" />
-                <Text style={styles.statLoadingLabel}>Loading…</Text>
-              </View>
-            )}
-          </Card.Content>
-        </Card>
-
-        {(!auditLogsLoaded || mostUsedColor) && (
-          <Card
-            style={[styles.statCard, surfaceCardStyle]}
-            mode="outlined"
-            onPress={
-              auditLogsLoaded
-                ? () => setMostUsedByWeek((prev) => !prev)
-                : undefined
-            }
-          >
-            <Card.Content style={styles.statCardContent}>
-              <Text
-                style={[
-                  styles.statLabel,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={2}
-              >
-                Color most checked out
-              </Text>
-              {auditLogsLoaded && mostUsedColor ? (
-                <>
-                  <Text
-                    style={[
-                      styles.statValue,
-                      styles.statValueCompact,
-                      { color: theme.colors.primary },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {mostUsedColor.name}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.statSubtext,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                    numberOfLines={2}
-                  >
-                    {mostUsedColor.totalGal} gal —{" "}
-                    {mostUsedColor.isWeek
-                      ? `week of ${mostUsedColor.periodLabel}`
-                      : mostUsedColor.periodLabel}
-                  </Text>
-                </>
-              ) : (
-                <View style={styles.statLoadingRow}>
-                  <ActivityIndicator size="small" />
-                  <Text style={styles.statLoadingLabel}>Loading…</Text>
-                </View>
-              )}
-            </Card.Content>
-          </Card>
-        )}
-      </View>
-      ) : null}
-
       {showBriefRecent ? (
         <View style={styles.briefHistoryBlock}>
           <Text
@@ -2437,111 +2049,77 @@ export default function DashboardScreen({
               { color: theme.colors.onSurfaceVariant },
             ]}
           >
-            {isAdmin ? "Transaction history" : "Recent activity"}
+            Transaction history
           </Text>
+          {!isAdmin ? (
+            <SegmentedButtons
+              value={historyScope}
+              onValueChange={setHistoryScope}
+              style={styles.mobileHistoryTabs}
+              buttons={[
+                { value: "personal", label: "My activity" },
+                { value: "all", label: "All activity" },
+              ]}
+            />
+          ) : null}
+          <View style={styles.activityPeriodRow}>
+            {[
+              { key: "today", label: "Today" },
+              { key: "week", label: "This week" },
+              { key: "days30", label: "30 days" },
+            ].map((opt) => (
+              <Button
+                key={opt.key}
+                mode={activityPeriod === opt.key ? "contained" : "outlined"}
+                compact
+                onPress={() => setActivityPeriod(opt.key)}
+                style={styles.historyToggleBtn}
+                contentStyle={styles.historyToggleContent}
+                labelStyle={styles.historyToggleLabel}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </View>
+          <SegmentedButtons
+            value={mobileHistoryTab}
+            onValueChange={setMobileHistoryTab}
+            style={styles.mobileHistoryTabs}
+            buttons={[
+              { value: "all", label: "All" },
+              { value: "checks", label: "Checks" },
+              { value: "usage", label: "Usage" },
+            ]}
+          />
           {!auditLogsLoaded ? (
             <View style={styles.statLoadingRow}>
               <ActivityIndicator size="small" />
               <Text style={styles.statLoadingLabel}>Loading…</Text>
             </View>
-          ) : briefRecentLogs.length === 0 ? (
-            <Text
-              style={[
-                styles.briefHistoryEmpty,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              No recent transactions.
-            </Text>
+          ) : mobileHistoryLogs.length === 0 ? (
+            <View style={styles.briefHistoryEmptyWrap}>
+              <Text
+                style={[
+                  styles.dualBriefEmptyText,
+                  { color: theme.colors.onSurface },
+                ]}
+              >
+                No activity in this period
+              </Text>
+            </View>
           ) : (
-            <>
-              <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
-                {briefRecentLogs.map((log, index) => {
-                  const accent = getActionColor(log.action, log.details);
-                  const time = log.timestamp
-                    ? new Date(log.timestamp).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })
-                    : "—";
-                  const user = getDisplayUserName(log);
-                  const actionLabel = formatBriefVerb(log);
-                  const qty = logQtyAbs(log);
-                  const colorName = getEventColorName(log);
-                  return (
-                    <View
-                      key={`${log.timestamp}-${log.itemId}-${index}`}
-                      style={[
-                        styles.briefHistoryRow,
-                        index > 0 && {
-                          borderTopWidth: StyleSheet.hairlineWidth,
-                          borderTopColor: theme.colors.outlineVariant,
-                        },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.briefHistoryAccent,
-                          { backgroundColor: accent },
-                        ]}
-                      />
-                      <View style={styles.briefHistoryBody}>
-                        <View style={styles.briefHistoryTop}>
-                          <Text
-                            style={[
-                              styles.briefHistoryTime,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {time}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.briefHistoryUser,
-                              { color: theme.colors.onSurface },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {user}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.briefHistorySummary,
-                            { color: theme.colors.onSurface },
-                          ]}
-                          numberOfLines={2}
-                        >
-                          <Text style={{ color: accent, fontWeight: "700" }}>
-                            {actionLabel}
-                          </Text>
-                          {qty > 0 ? ` ${qty} gal ` : " "}
-                          <Text style={{ fontWeight: "700" }}>{colorName}</Text>
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-              {isAdmin && hasMoreHistory ? (
-                <Button
-                  mode="outlined"
-                  onPress={() => setHistoryWeeksShown((w) => w + 1)}
-                  style={styles.briefHistoryMoreBtn}
-                  compact
-                >
-                  Show more
-                </Button>
-              ) : null}
-            </>
+            <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
+              {mobileHistoryLogs.map((log, index) =>
+                renderBriefLogRow(log, index, {
+                  showBooth: resolveActionType(log) === "material_usage",
+                }),
+              )}
+            </View>
           )}
         </View>
       ) : null}
 
-      {showAdminDualBrief ? (
+      {showDualBriefActivity ? (
         <View style={styles.dualBriefBlock}>
           <View style={styles.historyHeader}>
             <Title
@@ -2550,8 +2128,19 @@ export default function DashboardScreen({
                 { color: theme.colors.onBackground },
               ]}
             >
-              Activity
+              Transaction history
             </Title>
+            {!isAdmin ? (
+              <SegmentedButtons
+                value={historyScope}
+                onValueChange={setHistoryScope}
+                style={styles.historyScopeTabs}
+                buttons={[
+                  { value: "personal", label: "My activity" },
+                  { value: "all", label: "All activity" },
+                ]}
+              />
+            ) : null}
             <View style={styles.activityPeriodRow}>
               {[
                 { key: "today", label: "Today" },
@@ -2578,6 +2167,11 @@ export default function DashboardScreen({
               ]}
             >
               {adminActivityRange.label}
+              {!isAdmin
+                ? historyScope === "personal"
+                  ? " · yours"
+                  : " · everyone"
+                : ""}
             </Text>
           </View>
 
@@ -2636,7 +2230,7 @@ export default function DashboardScreen({
                       { color: theme.colors.onSurfaceVariant },
                     ]}
                   >
-                    Checked in
+                    Checked in / received
                   </Text>
                   <Text
                     style={[
@@ -2679,7 +2273,6 @@ export default function DashboardScreen({
                     ]}
                   >
                     {adminPeriodTotals.usage}
-                    <Text style={styles.activityTotalUnit}> gal</Text>
                   </Text>
                   <Text
                     style={[
@@ -2726,14 +2319,7 @@ export default function DashboardScreen({
                     </Text>
                   </View>
                   {adminPeriodCheckOutLogs.length === 0 ? (
-                    <Text
-                      style={[
-                        styles.briefHistoryEmpty,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      No check-outs in this period.
-                    </Text>
+                    renderDualBriefEmpty("No check-outs in this period")
                   ) : (
                     <ScrollFrame
                       fill
@@ -2768,7 +2354,7 @@ export default function DashboardScreen({
                         { color: theme.colors.onSurface },
                       ]}
                     >
-                      Checked in
+                      Checked in / received
                     </Text>
                     <Text
                       style={[
@@ -2780,14 +2366,7 @@ export default function DashboardScreen({
                     </Text>
                   </View>
                   {adminPeriodCheckInLogs.length === 0 ? (
-                    <Text
-                      style={[
-                        styles.briefHistoryEmpty,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      No check-ins in this period.
-                    </Text>
+                    renderDualBriefEmpty("No check-ins in this period")
                   ) : (
                     <ScrollFrame
                       fill
@@ -2834,14 +2413,7 @@ export default function DashboardScreen({
                     </Text>
                   </View>
                   {adminPeriodUsageLogs.length === 0 ? (
-                    <Text
-                      style={[
-                        styles.briefHistoryEmpty,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      No material usage in this period.
-                    </Text>
+                    renderDualBriefEmpty("No material usage in this period")
                   ) : (
                     <ScrollFrame
                       fill
@@ -3124,7 +2696,11 @@ export default function DashboardScreen({
                                     { color: theme.dark ? "#fff" : "#000" },
                                   ]}
                                 >
-                                  {quantity !== "-" ? `${quantity}` : "-"}
+                                  {quantity !== "-" && quantity != null
+                                    ? formatHistoryQtyLabel(log, quantity, {
+                                        withGalUnit: false,
+                                      }) || String(quantity)
+                                    : "-"}
                                 </Text>
                               </DataTable.Cell>
                               <DataTable.Cell style={styles.actionCell}>
@@ -3223,7 +2799,7 @@ export default function DashboardScreen({
   );
 
   if (isWeb) {
-    if (!showFullHistoryTable && !showAdminDualBrief) {
+    if (!showFullHistoryTable && !showDualBriefActivity) {
       return (
         <ScrollView
           style={[
@@ -3739,9 +3315,38 @@ const styles = StyleSheet.create({
   briefHistoryBlock: {
     marginBottom: space[5],
   },
+  mobileHistoryTabs: {
+    marginBottom: space[2],
+  },
+  historyScopeTabs: {
+    marginBottom: space[3],
+    alignSelf: "stretch",
+  },
   briefHistoryEmpty: {
     fontSize: 13,
     paddingVertical: space[2],
+  },
+  briefHistoryEmptyWrap: {
+    minHeight: 160,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: space[4],
+    paddingVertical: space[6],
+  },
+  dualBriefEmptyWrap: {
+    flex: 1,
+    minHeight: 220,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: space[4],
+    paddingVertical: space[8],
+  },
+  dualBriefEmptyText: {
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+    lineHeight: 28,
+    letterSpacing: 0.2,
   },
   briefHistoryCard: {
     borderRadius: radius.md,

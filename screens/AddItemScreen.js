@@ -17,6 +17,7 @@ import {
   IconButton,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
+import ItemAdvancedFields from "../components/ItemAdvancedFields";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { normalizeItemNameForSave } from "../utils/itemNameUtils";
@@ -140,6 +141,9 @@ export default function AddItemScreen({
   const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
   const [poCategory, setPoCategory] = useState("mixing");
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [unitLabel, setUnitLabel] = useState("");
+  const [catalystPercentInput, setCatalystPercentInput] = useState("");
   const [fieldErrors, setFieldErrors] = useState({
     itemId: false,
     name: false,
@@ -148,6 +152,17 @@ export default function AddItemScreen({
   const isCustomType = CUSTOM_TYPES.includes(type);
   const usesCustomContainer = isCustomType || type === "precat";
   const inputStyle = isWideDesktop ? styles.inputDesktop : styles.input;
+  const unitAffix = (unitLabel || "").trim() || "gal";
+  const advancedToggle = (
+    <Button
+      mode={advancedOpen ? "contained" : "outlined"}
+      compact
+      icon="tune"
+      onPress={() => setAdvancedOpen((o) => !o)}
+    >
+      Advanced
+    </Button>
+  );
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type) || type === "precat") {
@@ -266,6 +281,18 @@ export default function AddItemScreen({
       return;
     }
 
+    let catalystPercentVal = null;
+    const catRaw = catalystPercentInput.trim();
+    if (catRaw !== "") {
+      const n = parseFloat(catRaw);
+      if (isNaN(n) || n < 0) {
+        showAlert("Invalid", "Catalyst % must be 0 or greater.");
+        return;
+      }
+      catalystPercentVal = n;
+    }
+    const unitLabelVal = unitLabel.trim() || null;
+
     const item = {
       id: tid,
       name: nname,
@@ -282,6 +309,8 @@ export default function AddItemScreen({
       ...(extRaw && { external_code: extRaw }),
       ...(rexRaw && { rex: rexRaw }),
       ...(lotDateVal && { lot_date: lotDateVal }),
+      ...(unitLabelVal && { unit_label: unitLabelVal }),
+      ...(catalystPercentVal != null && { catalyst_percent: catalystPercentVal }),
     };
 
     onSave(item);
@@ -524,6 +553,7 @@ export default function AddItemScreen({
           title="Add New Paint"
           onBack={handleBack}
           embeddedInShell={embeddedInShell}
+          actions={!isWideDesktop ? advancedToggle : null}
         />
         <Card
           style={[
@@ -601,7 +631,7 @@ export default function AddItemScreen({
                       keyboardType={
                         allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
                       }
-                      right={<TextInput.Affix text="gal" />}
+                      right={<TextInput.Affix text={unitAffix} />}
                     />
                   </FormCol>
                   <FormCol desktop flex={0.7}>
@@ -693,7 +723,17 @@ export default function AddItemScreen({
                   <Button mode="outlined" onPress={onCancel}>
                     Cancel
                   </Button>
+                  <View style={styles.advancedDesktopSlot}>{advancedToggle}</View>
                 </View>
+                <ItemAdvancedFields
+                  visible={advancedOpen}
+                  unitLabel={unitLabel}
+                  onUnitLabelChange={setUnitLabel}
+                  catalystPercent={catalystPercentInput}
+                  onCatalystPercentChange={setCatalystPercentInput}
+                  materialType={type}
+                  dense
+                />
               </>
             ) : (
               <>
@@ -743,7 +783,7 @@ export default function AddItemScreen({
                   keyboardType={
                     allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
                   }
-                  right={<TextInput.Affix text="gal" />}
+                  right={<TextInput.Affix text={unitAffix} />}
                 />
                 <TextInput
                   label="Minimum quantity (low stock threshold)"
@@ -803,6 +843,14 @@ export default function AddItemScreen({
                     </Text>
                   </View>
                 )}
+                <ItemAdvancedFields
+                  visible={advancedOpen}
+                  unitLabel={unitLabel}
+                  onUnitLabelChange={setUnitLabel}
+                  catalystPercent={catalystPercentInput}
+                  onCatalystPercentChange={setCatalystPercentInput}
+                  materialType={type}
+                />
                 <View style={styles.buttonContainer}>
                   <Button
                     mode="contained"
@@ -844,9 +892,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, minWidth: 0 },
   scroll: {
     paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingBottom: 48,
-    maxWidth: 720,
+    /** Match Item Details desktop width (webWrapperWide). */
+    maxWidth: 1100,
     width: "100%",
     alignSelf: "center",
     ...(Platform.OS === "web" ? { boxSizing: "border-box" } : null),
@@ -951,5 +1000,10 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 12,
     justifyContent: "flex-start",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  advancedDesktopSlot: {
+    marginLeft: "auto",
   },
 });

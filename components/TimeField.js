@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Button, Text, TextInput, useTheme } from "react-native-paper";
@@ -57,7 +57,7 @@ function fromHtmlTimeValue(hhmm) {
 
 /**
  * Time field: native picker on iOS/Android; transparent overlay input on web
- * so mobile browsers can open the time picker reliably.
+ * so the user taps the real control (required on mobile browsers).
  * Value format: "3:00 PM"
  */
 
@@ -69,9 +69,8 @@ const webOverlayInputStyle = {
   bottom: 0,
   width: "100%",
   height: "100%",
-  // Not fully 0 — iOS Safari ignores taps on opacity:0 controls.
-  opacity: 0.011,
-  zIndex: 5,
+  opacity: 0,
+  zIndex: 10,
   border: "none",
   padding: 0,
   margin: 0,
@@ -81,6 +80,7 @@ const webOverlayInputStyle = {
   backgroundColor: "transparent",
   WebkitAppearance: "none",
   appearance: "none",
+  pointerEvents: "auto",
 };
 
 export default function TimeField({
@@ -95,6 +95,7 @@ export default function TimeField({
   const [show, setShow] = useState(false);
   const [draft, setDraft] = useState(() => toDateWithTime(value));
   const theme = useTheme();
+  const webInputRef = useRef(null);
 
   const displayValue = useMemo(() => {
     const parts = parseTimeParts(value);
@@ -135,6 +136,7 @@ export default function TimeField({
       <View style={[styles.wrap, style]}>
         <View pointerEvents="none">{field}</View>
         <input
+          ref={webInputRef}
           type="time"
           value={toHtmlTimeValue(value)}
           disabled={disabled}

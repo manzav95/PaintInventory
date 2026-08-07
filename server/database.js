@@ -323,6 +323,20 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'unit_label') THEN
+          ALTER TABLE items ADD COLUMN unit_label TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'catalyst_percent') THEN
+          ALTER TABLE items ADD COLUMN catalyst_percent REAL DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     // Backfill missing unit prices (blank / null → default)
@@ -651,6 +665,15 @@ class Database {
       item.rex != null && String(item.rex).trim() !== ""
         ? String(item.rex).trim()
         : null;
+    const unitLabel =
+      item.unit_label != null && String(item.unit_label).trim() !== ""
+        ? String(item.unit_label).trim()
+        : null;
+    let catalystPercent = null;
+    if (item.catalyst_percent != null && item.catalyst_percent !== "") {
+      const n = Number(item.catalyst_percent);
+      if (Number.isFinite(n) && n >= 0) catalystPercent = n;
+    }
     try {
       // Pre-check duplicate name (case-insensitive)
       const nameTrim = item.name != null ? String(item.name).trim() : "";
@@ -667,8 +690,8 @@ class Database {
         }
       }
       await this.pool.query(
-        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing, unit_label, catalyst_percent)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
         [
           item.id,
           item.name,
@@ -689,6 +712,8 @@ class Database {
           externalCode,
           rex,
           isMixing,
+          unitLabel,
+          catalystPercent,
         ],
       );
     } catch (e) {
@@ -720,6 +745,8 @@ class Database {
         external_code: externalCode,
         rex,
         is_mixing: isMixing,
+        unit_label: unitLabel,
+        catalyst_percent: catalystPercent,
       }),
     };
   }
@@ -745,6 +772,8 @@ class Database {
       "external_code",
       "rex",
       "is_mixing",
+      "unit_label",
+      "catalyst_percent",
       // Legacy PO fields (kept for backward compatibility)
       "po_label_ap",
       "po_label_mixing",
@@ -805,6 +834,18 @@ class Database {
           else if (v === "true" || v === 1 || v === "1") values.push(true);
           else if (v === "false" || v === 0 || v === "0") values.push(false);
           else values.push(null);
+        } else if (key === "unit_label") {
+          const v = updates[key];
+          values.push(
+            v != null && String(v).trim() !== "" ? String(v).trim() : null,
+          );
+        } else if (key === "catalyst_percent") {
+          const v = updates[key];
+          if (v == null || v === "") values.push(null);
+          else {
+            const n = Number(v);
+            values.push(Number.isFinite(n) && n >= 0 ? n : null);
+          }
         } else if (key === "po_label_ap" || key === "po_label_mixing") {
           const v = updates[key];
           if (v === true || v === false) values.push(v);
@@ -1811,7 +1852,15 @@ class Database {
 
   async addMaterialUsage(entry) {
     const qtyGallons = Number(entry.qty_gallons) || 0;
-    const catalystOz = entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz)) ? Number(entry.catalyst_oz) : (qtyGallons * 0.04 * 128);
+    let catalystOz;
+    if (entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz))) {
+      catalystOz = Number(entry.catalyst_oz);
+    } else {
+      const t = String(entry.material_type || "").toLowerCase();
+      const pct =
+        t === "paint" || t === "custom_paint" ? 3.9 : 4;
+      catalystOz = Math.round(qtyGallons * (pct / 100) * 128 * 10) / 10;
+    }
     const catalystGallons = catalystOz / 128;
     const materialType = entry.material_type != null ? String(entry.material_type).trim() : null;
     const cupGun = entry.cup_gun === true;
@@ -1868,6 +1917,55 @@ class Database {
     return result.rows;
   }
 
+  /**
+   * Distinct months/years that have material-usage qty (excludes admin users).
+   * entry_date is TEXT (YYYY-MM-DD) — use substring, not ::date, so bad rows
+   * cannot wipe the whole result set.
+   */
+  async getMaterialUsageExportPeriods() {
+    const excludeAdmin = `(user_name IS NULL OR LOWER(TRIM(COALESCE(user_name, ''))) NOT IN ('admin123', 'admin'))`;
+    const monthsResult = await this.pool.query(
+      `SELECT
+         LEFT(TRIM(entry_date), 7) AS period_key,
+         COUNT(*)::int AS entry_count,
+         COALESCE(SUM(qty_gallons), 0)::float AS total_gal
+       FROM material_usage
+       WHERE entry_date IS NOT NULL
+         AND TRIM(entry_date) <> ''
+         AND LEFT(TRIM(entry_date), 7) ~ '^\\d{4}-\\d{2}$'
+         AND ${excludeAdmin}
+       GROUP BY 1
+       HAVING COALESCE(SUM(qty_gallons), 0) > 0 OR COUNT(*) > 0
+       ORDER BY 1 DESC`,
+    );
+    const yearsResult = await this.pool.query(
+      `SELECT
+         LEFT(TRIM(entry_date), 4) AS period_key,
+         COUNT(*)::int AS entry_count,
+         COALESCE(SUM(qty_gallons), 0)::float AS total_gal
+       FROM material_usage
+       WHERE entry_date IS NOT NULL
+         AND TRIM(entry_date) <> ''
+         AND LEFT(TRIM(entry_date), 4) ~ '^\\d{4}$'
+         AND ${excludeAdmin}
+       GROUP BY 1
+       HAVING COALESCE(SUM(qty_gallons), 0) > 0 OR COUNT(*) > 0
+       ORDER BY 1 DESC`,
+    );
+    return {
+      months: monthsResult.rows.map((r) => ({
+        key: String(r.period_key),
+        entryCount: Number(r.entry_count) || 0,
+        totalGal: Math.round((Number(r.total_gal) || 0) * 100) / 100,
+      })),
+      years: yearsResult.rows.map((r) => ({
+        key: String(r.period_key),
+        entryCount: Number(r.entry_count) || 0,
+        totalGal: Math.round((Number(r.total_gal) || 0) * 100) / 100,
+      })),
+    };
+  }
+
   async updateMaterialUsageCatalyzed(id, confirmed) {
     const confirmedAt = confirmed ? new Date().toISOString() : null;
     const result = await this.pool.query(
@@ -1887,7 +1985,12 @@ class Database {
     const catalystOz =
       entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz))
         ? Number(entry.catalyst_oz)
-        : qtyGallons * 0.04 * 128;
+        : (() => {
+            const t = String(entry.material_type || "").toLowerCase();
+            const pct =
+              t === "paint" || t === "custom_paint" ? 3.9 : 4;
+            return Math.round(qtyGallons * (pct / 100) * 128 * 10) / 10;
+          })();
     const catalystGallons = catalystOz / 128;
     const materialType =
       entry.material_type != null ? String(entry.material_type).trim() : null;

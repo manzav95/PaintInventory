@@ -713,6 +713,17 @@ app.get('/api/material-usage', async (req, res) => {
   }
 });
 
+/** Months / years that have material-usage qty (for Settings export pickers). */
+app.get('/api/material-usage/export-periods', async (req, res) => {
+  try {
+    const periods = await db.getMaterialUsageExportPeriods();
+    res.json(periods);
+  } catch (error) {
+    console.error('Error fetching material usage export periods:', error);
+    res.status(500).json({ error: 'Failed to fetch export periods' });
+  }
+});
+
 app.post('/api/material-usage', async (req, res) => {
   try {
     const body = req.body || {};

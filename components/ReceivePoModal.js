@@ -5,11 +5,11 @@ import {
   Platform,
   Modal,
   Pressable,
-  TextInput as NativeTextInput,
   useWindowDimensions,
 } from "react-native";
 import {
   Text,
+  TextInput,
   Button,
   useTheme,
   IconButton,
@@ -18,7 +18,7 @@ import {
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
-import { colors, fontFamily } from "../theme/tokens";
+import { colors, fontFamily, space, radius } from "../theme/tokens";
 import { AppBadge, AppEmptyState } from "./ui";
 
 const PANEL_WIDTH = 460;
@@ -105,7 +105,6 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   allowHalf,
   onQtyChange,
 }) {
-  const theme = useTheme();
   const [value, setValue] = useState(initialQty);
 
   useEffect(() => {
@@ -119,42 +118,24 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   };
 
   return (
-    <View style={styles.receiveQtyWrap}>
-      <Text
-        style={[styles.receiveQtyLabel, { color: theme.colors.onSurfaceVariant }]}
-      >
-        Receive (gal)
-      </Text>
-      <NativeTextInput
-        value={value}
-        onChangeText={handleChange}
-        placeholder={String(remaining)}
-        placeholderTextColor={theme.colors.onSurfaceVariant}
-        keyboardType={
-          allowHalf
-            ? Platform.OS === "ios"
-              ? "decimal-pad"
-              : "numeric"
-            : Platform.OS === "ios"
-              ? "number-pad"
-              : "numeric"
-        }
-        inputMode={allowHalf ? "decimal" : "numeric"}
-        returnKeyType="done"
-        blurOnSubmit={false}
-        autoCorrect={false}
-        autoComplete="off"
-        selectTextOnFocus={false}
-        style={[
-          styles.receiveQtyInput,
-          {
-            borderColor: theme.colors.outline,
-            color: theme.colors.onSurface,
-            backgroundColor: theme.colors.surface,
-          },
-        ]}
-      />
-    </View>
+    <TextInput
+      label="Receive qty (gal)"
+      value={value}
+      onChangeText={handleChange}
+      mode="outlined"
+      dense
+      placeholder={String(remaining)}
+      keyboardType={
+        allowHalf
+          ? Platform.OS === "ios"
+            ? "decimal-pad"
+            : "numeric"
+          : Platform.OS === "ios"
+            ? "number-pad"
+            : "numeric"
+      }
+      style={styles.receiveQtyInput}
+    />
   );
 });
 
@@ -578,125 +559,15 @@ export default function ReceivePoModal({
                               Job: {(line.job_name || "").trim()}
                             </Text>
                           ) : null}
-                          <View style={styles.qtyStrip}>
-                            <View
-                              style={[
-                                styles.qtyStat,
-                                {
-                                  backgroundColor: theme.dark
-                                    ? "rgba(255,255,255,0.06)"
-                                    : "rgba(0,0,0,0.04)",
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.qtyStatLabel,
-                                  { color: theme.colors.onSurfaceVariant },
-                                ]}
-                              >
-                                Ordered
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatValue,
-                                  { color: theme.colors.onSurface },
-                                ]}
-                              >
-                                {ordered}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatUnit,
-                                  { color: theme.colors.onSurfaceVariant },
-                                ]}
-                              >
-                                gal
-                              </Text>
-                            </View>
-                            <View
-                              style={[
-                                styles.qtyStat,
-                                { backgroundColor: statusColors.soft },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.qtyStatLabel,
-                                  { color: statusColors.accent },
-                                ]}
-                              >
-                                Received
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatValue,
-                                  { color: statusColors.accent },
-                                ]}
-                              >
-                                {received}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatUnit,
-                                  { color: statusColors.accent },
-                                ]}
-                              >
-                                gal
-                              </Text>
-                            </View>
-                            <View
-                              style={[
-                                styles.qtyStat,
-                                {
-                                  backgroundColor:
-                                    remaining > 0
-                                      ? STATUS_COLORS.partial.soft
-                                      : STATUS_COLORS.complete.soft,
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.qtyStatLabel,
-                                  {
-                                    color:
-                                      remaining > 0
-                                        ? STATUS_COLORS.partial.accent
-                                        : STATUS_COLORS.complete.accent,
-                                  },
-                                ]}
-                              >
-                                Remaining
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatValue,
-                                  {
-                                    color:
-                                      remaining > 0
-                                        ? STATUS_COLORS.partial.accent
-                                        : STATUS_COLORS.complete.accent,
-                                  },
-                                ]}
-                              >
-                                {remaining}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.qtyStatUnit,
-                                  {
-                                    color:
-                                      remaining > 0
-                                        ? STATUS_COLORS.partial.accent
-                                        : STATUS_COLORS.complete.accent,
-                                  },
-                                ]}
-                              >
-                                gal
-                              </Text>
-                            </View>
-                          </View>
+                          <Text
+                            style={[
+                              styles.qtyMeta,
+                              { color: theme.colors.onSurfaceVariant },
+                            ]}
+                          >
+                            Ordered {ordered} · Received {received} · Remaining{" "}
+                            {remaining} gal
+                          </Text>
                           {remaining > 0 ? (
                             <ReceiveLineQtyInput
                               itemId={itemId}
@@ -778,11 +649,11 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   panel: {
-    borderRadius: 10,
+    borderRadius: radius.md + 2,
     borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingTop: 4,
-    paddingBottom: 12,
+    paddingHorizontal: space[5],
+    paddingTop: space[2],
+    paddingBottom: space[4],
     width: "100%",
     overflow: "hidden",
     ...(Platform.OS === "web"
@@ -802,39 +673,40 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 2,
+    marginBottom: space[1],
     marginRight: -4,
+    minHeight: 36,
   },
   panelTitle: {
     fontSize: 17,
     fontWeight: "700",
     flex: 1,
-    paddingRight: 8,
+    paddingRight: space[2],
   },
   closeBtn: {
     margin: 0,
   },
   help: {
     fontSize: 13,
-    marginBottom: 10,
+    marginBottom: space[3],
     lineHeight: 18,
-    paddingRight: 4,
+    paddingRight: space[1],
   },
   orderRow: {
     borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    marginBottom: 8,
+    borderRadius: radius.md,
+    paddingVertical: space[4],
+    paddingHorizontal: space[4],
+    marginBottom: space[2],
   },
   orderPo: {
     fontSize: 15,
     fontWeight: "600",
-    marginBottom: 4,
+    marginBottom: space[1],
   },
   orderMeta: {
     fontSize: 12,
-    marginBottom: 4,
+    marginBottom: space[1],
   },
   orderPreview: {
     fontSize: 13,
@@ -844,15 +716,15 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    gap: 12,
+    gap: space[4],
     flexWrap: "wrap",
-    marginTop: 8,
+    marginTop: space[2],
   },
   detailHeader: {
     position: "relative",
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: space[3],
     minHeight: 44,
   },
   backBtn: {
@@ -877,14 +749,15 @@ const styles = StyleSheet.create({
   },
   lineCard: {
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
+    borderRadius: radius.md,
+    padding: space[4],
+    marginBottom: space[3],
+    gap: space[1],
   },
   lineTitleRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 8,
+    gap: space[2],
     marginBottom: 2,
   },
   lineName: {
@@ -895,64 +768,25 @@ const styles = StyleSheet.create({
   lineCode: {
     fontSize: 13,
     fontFamily: fontFamily.mono,
-    marginBottom: 4,
+    marginBottom: space[1],
   },
   emptyOrders: {
     flex: 0,
-    paddingVertical: 12,
+    paddingVertical: space[4],
     paddingHorizontal: 0,
   },
   lineJob: {
     fontSize: 12,
-    marginBottom: 8,
+    marginBottom: space[1],
   },
-  qtyStrip: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 10,
-    marginTop: 4,
-  },
-  qtyStat: {
-    flexGrow: 1,
-    flexBasis: "28%",
-    minWidth: 88,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  qtyStatLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-    marginBottom: 2,
-  },
-  qtyStatValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    lineHeight: 22,
-  },
-  qtyStatUnit: {
-    fontSize: 11,
-    marginTop: 1,
-  },
-  receiveQtyWrap: {
-    marginTop: 2,
-  },
-  receiveQtyLabel: {
-    fontSize: 12,
-    marginBottom: 6,
+  qtyMeta: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: space[2],
+    marginTop: space[1],
   },
   receiveQtyInput: {
-    width: "100%",
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === "ios" ? 12 : 10,
-    fontSize: 16,
-    ...(Platform.OS === "web"
-      ? { outlineStyle: "none", boxSizing: "border-box" }
-      : null),
+    marginTop: space[1],
+    backgroundColor: "transparent",
   },
 });

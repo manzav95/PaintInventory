@@ -16,6 +16,7 @@ import KeepAlivePane from './components/KeepAlivePane';
 import FadeOverlay from './components/FadeOverlay';
 import FadeIn from './components/FadeIn';
 import ToastHost from './components/ToastHost';
+import ConfirmHost from './components/ConfirmHost';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -76,8 +77,11 @@ export default function App() {
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [materialUsageOvertime, setMaterialUsageOvertime] = useState(false);
   const [userName, setUserName] = useState(null);
-  const isAdmin = userName === 'admin123';
-  const actorName = isAdmin ? 'Admin' : (userName || 'unknown');
+  const isAdminUser = userName === 'admin123';
+  /** Admin can preview the standard-user UI without signing out. */
+  const [previewStandardView, setPreviewStandardView] = useState(false);
+  const isAdmin = isAdminUser && !previewStandardView;
+  const actorName = isAdminUser ? 'Admin' : (userName || 'unknown');
   const idleLogoutTriggeredRef = useRef(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -359,6 +363,7 @@ export default function App() {
     await recordUserActivity();
     LoginLogService.recordLogin(trimmed).catch(() => {});
     idleLogoutTriggeredRef.current = false;
+    setPreviewStandardView(false);
     setUserName(trimmed);
     setCurrentScreen(trimmed === 'admin123' ? 'home' : 'list');
   };
@@ -366,6 +371,7 @@ export default function App() {
   const handleSwitchUser = async () => {
     await AsyncStorage.removeItem('@inventory_user_name');
     await clearUserActivity();
+    setPreviewStandardView(false);
     setUserName(null);
     setSelectedItem(null);
     setPreviousScreen('home');
@@ -788,10 +794,14 @@ export default function App() {
           });
           await refreshAuditLogs(true);
         } else {
-          showAlert(
-            'Cannot check out',
-            result.error || 'Failed to check out quantity.',
-          );
+          const msg = result.error || 'Failed to check out quantity.';
+          showAlert('Cannot check out', msg);
+          showToast({
+            type: 'error',
+            title: 'Cannot check out',
+            message: msg,
+            duration: 5000,
+          });
           return;
         }
       } catch (err) {
@@ -1109,7 +1119,7 @@ export default function App() {
     const from = (fromDate || '').trim();
     const to = (toDate || '').trim();
     if (!from || !to) {
-      Alert.alert('Required', 'Please select both From and To dates.');
+      showAlert('Required', 'Please select a month or year to export.');
       return;
     }
     const url = MaterialUsageService.getExportExcelUrl(from, to);
@@ -1493,6 +1503,20 @@ export default function App() {
         }
         onOpenSettings={() => navigateTo('settings')}
         onSignOut={handleSwitchUser}
+        isAdmin={isAdminUser}
+        previewStandardView={previewStandardView}
+        onTogglePreviewStandardView={() => {
+          setPreviewStandardView((v) => {
+            const next = !v;
+            showToast({
+              title: next ? 'Standard user view' : 'Admin view',
+              message: next
+                ? 'UI now matches a standard user. Your account is still admin.'
+                : 'Admin features restored.',
+            });
+            return next;
+          });
+        }}
         notifications={
           <NotificationsBell
             inventory={inventory}
@@ -1575,6 +1599,7 @@ export default function App() {
           </View>
         </FadeOverlay>
         <ToastHost />
+        <ConfirmHost />
         <Modal
           visible={showAdminItemDialog}
           transparent

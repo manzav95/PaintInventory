@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -11,22 +11,31 @@ import {
   TextInput,
   Button,
   useTheme,
-  Menu,
   Text,
   ActivityIndicator,
 } from "react-native-paper";
 import FadeIn from "../components/FadeIn";
 import ShakeView from "../components/ShakeView";
+import ScrollFrame from "../components/ScrollFrame";
 import showToast from "../utils/showToast";
 import UserService from "../services/userService";
-import { colors, space } from "../theme/tokens";
+import { colors, space, radius } from "../theme/tokens";
 import { AppText } from "../components/ui";
 
 const HIDDEN_ADMIN_NAME = "admin123";
-const TRACKER_DOUBLE_TAP_MS = 450;
+const TRACKER_DOUBLE_TAP_MS = 550;
+/** ~5 name rows visible; scroll for the rest. */
+const NAME_LIST_MAX_HEIGHT = 5 * 44;
 
 function isHiddenAdminName(name) {
   return String(name || "").trim().toLowerCase() === HIDDEN_ADMIN_NAME;
+}
+
+function openAdminGateFromTracker(setAdminGate, setSelectedName, setPassword, setMenuOpen) {
+  setAdminGate(true);
+  setSelectedName("");
+  setPassword("");
+  setMenuOpen(false);
 }
 
 export default function LoginScreen({ onLogin }) {
@@ -80,18 +89,71 @@ export default function LoginScreen({ onLogin }) {
 
   const changingPassword = !!pendingUser;
 
+  const filteredUsers = useMemo(() => {
+    const q = selectedName.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((name) => String(name).toLowerCase().includes(q));
+  }, [users, selectedName]);
+
+  const blurCloseTimerRef = useRef(null);
+
+  const openNameList = () => {
+    if (blurCloseTimerRef.current) {
+      clearTimeout(blurCloseTimerRef.current);
+      blurCloseTimerRef.current = null;
+    }
+    setMenuOpen(true);
+  };
+
+  const scheduleCloseNameList = () => {
+    if (blurCloseTimerRef.current) clearTimeout(blurCloseTimerRef.current);
+    // Delay so a name-row press can register before the list unmounts.
+    blurCloseTimerRef.current = setTimeout(() => {
+      setMenuOpen(false);
+      blurCloseTimerRef.current = null;
+    }, 180);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (blurCloseTimerRef.current) clearTimeout(blurCloseTimerRef.current);
+    };
+  }, []);
+
+  const pickName = (name) => {
+    if (blurCloseTimerRef.current) {
+      clearTimeout(blurCloseTimerRef.current);
+      blurCloseTimerRef.current = null;
+    }
+    setSelectedName(name);
+    setMenuOpen(false);
+  };
+
   const handleTrackerPress = () => {
     if (changingPassword) return;
     const now = Date.now();
     if (now - lastTrackerTapRef.current < TRACKER_DOUBLE_TAP_MS) {
       lastTrackerTapRef.current = 0;
-      setAdminGate(true);
-      setSelectedName("");
-      setPassword("");
-      setMenuOpen(false);
+      openAdminGateFromTracker(
+        setAdminGate,
+        setSelectedName,
+        setPassword,
+        setMenuOpen,
+      );
       return;
     }
     lastTrackerTapRef.current = now;
+  };
+
+  const handleTrackerDoubleClick = () => {
+    if (changingPassword) return;
+    lastTrackerTapRef.current = 0;
+    openAdminGateFromTracker(
+      setAdminGate,
+      setSelectedName,
+      setPassword,
+      setMenuOpen,
+    );
   };
 
   const submit = async () => {
@@ -102,7 +164,7 @@ export default function LoginScreen({ onLogin }) {
       showToast({
         type: "error",
         title: "User required",
-        message: "Select your name from the list.",
+        message: "Select or type your name from the list.",
       });
       return;
     }
@@ -219,18 +281,31 @@ export default function LoginScreen({ onLogin }) {
         duration={360}
         style={isDesktop ? styles.webWrapper : undefined}
       >
-        <ShakeView trigger={shakeTick}>
-          <Card style={[styles.card, isDesktop && styles.webCard]}>
-            <Card.Content>
+        <ShakeView trigger={shakeTick} clip={!menuOpen}>
+          <Card
+            style={[
+              styles.card,
+              isDesktop && styles.webCard,
+              menuOpen && styles.cardMenuOpen,
+            ]}
+            mode="elevated"
+          >
+            <Card.Content
+              style={menuOpen ? styles.cardContentMenuOpen : undefined}
+            >
               <View style={styles.titleRow}>
                 <AppText variant="pageTitle" style={styles.title}>
                   Paint Inventory{" "}
                 </AppText>
                 <Pressable
                   onPress={handleTrackerPress}
-                  hitSlop={8}
-                  accessibilityRole="text"
+                  {...(Platform.OS === "web"
+                    ? { onDoubleClick: handleTrackerDoubleClick }
+                    : {})}
+                  hitSlop={{ top: 16, bottom: 16, left: 8, right: 16 }}
+                  accessibilityRole="button"
                   accessibilityLabel="Tracker"
+                  style={styles.trackerHit}
                 >
                   <AppText variant="pageTitle" style={styles.title}>
                     Tracker
@@ -336,36 +411,100 @@ export default function LoginScreen({ onLogin }) {
                       <ActivityIndicator />
                     </View>
                   ) : (
-                    <Menu
-                      visible={menuOpen}
-                      onDismiss={() => setMenuOpen(false)}
-                      anchor={
-                        <Pressable onPress={() => setMenuOpen(true)}>
-                          <TextInput
-                            label="Name"
-                            value={selectedName}
-                            mode="outlined"
-                            editable={false}
-                            pointerEvents="none"
-                            style={styles.input}
-                            right={<TextInput.Icon icon="menu-down" />}
-                            error={shakeTick > 0 && !selectedName.trim()}
+                    <View style={styles.nameFieldWrap}>
+                      <TextInput
+                        label="Name"
+                        value={selectedName}
+                        onChangeText={(t) => {
+                          setSelectedName(t);
+                          setMenuOpen(true);
+                        }}
+                        onFocus={openNameList}
+                        onBlur={scheduleCloseNameList}
+                        mode="outlined"
+                        autoCapitalize="words"
+                        autoCorrect={false}
+                        style={styles.nameInput}
+                        right={
+                          <TextInput.Icon
+                            icon={menuOpen ? "menu-up" : "menu-down"}
+                            onPress={() => {
+                              if (menuOpen) {
+                                setMenuOpen(false);
+                              } else {
+                                openNameList();
+                              }
+                            }}
                           />
-                        </Pressable>
-                      }
-                      style={styles.menu}
-                    >
-                      {users.map((name) => (
-                        <Menu.Item
-                          key={name}
-                          onPress={() => {
-                            setSelectedName(name);
-                            setMenuOpen(false);
-                          }}
-                          title={name}
-                        />
-                      ))}
-                    </Menu>
+                        }
+                        error={shakeTick > 0 && !selectedName.trim()}
+                      />
+                      {menuOpen ? (
+                        <View
+                          style={[
+                            styles.nameList,
+                            {
+                              backgroundColor: theme.dark
+                                ? colors.dark.nested
+                                : colors.light.elevatedHigh,
+                              borderColor: theme.dark
+                                ? colors.dark.border
+                                : colors.light.border,
+                            },
+                          ]}
+                        >
+                          <ScrollFrame
+                            maxHeight={NAME_LIST_MAX_HEIGHT}
+                            bordered={false}
+                            nested={false}
+                            fadeColor={
+                              theme.dark
+                                ? colors.dark.nested
+                                : colors.light.elevatedHigh
+                            }
+                            style={styles.nameListScroll}
+                          >
+                            {filteredUsers.length === 0 ? (
+                              <Text
+                                style={[
+                                  styles.nameListEmpty,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                {selectedName.trim()
+                                  ? "No matching names"
+                                  : "No users"}
+                              </Text>
+                            ) : (
+                              filteredUsers.map((name) => (
+                                <Pressable
+                                  key={name}
+                                  onPress={() => pickName(name)}
+                                  style={({ pressed }) => [
+                                    styles.nameRow,
+                                    pressed && {
+                                      backgroundColor: theme.dark
+                                        ? "rgba(255,255,255,0.08)"
+                                        : "rgba(0,0,0,0.06)",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.nameRowText,
+                                      { color: theme.colors.onSurface },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {name}
+                                  </Text>
+                                </Pressable>
+                              ))
+                            )}
+                          </ScrollFrame>
+                        </View>
+                      ) : null}
+                    </View>
                   )}
 
                   <TextInput
@@ -418,9 +557,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.light.background,
     justifyContent: "center",
     padding: space[8],
+    overflow: "visible",
   },
   card: {
     elevation: 4,
+    overflow: "visible",
+  },
+  cardMenuOpen: {
+    zIndex: 10,
+    overflow: "visible",
+  },
+  cardContentMenuOpen: {
+    overflow: "visible",
+    zIndex: 10,
   },
   titleRow: {
     flexDirection: "row",
@@ -428,6 +577,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: space[2],
+  },
+  trackerHit: {
+    paddingVertical: 10,
+    paddingLeft: 0,
+    paddingRight: 8,
+    marginVertical: -10,
+    ...(Platform.OS === "web" ? { cursor: "default" } : null),
   },
   title: {
     marginBottom: 0,
@@ -450,6 +606,7 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     alignSelf: "center",
+    overflow: "visible",
   },
   webCard: {
     width: "100%",
@@ -458,8 +615,52 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     alignItems: "center",
   },
-  menu: {
-    marginTop: 48,
+  nameFieldWrap: {
+    position: "relative",
+    zIndex: 20,
+    marginBottom: space[4],
+  },
+  nameInput: {
+    marginBottom: 0,
+  },
+  nameList: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: "100%",
+    marginTop: 4,
+    zIndex: 30,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    ...(Platform.OS === "web"
+      ? {
+          boxShadow: "0 8px 20px rgba(0,0,0,0.22)",
+        }
+      : {
+          elevation: 8,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
+        }),
+  },
+  nameListScroll: {
+    maxWidth: "100%",
+  },
+  nameListEmpty: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    fontSize: 14,
+  },
+  nameRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(128,128,128,0.25)",
+  },
+  nameRowText: {
+    fontSize: 16,
   },
   hint: {
     marginTop: 14,

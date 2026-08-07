@@ -19,6 +19,7 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
+import ItemAdvancedFields from "../components/ItemAdvancedFields";
 import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
 import showAlert from "../utils/showAlert";
@@ -159,10 +160,24 @@ export default function ItemDetailScreen({
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [poCategory, setPoCategory] = useState("mixing");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [unitLabel, setUnitLabel] = useState("");
+  const [catalystPercentInput, setCatalystPercentInput] = useState("");
   const isCustomType = CUSTOM_TYPES.includes(type);
   const recycleDueDisplay =
     formatDateDisplay(item?.recycle_date) ||
     formatRecycleDueFromLotDate(lotDateInput);
+  const unitAffix = unitLabel.trim() || "gal";
+  const advancedToggle = (
+    <Button
+      mode={advancedOpen ? "contained" : "outlined"}
+      compact
+      icon="tune"
+      onPress={() => setAdvancedOpen((o) => !o)}
+    >
+      Advanced
+    </Button>
+  );
 
   const normalizeHex = (raw) => {
     const s = String(raw).trim().replace(/^#/, "");
@@ -214,6 +229,18 @@ export default function ItemDetailScreen({
   useEffect(() => {
     setRexInput(item?.rex != null ? String(item.rex) : "");
   }, [item?.id, item?.rex]);
+
+  useEffect(() => {
+    setUnitLabel(item?.unit_label != null ? String(item.unit_label) : "");
+  }, [item?.id, item?.unit_label]);
+
+  useEffect(() => {
+    setCatalystPercentInput(
+      item?.catalyst_percent != null && item?.catalyst_percent !== ""
+        ? String(item.catalyst_percent)
+        : "",
+    );
+  }, [item?.id, item?.catalyst_percent]);
 
   useEffect(() => {
     setFieldErrors({});
@@ -356,6 +383,17 @@ export default function ItemDetailScreen({
     }
     qtyVal = qtyParsed.value;
 
+    let catalystPercentVal = null;
+    const catRaw = catalystPercentInput.trim();
+    if (catRaw !== "") {
+      const n = parseFloat(catRaw);
+      if (isNaN(n) || n < 0) {
+        showAlert("Invalid", "Catalyst % must be 0 or greater.");
+        return;
+      }
+      catalystPercentVal = n;
+    }
+
     const updatedItem = {
       ...item,
       id: trimmedId || item?.id,
@@ -372,6 +410,8 @@ export default function ItemDetailScreen({
       lot_date: lotDateVal,
       external_code: externalCodeVal,
       rex: rexVal,
+      unit_label: unitLabel.trim() || null,
+      catalyst_percent: catalystPercentVal,
       is_mixing: poCategory !== "ap",
       po_label_ap: poCategory === "ap",
       po_label_mixing: poCategory !== "ap",
@@ -438,10 +478,12 @@ export default function ItemDetailScreen({
       keyboardType={allowsHalfGallon(type) ? "decimal-pad" : "number-pad"}
       style={inputStyle}
       dense={isWideDesktop}
-      right={<TextInput.Affix text="gal" />}
+      right={<TextInput.Affix text={unitAffix} />}
     />
   ) : (
-    <ReadOnlyValue>{formatGallonQuantity(quantity)} gal</ReadOnlyValue>
+    <ReadOnlyValue>
+      {formatGallonQuantity(quantity)} {unitAffix}
+    </ReadOnlyValue>
   );
 
   const colorSection = isAdmin ? (
@@ -635,6 +677,9 @@ export default function ItemDetailScreen({
         >
           Delete Item
         </Button>
+      )}
+      {isWideDesktop && isAdmin && (
+        <View style={styles.advancedDesktopSlot}>{advancedToggle}</View>
       )}
     </View>
   );
@@ -911,6 +956,7 @@ export default function ItemDetailScreen({
             title="Item Details"
             onBack={onBack}
             embeddedInShell={embeddedInShell}
+            actions={!isWideDesktop && isAdmin ? advancedToggle : null}
           />
           <Card
             style={[
@@ -1103,6 +1149,17 @@ export default function ItemDetailScreen({
 
                   {recycleBlock}
                   {lastScannedLine}
+                  {isAdmin && (
+                    <ItemAdvancedFields
+                      visible={advancedOpen}
+                      unitLabel={unitLabel}
+                      onUnitLabelChange={setUnitLabel}
+                      catalystPercent={catalystPercentInput}
+                      onCatalystPercentChange={setCatalystPercentInput}
+                      materialType={type}
+                      dense
+                    />
+                  )}
                   {actionButtons}
                 </>
               ) : (
@@ -1242,6 +1299,16 @@ export default function ItemDetailScreen({
                   {colorSection}
                   {recycleBlock}
                   {lastScannedLine}
+                  {isAdmin && (
+                    <ItemAdvancedFields
+                      visible={advancedOpen}
+                      unitLabel={unitLabel}
+                      onUnitLabelChange={setUnitLabel}
+                      catalystPercent={catalystPercentInput}
+                      onCatalystPercentChange={setCatalystPercentInput}
+                      materialType={type}
+                    />
+                  )}
                   {actionButtons}
                 </>
               )}
@@ -1436,5 +1503,8 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     flexWrap: "wrap",
     alignItems: "center",
+  },
+  advancedDesktopSlot: {
+    marginLeft: "auto",
   },
 });

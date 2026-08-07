@@ -29,6 +29,9 @@ export default function AppShell({
   showPersistentSidebar = true,
   title = "Dashboard",
   userName,
+  isAdmin = false,
+  previewStandardView = false,
+  onTogglePreviewStandardView,
   drawerOpen = false,
   onOpenDrawer,
   onCloseDrawer,
@@ -181,6 +184,9 @@ export default function AppShell({
       <View style={styles.topActionSlot}>
         <UserMenuAvatar
           userName={userName}
+          isAdmin={isAdmin || previewStandardView}
+          previewStandardView={previewStandardView}
+          onTogglePreviewStandardView={onTogglePreviewStandardView}
           onOpenSettings={onOpenSettings}
           onSignOut={onSignOut}
         />

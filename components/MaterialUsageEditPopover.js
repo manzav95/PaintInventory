@@ -23,6 +23,17 @@ import { space, radius } from "../theme/tokens";
 
 const PANEL_WIDTH = 380;
 
+/** Capitalize the first letter of each whitespace-separated word. */
+function titleCaseWords(text) {
+  return String(text ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
+
 /**
  * Bell/settings-style caret popup for editing a material-usage log row.
  */
@@ -97,12 +108,12 @@ export default function MaterialUsageEditPopover({
   };
 
   const handleSave = () => {
-    const job = (jobName || "").trim();
+    const job = titleCaseWords(jobName || "");
     if (!job && !jobOptional) {
       setError("Job number is required for this booth.");
       return;
     }
-    const mat = (material || "").trim();
+    const mat = titleCaseWords(material || "");
     if (!mat) {
       setError("Enter a material / color name.");
       return;
@@ -123,9 +134,8 @@ export default function MaterialUsageEditPopover({
     let qtyGallons = rawQty;
     if (cupGun) {
       qtyGallons = rawQty / 128;
-    } else {
-      qtyGallons = Math.round(rawQty * 4) / 4;
     }
+    // Exact gallons as entered (no 0.25 snap)
     setError("");
     onSave?.({
       entry_date: entryDate,
@@ -368,29 +378,30 @@ const styles = StyleSheet.create({
     borderRightColor: "transparent",
   },
   panel: {
-    borderRadius: radius.md,
+    borderRadius: radius.md + 2,
     borderWidth: 1,
     overflow: "hidden",
     ...(Platform.OS === "web"
-      ? { boxShadow: "0 8px 28px rgba(0,0,0,0.18)" }
+      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
       : {
           elevation: 8,
           shadowColor: "#000",
-          shadowOpacity: 0.2,
-          shadowRadius: 12,
+          shadowOpacity: 0.22,
+          shadowRadius: 10,
           shadowOffset: { width: 0, height: 4 },
         }),
   },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingLeft: space[3],
+    paddingLeft: space[5],
     paddingRight: 2,
-    paddingTop: 4,
+    paddingTop: space[2],
+    minHeight: 36,
   },
   title: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "700",
   },
   closeBtn: {
@@ -398,20 +409,21 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: 12,
-    paddingHorizontal: space[3],
-    marginBottom: 6,
+    paddingHorizontal: space[5],
+    marginBottom: space[2],
+    lineHeight: 16,
   },
   scroll: {
     maxHeight: 360,
   },
   scrollContent: {
-    paddingHorizontal: space[3],
+    paddingHorizontal: space[5],
     paddingBottom: space[2],
-    gap: 10,
+    gap: space[3],
   },
   row: {
     flexDirection: "row",
-    gap: 8,
+    gap: space[2],
   },
   half: {
     flex: 1,
@@ -439,8 +451,8 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    gap: 8,
-    paddingHorizontal: space[3],
+    gap: space[2],
+    paddingHorizontal: space[5],
     paddingVertical: space[3],
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(128,128,128,0.3)",

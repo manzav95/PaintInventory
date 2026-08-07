@@ -72,7 +72,7 @@ export const MATERIAL_USAGE_FORM_HELP = {
       bullets: [
         "Normal mode: quantity in gallons (snaps to 0.25 gal steps).",
         "Cup gun: check “Cup gun?” and enter ounces instead.",
-        "Paint / clear / primer show catalyst at 4% automatically — confirm when prompted.",
+        "Paint uses 3.9% catalyst (~5 oz/gal); clear/primer use 4%. Confirm when prompted. Custom items can override % in Advanced.",
         "Your entry shows in today’s log (admins see more history and filters).",
       ],
     },

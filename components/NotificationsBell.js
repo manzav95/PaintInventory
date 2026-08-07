@@ -27,7 +27,7 @@ import NotificationService from "../services/notificationService";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { NOTIFICATION_BADGE_RED } from "../utils/themeColors";
 import { isRecycleDue, getLowStockItems } from "../utils/inventoryAlerts";
-import { colors } from "../theme/tokens";
+import { colors, space } from "../theme/tokens";
 import {
   getDismissedIdsToday,
   dismissAlertsForToday,
@@ -593,9 +593,9 @@ const styles = StyleSheet.create({
   panel: {
     borderRadius: 10,
     borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: space[5],
+    paddingTop: space[2],
+    paddingBottom: space[4],
     width: "100%",
     overflow: "hidden",
     ...(Platform.OS === "web"
@@ -615,8 +615,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 2,
+    marginBottom: space[1],
     marginRight: -4,
+    minHeight: 36,
   },
   closeBtn: {
     margin: 0,
@@ -628,9 +629,9 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     fontSize: 12,
-    marginBottom: 12,
+    marginBottom: space[4],
     lineHeight: 16,
-    paddingRight: 8,
+    paddingRight: space[2],
   },
   loadingRow: {
     flexDirection: "row",

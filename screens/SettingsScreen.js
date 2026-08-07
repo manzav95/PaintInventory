@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   Platform,
   useWindowDimensions,
   Alert,
+  Pressable,
 } from "react-native";
 import {
   Text,
@@ -15,40 +16,70 @@ import {
   useTheme,
   TextInput,
   ActivityIndicator,
+  SegmentedButtons,
+  Menu,
 } from "react-native-paper";
-import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
 import version from "../version";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import InventoryService from "../services/inventoryService";
 import UserService from "../services/userService";
+import MaterialUsageService from "../services/materialUsageService";
 import LoginHistoryModal from "../components/LoginHistoryModal";
 import { AppSurface, AppText } from "../components/ui";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
+import confirmAction from "../utils/confirmAction";
 
-function confirmAction(title, message, { confirmLabel = "Confirm", destructive = false } = {}) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
-  }
-  return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: destructive ? "destructive" : "default",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function formatGal(n) {
+  const v = Number(n) || 0;
+  return `${v.toFixed(2)} gal`;
 }
 
-function formatDateForInput(d) {
-  const date = d instanceof Date ? d : new Date(d);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function formatMonthLabel(ym, totalGal) {
+  const [y, m] = String(ym || "").split("-");
+  const monthIdx = Math.max(0, (parseInt(m, 10) || 1) - 1);
+  const name = MONTH_NAMES[monthIdx] || ym;
+  return `${name} ${y} · ${formatGal(totalGal)}`;
+}
+
+function formatYearLabel(year, totalGal) {
+  return `${year} · ${formatGal(totalGal)}`;
+}
+
+/** Inclusive YYYY-MM-DD range for a calendar month key (YYYY-MM). */
+function rangeForMonth(ym) {
+  const [ys, ms] = String(ym || "").split("-");
+  const y = parseInt(ys, 10);
+  const m = parseInt(ms, 10);
+  if (!y || !m || m < 1 || m > 12) return null;
+  const last = new Date(y, m, 0).getDate();
+  return {
+    from: `${ys}-${ms}-01`,
+    to: `${ys}-${ms}-${String(last).padStart(2, "0")}`,
+  };
+}
+
+/** Inclusive YYYY-MM-DD range for a calendar year. */
+function rangeForYear(year) {
+  const y = String(year || "").trim();
+  if (!/^\d{4}$/.test(y)) return null;
+  return { from: `${y}-01-01`, to: `${y}-12-31` };
 }
 
 export default function SettingsScreen({
@@ -68,12 +99,14 @@ export default function SettingsScreen({
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
-  const [exportFromDate, setExportFromDate] = useState(() =>
-    formatDateForInput(new Date()),
-  );
-  const [exportToDate, setExportToDate] = useState(() =>
-    formatDateForInput(new Date()),
-  );
+  const [exportTab, setExportTab] = useState("month");
+  const [exportMonths, setExportMonths] = useState([]);
+  const [exportYears, setExportYears] = useState([]);
+  const [exportPeriodsLoading, setExportPeriodsLoading] = useState(false);
+  const [selectedMonthKey, setSelectedMonthKey] = useState("");
+  const [selectedYearKey, setSelectedYearKey] = useState("");
+  const [monthMenuOpen, setMonthMenuOpen] = useState(false);
+  const [yearMenuOpen, setYearMenuOpen] = useState(false);
   const [paintSuffix, setPaintSuffix] = useState("");
   const [savingSuffix, setSavingSuffix] = useState(false);
   const [loginHistoryOpen, setLoginHistoryOpen] = useState(false);
@@ -95,6 +128,87 @@ export default function SettingsScreen({
     }
   };
 
+  const loadExportPeriods = async () => {
+    if (!isAdmin) return;
+    setExportPeriodsLoading(true);
+    try {
+      let months = [];
+      let years = [];
+      try {
+        const data = await MaterialUsageService.getExportPeriods();
+        months = Array.isArray(data?.months) ? data.months : [];
+        years = Array.isArray(data?.years) ? data.years : [];
+      } catch (apiErr) {
+        // Older servers / failed route — derive from recent usage rows.
+        console.warn(
+          "export-periods API unavailable, falling back to usage list:",
+          apiErr?.message || apiErr,
+        );
+        const rows = await MaterialUsageService.list(null, 2000, {
+          excludeAdmin: true,
+        });
+        const monthMap = new Map();
+        const yearMap = new Map();
+        for (const row of rows || []) {
+          const d = String(row.entry_date || "").trim();
+          if (!/^\d{4}-\d{2}-\d{2}/.test(d)) continue;
+          const mk = d.slice(0, 7);
+          const yk = d.slice(0, 4);
+          const gal = Number(row.qty_gallons) || 0;
+          const m = monthMap.get(mk) || { key: mk, entryCount: 0, totalGal: 0 };
+          m.entryCount += 1;
+          m.totalGal += gal;
+          monthMap.set(mk, m);
+          const y = yearMap.get(yk) || { key: yk, entryCount: 0, totalGal: 0 };
+          y.entryCount += 1;
+          y.totalGal += gal;
+          yearMap.set(yk, y);
+        }
+        months = [...monthMap.values()]
+          .map((m) => ({
+            ...m,
+            totalGal: Math.round(m.totalGal * 100) / 100,
+          }))
+          .sort((a, b) => b.key.localeCompare(a.key));
+        years = [...yearMap.values()]
+          .map((y) => ({
+            ...y,
+            totalGal: Math.round(y.totalGal * 100) / 100,
+          }))
+          .sort((a, b) => b.key.localeCompare(a.key));
+      }
+
+      setExportMonths(months);
+      setExportYears(years);
+
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const currentYear = String(now.getFullYear());
+
+      setSelectedMonthKey((prev) => {
+        if (prev && months.some((m) => m.key === prev)) return prev;
+        if (months.some((m) => m.key === currentMonth)) return currentMonth;
+        return months[0]?.key || "";
+      });
+      setSelectedYearKey((prev) => {
+        if (prev && years.some((y) => y.key === prev)) return prev;
+        if (years.some((y) => y.key === currentYear)) return currentYear;
+        return years[0]?.key || "";
+      });
+    } catch (e) {
+      console.error("Load export periods error:", e);
+      setExportMonths([]);
+      setExportYears([]);
+      showToast({
+        type: "error",
+        title: "Could not load export periods",
+        message: e?.message || "Try refreshing Settings.",
+      });
+    } finally {
+      setExportPeriodsLoading(false);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -108,7 +222,46 @@ export default function SettingsScreen({
 
   useEffect(() => {
     loadUsers();
+    loadExportPeriods();
   }, [isAdmin]);
+
+  const selectedMonthLabel = useMemo(() => {
+    const row = exportMonths.find((m) => m.key === selectedMonthKey);
+    if (!row) return "Select month";
+    return formatMonthLabel(row.key, row.totalGal);
+  }, [exportMonths, selectedMonthKey]);
+
+  const selectedYearLabel = useMemo(() => {
+    const row = exportYears.find((y) => y.key === selectedYearKey);
+    if (!row) return "Select year";
+    return formatYearLabel(row.key, row.totalGal);
+  }, [exportYears, selectedYearKey]);
+
+  const handleExportMaterialUsage = () => {
+    if (exportTab === "month") {
+      const range = rangeForMonth(selectedMonthKey);
+      if (!range) {
+        showToast({
+          type: "error",
+          title: "Select a month",
+          message: "Choose a month that has material usage to export.",
+        });
+        return;
+      }
+      onExportMaterialUsageExcel?.(range.from, range.to);
+      return;
+    }
+    const range = rangeForYear(selectedYearKey);
+    if (!range) {
+      showToast({
+        type: "error",
+        title: "Select a year",
+        message: "Choose a year that has material usage to export.",
+      });
+      return;
+    }
+    onExportMaterialUsageExcel?.(range.from, range.to);
+  };
 
   const handleCreateUser = async () => {
     const name = newUserName.trim();
@@ -411,27 +564,100 @@ export default function SettingsScreen({
                 ]}
               />
               <AppText variant="caption" tone="muted" style={styles.blockHint}>
-                Export Material Usage log to Excel (choose date range)
+                Export Material Usage to Excel — by month or by year (only
+                periods with logged quantity are listed).
               </AppText>
-              <DateField
-                label="From date"
-                value={exportFromDate}
-                onChange={setExportFromDate}
-                style={styles.adminInput}
+              <SegmentedButtons
+                value={exportTab}
+                onValueChange={setExportTab}
+                style={styles.exportTabs}
+                buttons={[
+                  { value: "month", label: "Month" },
+                  { value: "year", label: "Year" },
+                ]}
               />
-              <DateField
-                label="To date"
-                value={exportToDate}
-                onChange={setExportToDate}
-                style={styles.adminInput}
-              />
+              {exportPeriodsLoading ? (
+                <ActivityIndicator style={{ marginVertical: 12 }} />
+              ) : exportTab === "month" ? (
+                <Menu
+                  visible={monthMenuOpen}
+                  onDismiss={() => setMonthMenuOpen(false)}
+                  anchor={
+                    <Pressable onPress={() => setMonthMenuOpen(true)}>
+                      <TextInput
+                        label="Month"
+                        value={selectedMonthLabel}
+                        mode="outlined"
+                        editable={false}
+                        pointerEvents="none"
+                        style={styles.adminInput}
+                        right={<TextInput.Icon icon="menu-down" />}
+                      />
+                    </Pressable>
+                  }
+                  contentStyle={styles.exportMenuContent}
+                >
+                  {exportMonths.length === 0 ? (
+                    <Menu.Item disabled title="No months with usage yet" />
+                  ) : (
+                    exportMonths.map((m) => (
+                      <Menu.Item
+                        key={m.key}
+                        onPress={() => {
+                          setSelectedMonthKey(m.key);
+                          setMonthMenuOpen(false);
+                        }}
+                        title={formatMonthLabel(m.key, m.totalGal)}
+                      />
+                    ))
+                  )}
+                </Menu>
+              ) : (
+                <Menu
+                  visible={yearMenuOpen}
+                  onDismiss={() => setYearMenuOpen(false)}
+                  anchor={
+                    <Pressable onPress={() => setYearMenuOpen(true)}>
+                      <TextInput
+                        label="Year"
+                        value={selectedYearLabel}
+                        mode="outlined"
+                        editable={false}
+                        pointerEvents="none"
+                        style={styles.adminInput}
+                        right={<TextInput.Icon icon="menu-down" />}
+                      />
+                    </Pressable>
+                  }
+                  contentStyle={styles.exportMenuContent}
+                >
+                  {exportYears.length === 0 ? (
+                    <Menu.Item disabled title="No years with usage yet" />
+                  ) : (
+                    exportYears.map((y) => (
+                      <Menu.Item
+                        key={y.key}
+                        onPress={() => {
+                          setSelectedYearKey(y.key);
+                          setYearMenuOpen(false);
+                        }}
+                        title={formatYearLabel(y.key, y.totalGal)}
+                      />
+                    ))
+                  )}
+                </Menu>
+              )}
               <Button
                 mode="outlined"
-                onPress={() =>
-                  onExportMaterialUsageExcel?.(exportFromDate, exportToDate)
-                }
+                onPress={handleExportMaterialUsage}
                 style={styles.adminButton}
                 icon="file-excel"
+                disabled={
+                  exportPeriodsLoading ||
+                  (exportTab === "month"
+                    ? !selectedMonthKey
+                    : !selectedYearKey)
+                }
               >
                 Export Material Usage to Excel
               </Button>
@@ -588,6 +814,12 @@ const styles = StyleSheet.create({
   adminInput: {
     marginTop: space[2],
     marginBottom: space[3],
+  },
+  exportTabs: {
+    marginBottom: space[2],
+  },
+  exportMenuContent: {
+    maxHeight: 280,
   },
   adminButton: {
     marginTop: space[2],

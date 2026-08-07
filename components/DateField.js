@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import {
   Modal,
   Platform,
@@ -39,7 +39,8 @@ function formatMdy(value) {
 
 /**
  * Outlined date field that matches Paper TextInput chrome.
- * Web: full-size transparent native date input over the field (works on mobile Safari).
+ * Web: full-size transparent native date input over the field (direct tap —
+ * required for mobile Safari/Chrome; showPicker from a Pressable is blocked).
  * Native: system / modal picker.
  */
 
@@ -51,9 +52,8 @@ const webOverlayInputStyle = {
   bottom: 0,
   width: "100%",
   height: "100%",
-  // Not fully 0 — iOS Safari ignores taps on opacity:0 controls.
-  opacity: 0.011,
-  zIndex: 5,
+  opacity: 0,
+  zIndex: 10,
   border: "none",
   padding: 0,
   margin: 0,
@@ -63,6 +63,8 @@ const webOverlayInputStyle = {
   backgroundColor: "transparent",
   WebkitAppearance: "none",
   appearance: "none",
+  // Ensure the control receives taps on mobile web (RN Pressable must not sit above).
+  pointerEvents: "auto",
 };
 
 export default function DateField({
@@ -79,6 +81,7 @@ export default function DateField({
   const [show, setShow] = useState(false);
   const [draft, setDraft] = useState(() => parseYmd(value) || new Date());
   const theme = useTheme();
+  const webInputRef = useRef(null);
 
   const nativeDate = useMemo(() => parseYmd(value) || new Date(), [value]);
   const display = formatMdy(value);
@@ -141,6 +144,7 @@ export default function DateField({
 
       {isWeb ? (
         <input
+          ref={webInputRef}
           type="date"
           value={String(value ?? "")}
           disabled={disabled}

@@ -20,6 +20,8 @@ import {
 } from "../utils/gallonQuantity";
 import ScrollFrame from "../components/ScrollFrame";
 import { colors, fontFamily } from "../theme/tokens";
+import showAlertUtil from "../utils/showAlert";
+import showToast from "../utils/showToast";
 
 const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
 
@@ -108,6 +110,11 @@ export default function CheckInOutScreen({
   const itemType = String(item?.type || "")
     .toLowerCase()
     .trim();
+  const unitWord =
+    (item?.unit_label && String(item.unit_label).trim()) || "gallons";
+  const unitAffix =
+    (item?.unit_label && String(item.unit_label).trim()) || "gal";
+  const currentStock = Number(item?.quantity) || 0;
   const isCustomColor = CUSTOM_COLOR_TYPES.has(itemType);
   const showRecycleButton = isAdmin && onRecyclePaint && isCustomColor;
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
@@ -152,15 +159,13 @@ export default function CheckInOutScreen({
   }, [action, showRecycleButton]);
 
   const showAlert = (title, message) => {
-    if (
-      Platform.OS === "web" &&
-      typeof window !== "undefined" &&
-      window.alert
-    ) {
-      window.alert(message ? `${title}\n\n${message}` : title);
-    } else {
-      Alert.alert(title, message);
-    }
+    showAlertUtil(title, message);
+    showToast({
+      type: "error",
+      title: String(title || "Error"),
+      message: String(message || ""),
+      duration: 4500,
+    });
   };
 
   const handleSubmit = () => {
@@ -184,7 +189,7 @@ export default function CheckInOutScreen({
       if (qty > currentQty) {
         showAlert(
           `Cannot ${label}`,
-          `Only ${currentQty} gallon${currentQty !== 1 ? "s" : ""} available. You cannot ${label} ${qty} gallons.`,
+          `Only ${formatGallonQuantity(currentQty)} gallon${currentQty !== 1 ? "s" : ""} available. You cannot ${label} ${formatGallonQuantity(qty)} gallons.`,
         );
         return;
       }
@@ -196,6 +201,11 @@ export default function CheckInOutScreen({
       onCheckOut(qty);
     } else if (action === "recycle") {
       onRecyclePaint?.(qty);
+    } else {
+      showAlert(
+        "Choose an action",
+        "Select Check In or Check Out before submitting.",
+      );
     }
   };
 
@@ -333,7 +343,8 @@ export default function CheckInOutScreen({
               },
             ]}
           >
-            Current Quantity: {formatGallonQuantity(item.quantity || 0)} gallons
+            Current Quantity: {formatGallonQuantity(item.quantity || 0)}{" "}
+            {unitWord}
           </Text>
         </View>
 
@@ -356,20 +367,43 @@ export default function CheckInOutScreen({
                   onPress={handleCheckInPress}
                   style={[
                     styles.actionButton,
+                    { borderColor: colors.action.checkIn },
                     action === "in" && styles.selectedButton,
                   ]}
-                  icon="arrow-down"
+                  buttonColor={
+                    action === "in" ? colors.action.checkIn : undefined
+                  }
+                  textColor={
+                    action === "in" ? "#1b5e20" : colors.action.checkIn
+                  }
+                  icon="arrow-up"
                 >
                   Check In
                 </Button>
                 <Button
                   mode={action === "out" ? "contained" : "outlined"}
-                  onPress={() => setAction("out")}
+                  onPress={() => {
+                    if (currentStock <= 0) {
+                      showAlert(
+                        "Cannot check out",
+                        `This item currently has 0 ${unitWord} available to check out.`,
+                      );
+                      return;
+                    }
+                    setAction("out");
+                  }}
                   style={[
                     styles.actionButton,
+                    { borderColor: colors.action.checkOut },
                     action === "out" && styles.selectedButton,
                   ]}
-                  icon="arrow-up"
+                  buttonColor={
+                    action === "out" ? colors.action.checkOut : undefined
+                  }
+                  textColor={
+                    action === "out" ? "#b71c1c" : colors.action.checkOut
+                  }
+                  icon="arrow-down"
                 >
                   Check Out
                 </Button>
@@ -446,8 +480,19 @@ export default function CheckInOutScreen({
                     mode="outlined"
                     keyboardType="decimal-pad"
                     style={styles.input}
-                    right={<TextInput.Affix text="gal" />}
+                    right={<TextInput.Affix text={unitAffix} />}
                   />
+                  {(action === "out" || action === "recycle") &&
+                  currentStock <= 0 ? (
+                    <Text
+                      style={[
+                        styles.stockWarning,
+                        { color: theme.colors.error },
+                      ]}
+                    >
+                      No {unitWord} available to {action === "recycle" ? "recycle" : "check out"}.
+                    </Text>
+                  ) : null}
                   <View style={styles.submitRow}>
                     <Button
                       mode="outlined"
@@ -460,7 +505,12 @@ export default function CheckInOutScreen({
                       mode="contained"
                       onPress={handleSubmit}
                       style={styles.button}
-                      disabled={!quantity || parseFloat(quantity) <= 0}
+                      disabled={
+                        !quantity ||
+                        parseFloat(quantity) <= 0 ||
+                        ((action === "out" || action === "recycle") &&
+                          currentStock <= 0)
+                      }
                       buttonColor={
                         action === "recycle" ? colors.action.receive : undefined
                       }
@@ -647,7 +697,7 @@ export default function CheckInOutScreen({
                   onChangeText={setReceiveQty}
                   mode="outlined"
                   keyboardType="number-pad"
-                  style={styles.input}
+                  style={styles.receiveInput}
                 />
                 <View style={styles.modalActions}>
                   <Button
@@ -737,6 +787,11 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: 20,
   },
+  stockWarning: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
   quickQtyWrap: {
     marginBottom: 12,
   },
@@ -781,24 +836,29 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 400,
     borderRadius: 12,
-    padding: 20,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
     maxHeight: "80%",
+    gap: 0,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 8,
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 4,
   },
   modalSubtitle: {
     fontSize: 13,
-    marginBottom: 16,
+    marginBottom: 12,
+    lineHeight: 18,
   },
   poList: {
     maxHeight: 200,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   poRow: {
-    padding: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
     marginBottom: 8,
@@ -815,6 +875,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12,
     justifyContent: "flex-end",
+    marginTop: 8,
   },
   promptActions: {
     gap: 10,
@@ -822,5 +883,9 @@ const styles = StyleSheet.create({
   },
   promptPrimaryBtn: {
     marginBottom: 4,
+  },
+  receiveInput: {
+    marginBottom: 12,
+    marginTop: 4,
   },
 });

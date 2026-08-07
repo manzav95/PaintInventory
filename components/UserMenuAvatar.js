@@ -16,6 +16,9 @@ export default function UserMenuAvatar({
   userName,
   onOpenSettings,
   onSignOut,
+  isAdmin = false,
+  previewStandardView = false,
+  onTogglePreviewStandardView,
   size = 28,
 }) {
   const theme = useTheme();
@@ -159,6 +162,30 @@ export default function UserMenuAvatar({
                 Settings
               </Text>
             </Pressable>
+            {isAdmin && onTogglePreviewStandardView ? (
+              <Pressable
+                style={({ hovered, pressed }) => [
+                  styles.item,
+                  (hovered || pressed) && {
+                    backgroundColor: theme.dark
+                      ? colors.semantic.activeTintDark
+                      : colors.semantic.activeTintLight,
+                  },
+                ]}
+                onPress={() => {
+                  setOpen(false);
+                  onTogglePreviewStandardView();
+                }}
+              >
+                <Text
+                  style={[styles.itemText, { color: theme.colors.onSurface }]}
+                >
+                  {previewStandardView
+                    ? "Exit standard user view"
+                    : "View as standard user"}
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={({ hovered, pressed }) => [
                 styles.item,

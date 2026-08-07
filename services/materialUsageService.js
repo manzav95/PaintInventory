@@ -24,7 +24,18 @@ export const BOOTH_OPTIONS = [
   { label: 'Booth 4', value: 'Booth 4' },
 ];
 
-export const CATALYST_PERCENT = 4;
+// Re-export catalyst helpers (paint 3.9%, clear 4%, tenths rounding).
+export {
+  CATALYST_PERCENT,
+  CATALYST_PERCENT_PAINT,
+  CATALYST_PERCENT_CLEAR,
+  computeCatalystOz,
+  resolveCatalystPercent,
+  materialNeedsCatalyst,
+  formatCatalystPercentLabel,
+  formatTenths,
+  roundTenths,
+} from '../utils/catalyst';
 
 function todayYYYYMMDD() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -102,6 +113,10 @@ class MaterialUsageService {
   getExportExcelUrl(fromDate, toDate) {
     const params = new URLSearchParams({ from: fromDate, to: toDate });
     return `${API_URL}/api/export/material-usage/excel?${params.toString()}`;
+  }
+
+  async getExportPeriods() {
+    return _fetch('/api/material-usage/export-periods');
   }
 }
 

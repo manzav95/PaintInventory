@@ -8,7 +8,6 @@ import {
   Pressable,
   RefreshControl,
   Modal,
-  Alert,
   LayoutAnimation,
   UIManager,
 } from "react-native";
@@ -31,6 +30,7 @@ import PageHeader from "../components/PageHeader";
 import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import showToast from "../utils/showToast";
+import confirmAction from "../utils/confirmAction";
 import {
   bundleUsageByWeek,
   formatBoothWeekUsageForExcel,
@@ -45,7 +45,11 @@ import { nestedSurfaceColor } from "../utils/themeColors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
   BOOTH_OPTIONS,
-  CATALYST_PERCENT,
+  computeCatalystOz,
+  resolveCatalystPercent,
+  materialNeedsCatalyst,
+  formatCatalystPercentLabel,
+  formatTenths,
 } from "../services/materialUsageService";
 import {
   formatMonthDayYear,
@@ -137,58 +141,95 @@ function addUsageQty(totals, type, qty) {
   return t;
 }
 
-function UsageTypeChips({ totals, theme, compact = false }) {
+function UsageTypeChips({ totals, theme, compact = false, twoRows = false }) {
+  const renderChip = (meta) => {
+    const color = getMaterialTypeColor(meta.key, theme);
+    const soft = meta.soft
+      ? meta.soft
+      : theme.dark
+        ? meta.softDark
+        : meta.softLight;
+    const qty = Number(totals?.[meta.key]) || 0;
+    return (
+      <View
+        key={meta.key}
+        style={[
+          styles.typeChip,
+          compact && styles.typeChipCompact,
+          twoRows && styles.typeChipTwoRows,
+          { backgroundColor: soft },
+        ]}
+      >
+        <Text
+          style={[
+            styles.typeChipLabel,
+            compact && styles.typeChipLabelCompact,
+            { color },
+          ]}
+        >
+          {meta.label}
+        </Text>
+        <Text
+          style={[
+            styles.typeChipQty,
+            compact && styles.typeChipQtyCompact,
+            { color },
+          ]}
+        >
+          {qty.toFixed(2)}
+        </Text>
+        <Text
+          style={[
+            styles.typeChipUnit,
+            compact && styles.typeChipUnitCompact,
+            { color },
+          ]}
+        >
+          gal
+        </Text>
+      </View>
+    );
+  };
+
+  if (twoRows) {
+    const topRow = USAGE_TYPE_ORDER.filter((m) =>
+      ["paint", "clear", "primer"].includes(m.key),
+    );
+    const bottomRow = USAGE_TYPE_ORDER.filter((m) =>
+      ["stain", "dye"].includes(m.key),
+    );
+    return (
+      <View style={styles.typeChipsStack}>
+        <View
+          style={[styles.typeChipsRow, compact && styles.typeChipsRowCompact]}
+        >
+          {topRow.map(renderChip)}
+        </View>
+        <View
+          style={[styles.typeChipsRow, compact && styles.typeChipsRowCompact]}
+        >
+          {bottomRow.map(renderChip)}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.typeChipsRow, compact && styles.typeChipsRowCompact]}>
-      {USAGE_TYPE_ORDER.map((meta) => {
-        const color = getMaterialTypeColor(meta.key, theme);
-        const soft = meta.soft
-          ? meta.soft
-          : theme.dark
-            ? meta.softDark
-            : meta.softLight;
-        const qty = Number(totals?.[meta.key]) || 0;
-        return (
-          <View
-            key={meta.key}
-            style={[
-              styles.typeChip,
-              compact && styles.typeChipCompact,
-              { backgroundColor: soft },
-            ]}
-          >
-            <Text
-              style={[
-                styles.typeChipLabel,
-                compact && styles.typeChipLabelCompact,
-                { color },
-              ]}
-            >
-              {meta.label}
-            </Text>
-            <Text
-              style={[
-                styles.typeChipQty,
-                compact && styles.typeChipQtyCompact,
-                { color },
-              ]}
-            >
-              {qty.toFixed(2)}
-            </Text>
-            <Text
-              style={[
-                styles.typeChipUnit,
-                compact && styles.typeChipUnitCompact,
-                { color },
-              ]}
-            >
-              gal
-            </Text>
-          </View>
-        );
-      })}
+      {USAGE_TYPE_ORDER.map(renderChip)}
     </View>
   );
+}
+
+/** Capitalize the first letter of each whitespace-separated word. */
+function titleCaseWords(text) {
+  return String(text ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
 }
 
 function formatDateForInput(d) {
@@ -246,13 +287,53 @@ function formatLogDate(entryDate) {
   return `${weekday} · ${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
 }
 
+/** Inventory types shown in the material picker. Excludes acetone/catalyst/slow reducer. */
 const MATERIAL_USAGE_COLOR_TYPES = [
   "paint",
   "custom_paint",
   "clear",
   "primer",
+  "stain",
   "custom_stain",
 ];
+
+const MATERIAL_USAGE_EXCLUDE_NAME_RE =
+  /^(acetone|catalyst|slow\s*reducer)$/i;
+
+function isMaterialUsageEligibleItem(item) {
+  const type = String(item?.type || "").toLowerCase();
+  if (!MATERIAL_USAGE_COLOR_TYPES.includes(type)) return false;
+  const name = String(item?.name || "").trim();
+  const id = String(item?.id || "").trim();
+  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(name)) return false;
+  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(id)) return false;
+  return true;
+}
+
+/** Show "stain" after stain / custom_stain names when not already present. */
+function formatMaterialPickerLabel(item) {
+  const name = String(item?.name || item?.id || "").trim();
+  if (!name) return "";
+  const type = String(item?.type || "").toLowerCase();
+  if (
+    (type === "stain" || type === "custom_stain") &&
+    !/\bstain\b/i.test(name)
+  ) {
+    return `${name} stain`;
+  }
+  return name;
+}
+
+/** Accent for the Material field outline/text (toner → clear/orange). */
+function getMaterialInputAccent(type, theme) {
+  const t = String(type || "").toLowerCase();
+  if (!t) return null;
+  if (t === "primer") {
+    // White / neutral — slightly muted on light surfaces so the outline stays visible.
+    return theme?.dark ? "#eceff1" : "#b0bec5";
+  }
+  return getMaterialTypeColor(t, theme);
+}
 
 /** Parse custom material input:
  * - If user types a paint ID (e.g. "1234" or "#1234"), treat as paint.
@@ -387,22 +468,6 @@ function getLogDate(row, isOvertime) {
   }
 }
 
-function confirmAction(title, message, { confirmLabel = "Confirm", destructive = false } = {}) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return Promise.resolve(window.confirm(`${title}\n\n${message}`));
-  }
-  return new Promise((resolve) => {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: destructive ? "destructive" : "default",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
-}
-
 export default function MaterialUsageScreen({
   inventory = [],
   userName,
@@ -450,6 +515,8 @@ export default function MaterialUsageScreen({
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
   const daysSeededRef = useRef(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editRow, setEditRow] = useState(null);
   const [editAnchor, setEditAnchor] = useState({ pageX: 0, pageY: 0 });
   const [editSaving, setEditSaving] = useState(false);
@@ -536,55 +603,56 @@ export default function MaterialUsageScreen({
     return custom ? deriveCustomCategory(custom) : null;
   }, [selectedItem, customColor, colorQuery]);
 
+  const materialInputAccent = useMemo(
+    () => getMaterialInputAccent(effectiveMaterialType, theme),
+    [effectiveMaterialType, theme],
+  );
+
+  const materialFieldValue = selectedItem
+    ? formatMaterialPickerLabel(selectedItem)
+    : customColor || colorQuery;
+
   const needsCatalyst = useMemo(
-    () =>
-      effectiveMaterialType &&
-      ["paint", "custom_paint", "clear", "primer"].includes(
-        effectiveMaterialType,
-      ),
-    [effectiveMaterialType],
+    () => materialNeedsCatalyst(effectiveMaterialType, selectedItem),
+    [effectiveMaterialType, selectedItem],
+  );
+
+  const catalystPercent = useMemo(
+    () => resolveCatalystPercent(effectiveMaterialType, selectedItem),
+    [effectiveMaterialType, selectedItem],
   );
 
   const catalystOz = useMemo(() => {
-    if (!needsCatalyst) return 0;
+    if (!needsCatalyst || catalystPercent == null) return 0;
     const n = parseFloat(String(qty).replace(/,/g, ""), 10);
     if (isNaN(n) || n < 0) return 0;
-    if (cupGun) {
-      // Qty is entered in ounces; catalyst is a % of that in ounces, rounded to nearest 0.1
-      const oz = n * (CATALYST_PERCENT / 100);
-      return Math.round(oz * 10) / 10;
-    }
-    // Qty is in gallons; convert to ounces and apply percentage, keep 2 decimals
-    const oz = n * (CATALYST_PERCENT / 100) * 128;
-    return Math.round(oz * 100) / 100;
-  }, [qty, needsCatalyst, cupGun]);
+    return computeCatalystOz(n, catalystPercent, cupGun);
+  }, [qty, needsCatalyst, cupGun, catalystPercent]);
 
   const materialSuggestions = useMemo(() => {
-    const paintClearPrimer = inventory.filter((i) =>
-      MATERIAL_USAGE_COLOR_TYPES.includes(String(i.type || "").toLowerCase()),
-    );
+    if (selectedItem) return [];
+    const eligible = inventory.filter(isMaterialUsageEligibleItem);
     const q = (colorQuery || "").trim().toLowerCase();
-    // Live search: wait for a few letters, then top 5 hits
-    if (q.length < 2 || selectedItem) return [];
-    return paintClearPrimer
-      .filter(
-        (i) =>
-          (i.name || "").toLowerCase().includes(q) ||
-          (i.id || "").toLowerCase().includes(q),
-      )
-      .sort((a, b) => {
-        const aName = (a.name || a.id || "").toLowerCase();
-        const bName = (b.name || b.id || "").toLowerCase();
+    const filtered = q
+      ? eligible.filter(
+          (i) =>
+            (i.name || "").toLowerCase().includes(q) ||
+            (i.id || "").toLowerCase().includes(q),
+        )
+      : eligible;
+    return filtered.sort((a, b) => {
+      const aName = (a.name || a.id || "").toLowerCase();
+      const bName = (b.name || b.id || "").toLowerCase();
+      if (q) {
         const aStarts = aName.startsWith(q) ? 0 : 1;
         const bStarts = bName.startsWith(q) ? 0 : 1;
         if (aStarts !== bStarts) return aStarts - bStarts;
-        return aName.localeCompare(bName);
-      })
-      .slice(0, 5);
+      }
+      return aName.localeCompare(bName);
+    });
   }, [inventory, colorQuery, selectedItem]);
 
-  const showMaterialSuggestions =
-    materialFocused && !selectedItem && (colorQuery || "").trim().length >= 2;
+  const showMaterialSuggestions = materialFocused && !selectedItem;
   const filteredLogs = useMemo(() => {
     let list = logs;
     if (boothFilter && boothFilter !== "all") {
@@ -691,10 +759,45 @@ export default function MaterialUsageScreen({
       -(Math.max(1, weeksShown) - 1) * 7,
     );
     return searchableLogs.some((row) => {
+      const gal = Number(row.qty_gallons) || 0;
+      if (gal <= 0) return false;
       const d = getLogDate(row, materialUsageOvertime) || "";
       const mon = weekMondayIso(d);
       return mon && mon < earliestMonday;
     });
+  }, [
+    isAdmin,
+    searchableLogs,
+    thisWeekMonday,
+    weeksShown,
+    materialUsageOvertime,
+  ]);
+
+  /** Jump to the nearest older week that actually has usage qty (skip empty weeks). */
+  const handleShowPreviousWeekWithData = useCallback(() => {
+    if (!isAdmin) return;
+    const earliestMonday = addDaysIso(
+      thisWeekMonday,
+      -(Math.max(1, weeksShown) - 1) * 7,
+    );
+    let bestOlder = null;
+    searchableLogs.forEach((row) => {
+      const gal = Number(row.qty_gallons) || 0;
+      if (gal <= 0) return;
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      const mon = weekMondayIso(d);
+      if (!mon || mon >= earliestMonday) return;
+      if (!bestOlder || mon > bestOlder) bestOlder = mon;
+    });
+    if (!bestOlder) return;
+
+    const from = new Date(`${bestOlder}T12:00:00`);
+    const to = new Date(`${thisWeekMonday}T12:00:00`);
+    const daySpan = Math.round((to - from) / (24 * 60 * 60 * 1000));
+    const needed = Math.max(1, Math.floor(daySpan / 7) + 1);
+
+    animateFilterChange();
+    setWeeksShown((w) => Math.max(w + 1, needed));
   }, [
     isAdmin,
     searchableLogs,
@@ -967,6 +1070,12 @@ export default function MaterialUsageScreen({
     try {
       await MaterialUsageService.delete(row.id);
       if (editRow?.id === row.id) setEditRow(null);
+      setSelectedIds((prev) => {
+        if (!prev.has(row.id)) return prev;
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
       await loadLogs();
       showToast({ title: "Deleted", message: "Material usage removed." });
     } catch (e) {
@@ -977,6 +1086,63 @@ export default function MaterialUsageScreen({
       });
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const toggleSelectEntry = (id) => {
+    if (!isAdmin || id == null) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleDeleteSelected = async () => {
+    if (!isAdmin || selectedIds.size === 0 || bulkDeleting) return;
+    const ids = Array.from(selectedIds);
+    const ok = await confirmAction(
+      `Delete ${ids.length} ${ids.length === 1 ? "entry" : "entries"}?`,
+      `Remove ${ids.length} material usage log${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+      { confirmLabel: "Delete", destructive: true },
+    );
+    if (!ok) return;
+
+    setBulkDeleting(true);
+    let deleted = 0;
+    let failed = 0;
+    try {
+      for (const id of ids) {
+        try {
+          await MaterialUsageService.delete(id);
+          deleted += 1;
+        } catch (_) {
+          failed += 1;
+        }
+      }
+      if (editRow && ids.includes(editRow.id)) setEditRow(null);
+      clearSelection();
+      await loadLogs();
+      if (failed === 0) {
+        showToast({
+          title: "Deleted",
+          message:
+            deleted === 1
+              ? "1 material usage entry removed."
+              : `${deleted} material usage entries removed.`,
+        });
+      } else {
+        showToast({
+          type: "error",
+          title: "Partial delete",
+          message: `Removed ${deleted}, failed ${failed}.`,
+        });
+      }
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -1006,7 +1172,7 @@ export default function MaterialUsageScreen({
   };
 
   const handleSubmit = () => {
-    const job = (jobName || "").trim();
+    const job = titleCaseWords(jobName || "");
     if (!job && !jobOptional) {
       setShakeTick((n) => n + 1);
       showToast({
@@ -1016,7 +1182,7 @@ export default function MaterialUsageScreen({
       });
       return;
     }
-    const customTrim = (customColor || colorQuery || "").trim();
+    const customTrim = titleCaseWords(customColor || colorQuery || "");
     const hasSelection = selectedItem || customTrim;
     if (!hasSelection) {
       setShakeTick((n) => n + 1);
@@ -1056,25 +1222,21 @@ export default function MaterialUsageScreen({
     let qtyGallons;
     let catOz = 0;
     if (cupGun) {
-      // Qty entered in ounces; convert to gallons for storage
+      // Qty entered in ounces; convert to gallons for storage (exact)
       qtyGallons = rawQty / 128;
-      if (needsCatalyst) {
-        const oz = rawQty * (CATALYST_PERCENT / 100);
-        // Round catalyst to nearest 0.10 oz
-        catOz = Math.round(oz * 10) / 10;
+      if (needsCatalyst && catalystPercent != null) {
+        catOz = computeCatalystOz(rawQty, catalystPercent, true);
       }
     } else {
-      // Qty entered in gallons, snapped to 0.25 increments
-      const qtyNum = Math.round(rawQty * 4) / 4;
-      qtyGallons = qtyNum;
-      if (needsCatalyst) {
-        const oz = qtyNum * (CATALYST_PERCENT / 100) * 128;
-        catOz = Math.round(oz * 100) / 100;
+      // Exact gallons as entered (no rounding)
+      qtyGallons = rawQty;
+      if (needsCatalyst && catalystPercent != null) {
+        catOz = computeCatalystOz(rawQty, catalystPercent, false);
       }
     }
     const itemId = selectedItem ? selectedItem.id : "";
     const colorName = selectedItem
-      ? selectedItem.name || selectedItem.id
+      ? formatMaterialPickerLabel(selectedItem)
       : customTrim;
     const materialType = selectedItem
       ? (selectedItem.type || "").toLowerCase() || null
@@ -1127,15 +1289,30 @@ export default function MaterialUsageScreen({
       getResolvedMaterialType(row, inventory),
       theme,
     );
+    const selected = selectedIds.has(row.id);
+    const busy = deletingId != null || bulkDeleting || submitting || editSaving;
     return (
       <View
         key={row.id}
         style={[
           styles.entryBlock,
           { borderBottomColor: theme.colors.outlineVariant },
+          selected && {
+            backgroundColor: theme.dark
+              ? "rgba(244,67,54,0.08)"
+              : "rgba(244,67,54,0.06)",
+          },
         ]}
       >
         <View style={styles.entryRow}>
+          {isAdmin ? (
+            <Checkbox
+              status={selected ? "checked" : "unchecked"}
+              onPress={() => toggleSelectEntry(row.id)}
+              disabled={busy}
+              color={theme.colors.error}
+            />
+          ) : null}
           <View style={styles.entryTimeCol}>
             <Text
               style={[
@@ -1211,7 +1388,7 @@ export default function MaterialUsageScreen({
               mode="text"
               compact
               onPress={(e) => startEditEntry(row, e)}
-              disabled={deletingId != null || submitting || editSaving}
+              disabled={busy}
             >
               Edit
             </Button>
@@ -1221,7 +1398,7 @@ export default function MaterialUsageScreen({
               textColor={theme.colors.error}
               onPress={() => handleDeleteEntry(row)}
               loading={deletingId === row.id}
-              disabled={deletingId != null || submitting}
+              disabled={busy}
             >
               Delete
             </Button>
@@ -1294,11 +1471,7 @@ export default function MaterialUsageScreen({
           <View style={styles.colorSection}>
             <TextInput
               label="Material"
-              value={
-                selectedItem
-                  ? selectedItem.name || selectedItem.id
-                  : customColor || colorQuery
-              }
+              value={materialFieldValue}
               onChangeText={(t) => {
                 setColorQuery(t);
                 setCustomColor("");
@@ -1311,7 +1484,18 @@ export default function MaterialUsageScreen({
               }}
               mode="outlined"
               style={styles.input}
-              placeholder="Type to search or custom dye/stain/toner"
+              placeholder="Search inventory or type custom dye/toner"
+              outlineColor={
+                materialInputAccent ||
+                theme.colors?.outlineVariant ||
+                theme.colors?.outline
+              }
+              activeOutlineColor={
+                materialInputAccent || theme.colors?.primary
+              }
+              textColor={
+                materialInputAccent || theme.colors?.onSurface
+              }
               right={
                 selectedItem || customColor || colorQuery ? (
                   <TextInput.Icon
@@ -1326,26 +1510,37 @@ export default function MaterialUsageScreen({
               }
             />
             {showMaterialSuggestions ? (
-              <ScrollFrame maxHeight={200} style={styles.suggestBox}>
-                {materialSuggestions.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => {
-                      setSelectedItem(item);
-                      setCustomColor("");
-                      setColorQuery("");
-                      setMaterialFocused(false);
-                    }}
-                    style={({ pressed }) => [
-                      styles.colorRow,
-                      pressed && styles.colorRowPressed,
-                    ]}
-                  >
-                    <Text numberOfLines={1} style={styles.colorRowText}>
-                      {item.name || item.id}
-                    </Text>
-                  </Pressable>
-                ))}
+              <ScrollFrame maxHeight={220} style={styles.suggestBox}>
+                {materialSuggestions.map((item) => {
+                  const type = String(item.type || "").toLowerCase();
+                  const rowColor = getMaterialInputAccent(type, theme);
+                  const label = formatMaterialPickerLabel(item);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => {
+                        setSelectedItem(item);
+                        setCustomColor("");
+                        setColorQuery("");
+                        setMaterialFocused(false);
+                      }}
+                      style={({ pressed }) => [
+                        styles.colorRow,
+                        pressed && styles.colorRowPressed,
+                      ]}
+                    >
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.colorRowText,
+                          rowColor ? { color: rowColor } : null,
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
                 {(colorQuery || "").trim() ? (
                   <Pressable
                     onPress={() => {
@@ -1361,15 +1556,31 @@ export default function MaterialUsageScreen({
                   >
                     <Text
                       numberOfLines={1}
-                      style={[styles.colorRowText, { fontStyle: "italic" }]}
+                      style={[
+                        styles.colorRowText,
+                        {
+                          fontStyle: "italic",
+                          ...(materialInputAccent
+                            ? { color: materialInputAccent }
+                            : null),
+                        },
+                      ]}
                     >
                       Use custom: {(colorQuery || "").trim()}
                     </Text>
                   </Pressable>
                 ) : null}
-                {materialSuggestions.length === 0 ? (
+                {materialSuggestions.length === 0 &&
+                !(colorQuery || "").trim() ? (
                   <AppEmptyState
-                    title="No inventory matches"
+                    title="No eligible materials in inventory"
+                    style={styles.emptyList}
+                  />
+                ) : null}
+                {materialSuggestions.length === 0 &&
+                (colorQuery || "").trim() ? (
+                  <AppEmptyState
+                    title="No inventory matches — use custom above"
                     style={styles.emptyList}
                   />
                 ) : null}
@@ -1384,7 +1595,7 @@ export default function MaterialUsageScreen({
               mode="outlined"
               keyboardType="decimal-pad"
               style={needsCatalyst ? styles.halfInput : styles.input}
-              placeholder={cupGun ? "ounces" : "0.25 increments"}
+              placeholder={cupGun ? "ounces" : "exact gallons"}
             />
             {needsCatalyst && (
               <View style={[styles.halfInput, styles.catalystDisplay]}>
@@ -1394,7 +1605,7 @@ export default function MaterialUsageScreen({
                     { color: theme.colors.onSurfaceVariant },
                   ]}
                 >
-                  Catalyst (4%)
+                  Catalyst ({formatCatalystPercentLabel(catalystPercent) || "—"})
                 </Text>
                 <Text
                   style={[
@@ -1402,7 +1613,7 @@ export default function MaterialUsageScreen({
                     { color: theme.colors.onSurface },
                   ]}
                 >
-                  {catalystOz} oz
+                  {formatTenths(catalystOz)} oz
                 </Text>
               </View>
             )}
@@ -1484,7 +1695,12 @@ export default function MaterialUsageScreen({
             >
               {formatMonthDayYear(day.date)}
             </Text>
-            <UsageTypeChips totals={day.totals} theme={theme} compact />
+            <UsageTypeChips
+              totals={day.totals}
+              theme={theme}
+              compact
+              twoRows={!isDesktop}
+            />
             <Text
               style={[
                 styles.dayToggleHint,
@@ -1630,7 +1846,11 @@ export default function MaterialUsageScreen({
             >
               Totals ({thisWeekTotalsLabel})
             </Text>
-            <UsageTypeChips totals={thisWeekTotals} theme={theme} />
+            <UsageTypeChips
+              totals={thisWeekTotals}
+              theme={theme}
+              twoRows={!isDesktop}
+            />
           </View>
         ) : null}
 
@@ -1641,6 +1861,46 @@ export default function MaterialUsageScreen({
             onChangeText={setLogSearchQuery}
             style={styles.logSearch}
           />
+        ) : null}
+
+        {isAdmin && selectedIds.size > 0 ? (
+          <View
+            style={[
+              styles.bulkSelectBar,
+              {
+                backgroundColor: nestedSurfaceColor(theme),
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.bulkSelectLabel, { color: theme.colors.onSurface }]}
+            >
+              {selectedIds.size} selected
+            </Text>
+            <View style={styles.bulkSelectActions}>
+              <Button
+                mode="text"
+                compact
+                onPress={clearSelection}
+                disabled={bulkDeleting}
+              >
+                Clear
+              </Button>
+              <Button
+                mode="contained"
+                compact
+                buttonColor={theme.colors.error}
+                textColor={theme.colors.onError}
+                onPress={handleDeleteSelected}
+                loading={bulkDeleting}
+                disabled={bulkDeleting || deletingId != null}
+                icon="delete"
+              >
+                Delete selected
+              </Button>
+            </View>
+          </View>
         ) : null}
 
         {!logsLoaded ? (
@@ -1680,14 +1940,11 @@ export default function MaterialUsageScreen({
             {isAdmin && canLoadOlderWeek ? (
               <Button
                 mode="outlined"
-                onPress={() => {
-                  animateFilterChange();
-                  setWeeksShown((w) => w + 1);
-                }}
+                onPress={handleShowPreviousWeekWithData}
                 style={styles.loadMoreBtn}
                 icon="history"
               >
-                Show previous week
+                Show previous week with usage
               </Button>
             ) : null}
             {isAdmin && !canLoadOlderWeek && weeksShown > 1 ? (
@@ -1822,7 +2079,7 @@ export default function MaterialUsageScreen({
                   { color: mutedTextColor(theme) },
                 ]}
               >
-                4% mixing ratio
+                {formatCatalystPercentLabel(catalystPercent) || "—"} mixing ratio
               </Text>
             </Dialog.Content>
             <Dialog.Actions>
@@ -2310,6 +2567,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: 10,
   },
+  typeChipsStack: {
+    gap: 8,
+    width: "100%",
+  },
   typeChipsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2326,6 +2587,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 10,
+  },
+  typeChipTwoRows: {
+    flexBasis: 0,
+    minWidth: 0,
   },
   typeChipCompact: {
     minWidth: 64,
@@ -2493,6 +2758,27 @@ const styles = StyleSheet.create({
   },
   entryBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  bulkSelectBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  bulkSelectLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  bulkSelectActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
   entryAdminActions: {
     flexDirection: "row",
