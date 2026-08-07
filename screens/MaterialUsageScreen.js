@@ -515,8 +515,6 @@ export default function MaterialUsageScreen({
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
   const daysSeededRef = useRef(false);
   const [deletingId, setDeletingId] = useState(null);
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [editRow, setEditRow] = useState(null);
   const [editAnchor, setEditAnchor] = useState({ pageX: 0, pageY: 0 });
   const [editSaving, setEditSaving] = useState(false);
@@ -1070,12 +1068,6 @@ export default function MaterialUsageScreen({
     try {
       await MaterialUsageService.delete(row.id);
       if (editRow?.id === row.id) setEditRow(null);
-      setSelectedIds((prev) => {
-        if (!prev.has(row.id)) return prev;
-        const next = new Set(prev);
-        next.delete(row.id);
-        return next;
-      });
       await loadLogs();
       showToast({ title: "Deleted", message: "Material usage removed." });
     } catch (e) {
@@ -1086,63 +1078,6 @@ export default function MaterialUsageScreen({
       });
     } finally {
       setDeletingId(null);
-    }
-  };
-
-  const toggleSelectEntry = (id) => {
-    if (!isAdmin || id == null) return;
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const clearSelection = () => setSelectedIds(new Set());
-
-  const handleDeleteSelected = async () => {
-    if (!isAdmin || selectedIds.size === 0 || bulkDeleting) return;
-    const ids = Array.from(selectedIds);
-    const ok = await confirmAction(
-      `Delete ${ids.length} ${ids.length === 1 ? "entry" : "entries"}?`,
-      `Remove ${ids.length} material usage log${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
-      { confirmLabel: "Delete", destructive: true },
-    );
-    if (!ok) return;
-
-    setBulkDeleting(true);
-    let deleted = 0;
-    let failed = 0;
-    try {
-      for (const id of ids) {
-        try {
-          await MaterialUsageService.delete(id);
-          deleted += 1;
-        } catch (_) {
-          failed += 1;
-        }
-      }
-      if (editRow && ids.includes(editRow.id)) setEditRow(null);
-      clearSelection();
-      await loadLogs();
-      if (failed === 0) {
-        showToast({
-          title: "Deleted",
-          message:
-            deleted === 1
-              ? "1 material usage entry removed."
-              : `${deleted} material usage entries removed.`,
-        });
-      } else {
-        showToast({
-          type: "error",
-          title: "Partial delete",
-          message: `Removed ${deleted}, failed ${failed}.`,
-        });
-      }
-    } finally {
-      setBulkDeleting(false);
     }
   };
 
@@ -1289,30 +1224,16 @@ export default function MaterialUsageScreen({
       getResolvedMaterialType(row, inventory),
       theme,
     );
-    const selected = selectedIds.has(row.id);
-    const busy = deletingId != null || bulkDeleting || submitting || editSaving;
+    const busy = deletingId != null || submitting || editSaving;
     return (
       <View
         key={row.id}
         style={[
           styles.entryBlock,
           { borderBottomColor: theme.colors.outlineVariant },
-          selected && {
-            backgroundColor: theme.dark
-              ? "rgba(244,67,54,0.08)"
-              : "rgba(244,67,54,0.06)",
-          },
         ]}
       >
         <View style={styles.entryRow}>
-          {isAdmin ? (
-            <Checkbox
-              status={selected ? "checked" : "unchecked"}
-              onPress={() => toggleSelectEntry(row.id)}
-              disabled={busy}
-              color={theme.colors.error}
-            />
-          ) : null}
           <View style={styles.entryTimeCol}>
             <Text
               style={[
@@ -1861,46 +1782,6 @@ export default function MaterialUsageScreen({
             onChangeText={setLogSearchQuery}
             style={styles.logSearch}
           />
-        ) : null}
-
-        {isAdmin && selectedIds.size > 0 ? (
-          <View
-            style={[
-              styles.bulkSelectBar,
-              {
-                backgroundColor: nestedSurfaceColor(theme),
-                borderColor: theme.colors.outlineVariant,
-              },
-            ]}
-          >
-            <Text
-              style={[styles.bulkSelectLabel, { color: theme.colors.onSurface }]}
-            >
-              {selectedIds.size} selected
-            </Text>
-            <View style={styles.bulkSelectActions}>
-              <Button
-                mode="text"
-                compact
-                onPress={clearSelection}
-                disabled={bulkDeleting}
-              >
-                Clear
-              </Button>
-              <Button
-                mode="contained"
-                compact
-                buttonColor={theme.colors.error}
-                textColor={theme.colors.onError}
-                onPress={handleDeleteSelected}
-                loading={bulkDeleting}
-                disabled={bulkDeleting || deletingId != null}
-                icon="delete"
-              >
-                Delete selected
-              </Button>
-            </View>
-          </View>
         ) : null}
 
         {!logsLoaded ? (
@@ -2758,27 +2639,6 @@ const styles = StyleSheet.create({
   },
   entryBlock: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  bulkSelectBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  bulkSelectLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  bulkSelectActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
   },
   entryAdminActions: {
     flexDirection: "row",

@@ -89,6 +89,48 @@ function logBelongsToUser(log, userName) {
   return u === target;
 }
 
+function sortLogsNewestFirst(logs) {
+  return [...(Array.isArray(logs) ? logs : [])].sort(
+    (a, b) =>
+      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
+      (a.timestamp ? new Date(a.timestamp).getTime() : 0),
+  );
+}
+
+const HISTORY_PAGE_SIZE = 20;
+
+/** Initial window: newest calendar day, capped at 20 txs. */
+function initialHistoryVisibleCount(logs) {
+  const sorted = sortLogsNewestFirst(logs);
+  if (sorted.length === 0) return 0;
+  const firstDay = getDayKey(sorted[0].timestamp);
+  let dayCount = 0;
+  for (const log of sorted) {
+    if (getDayKey(log.timestamp) !== firstDay) break;
+    dayCount += 1;
+  }
+  return Math.min(dayCount, HISTORY_PAGE_SIZE);
+}
+
+function visibleHistoryCount(logs, extraPages) {
+  const sortedLen = Array.isArray(logs) ? logs.length : 0;
+  if (sortedLen === 0) return 0;
+  const initial = initialHistoryVisibleCount(logs);
+  return Math.min(initial + Math.max(0, extraPages) * HISTORY_PAGE_SIZE, sortedLen);
+}
+
+function limitLogsForHistoryPage(logs, extraPages) {
+  const sorted = sortLogsNewestFirst(logs);
+  const limit = visibleHistoryCount(sorted, extraPages);
+  return sorted.slice(0, limit);
+}
+
+function historyHasMorePages(logs, extraPages) {
+  const sortedLen = Array.isArray(logs) ? logs.length : 0;
+  if (sortedLen === 0) return false;
+  return visibleHistoryCount(logs, extraPages) < sortedLen;
+}
+
 function isRecycleDue(item) {
   const t = (item.type || "").toLowerCase();
   if (!CUSTOM_TYPES.includes(t)) return false;
@@ -153,12 +195,17 @@ export default function DashboardScreen({
   const [checkedOutListOpen, setCheckedOutListOpen] = useState(false);
   const [checkedOutListIsWeek, setCheckedOutListIsWeek] = useState(true);
   const [shiftFilter, setShiftFilter] = useState(null);
-  /** Admin activity period: today (default) → week → last 30 days. */
-  const [activityPeriod, setActivityPeriod] = useState("today");
+  /** Admin activity period: today (default) → week → last 30 days.
+   *  Standard defaults to 30 days so “view more” can reveal prior days. */
+  const [activityPeriod, setActivityPeriod] = useState(
+    isAdmin ? "today" : "days30",
+  );
   /** Mobile history: 'all' | 'checks' | 'usage' */
   const [mobileHistoryTab, setMobileHistoryTab] = useState("all");
   /** Standard user: personal (default) vs all shop activity. */
   const [historyScope, setHistoryScope] = useState("personal");
+  /** Extra “view more” pages beyond the initial day/20 cap. */
+  const [historyExtraPages, setHistoryExtraPages] = useState(0);
   /** Admin transaction history: start with ~2 weeks; "Show more" adds another 2. */
   const [historyWeeksShown, setHistoryWeeksShown] = useState(2);
   /** Standard-user needs-attention popup */
@@ -171,21 +218,8 @@ export default function DashboardScreen({
     placement: "below",
     maxHeight: 320,
   });
-  /** My activity today popup */
-  const [activityOpen, setActivityOpen] = useState(false);
-  const [activityKind, setActivityKind] = useState("checkedOut"); // 'checkedOut' | 'checkedIn' | 'actions'
-  const [activityPanelPos, setActivityPanelPos] = useState({
-    top: 80,
-    left: 12,
-    caretLeft: 24,
-    placement: "below",
-    maxHeight: 320,
-  });
   const lowStockChipRef = useRef(null);
   const recycleChipRef = useRef(null);
-  const checkedOutCardRef = useRef(null);
-  const checkedInCardRef = useRef(null);
-  const actionsCardRef = useRef(null);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const ATTENTION_PANEL_WIDTH = Math.min(
     isMobileLayout ? 340 : 400,
@@ -394,60 +428,6 @@ export default function DashboardScreen({
   );
 
   const recycleDueCount = recycleDueItems.length;
-
-  /** Personal ops snapshot for standard users. */
-  const myActivityToday = useMemo(() => {
-    if (isAdmin || !userName) return null;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startMs = start.getTime();
-    let checkedOut = 0;
-    let checkedIn = 0;
-    let actions = 0;
-    let lastAt = null;
-    const checkOutLogs = [];
-    const checkInLogs = [];
-    const actionLogs = [];
-    for (const log of auditLogs) {
-      if (!logBelongsToUser(log, userName)) continue;
-      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-      if (!t || t < startMs) continue;
-      actions += 1;
-      actionLogs.push(log);
-      if (!lastAt || t > lastAt) lastAt = t;
-      const type = resolveActionType(log);
-      const qty = logQtyAbs(log);
-      if (type === "check_out") {
-        checkedOut += qty;
-        checkOutLogs.push(log);
-      }
-      if (type === "check_in" || type === "receiving") {
-        checkedIn += qty;
-        checkInLogs.push(log);
-      }
-    }
-    const byNewest = (a, b) =>
-      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
-      (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    checkOutLogs.sort(byNewest);
-    checkInLogs.sort(byNewest);
-    actionLogs.sort(byNewest);
-    const lastLabel = lastAt
-      ? new Date(lastAt).toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : null;
-    return {
-      checkedOut,
-      checkedIn,
-      actions,
-      lastLabel,
-      checkOutLogs,
-      checkInLogs,
-      actionLogs,
-    };
-  }, [auditLogs, userName, isAdmin]);
 
   const myRecentColors = useMemo(() => {
     if (isAdmin || !userName) return [];
@@ -877,21 +857,55 @@ export default function DashboardScreen({
   };
 
   const mobileHistoryLogs = useMemo(() => {
-    const byNewest = (a, b) =>
-      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
-      (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    const checks = [...adminPeriodCheckOutLogs, ...adminPeriodCheckInLogs].sort(
-      byNewest,
-    );
-    if (mobileHistoryTab === "checks") return checks;
-    if (mobileHistoryTab === "usage") return adminPeriodUsageLogs;
-    return [...checks, ...adminPeriodUsageLogs].sort(byNewest);
+    const checks = [...adminPeriodCheckOutLogs, ...adminPeriodCheckInLogs];
+    if (mobileHistoryTab === "checks") return sortLogsNewestFirst(checks);
+    if (mobileHistoryTab === "usage")
+      return sortLogsNewestFirst(adminPeriodUsageLogs);
+    return sortLogsNewestFirst([...checks, ...adminPeriodUsageLogs]);
   }, [
     mobileHistoryTab,
     adminPeriodCheckOutLogs,
     adminPeriodCheckInLogs,
     adminPeriodUsageLogs,
   ]);
+
+  const mobileHistoryLogsVisible = useMemo(
+    () => limitLogsForHistoryPage(mobileHistoryLogs, historyExtraPages),
+    [mobileHistoryLogs, historyExtraPages],
+  );
+  const mobileHistoryHasMore = historyHasMorePages(
+    mobileHistoryLogs,
+    historyExtraPages,
+  );
+
+  const visibleCheckOutLogs = useMemo(
+    () => limitLogsForHistoryPage(adminPeriodCheckOutLogs, historyExtraPages),
+    [adminPeriodCheckOutLogs, historyExtraPages],
+  );
+  const visibleCheckInLogs = useMemo(
+    () => limitLogsForHistoryPage(adminPeriodCheckInLogs, historyExtraPages),
+    [adminPeriodCheckInLogs, historyExtraPages],
+  );
+  const visibleUsageLogsPaged = useMemo(
+    () => limitLogsForHistoryPage(adminPeriodUsageLogs, historyExtraPages),
+    [adminPeriodUsageLogs, historyExtraPages],
+  );
+  const checkOutHasMore = historyHasMorePages(
+    adminPeriodCheckOutLogs,
+    historyExtraPages,
+  );
+  const checkInHasMore = historyHasMorePages(
+    adminPeriodCheckInLogs,
+    historyExtraPages,
+  );
+  const usageHasMore = historyHasMorePages(
+    adminPeriodUsageLogs,
+    historyExtraPages,
+  );
+
+  useEffect(() => {
+    setHistoryExtraPages(0);
+  }, [activityPeriod, historyScope, mobileHistoryTab, isAdmin]);
 
   // Desktop: 3-column activity brief for admin and standard users.
   // Mobile: stacked brief list. (Standard no longer uses the wide history table.)
@@ -1078,6 +1092,65 @@ export default function DashboardScreen({
     );
   };
 
+  const renderViewMoreButton = (hasMore) => {
+    if (!hasMore) return null;
+    return (
+      <Pressable
+        onPress={() => setHistoryExtraPages((p) => p + 1)}
+        style={styles.viewMoreHistoryBtn}
+        accessibilityRole="button"
+        accessibilityLabel="Click to view more"
+      >
+        <Text
+          style={[
+            styles.viewMoreHistoryBtnText,
+            { color: theme.colors.primary },
+          ]}
+        >
+          Click to view more
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderPagedBriefLogs = (logs, { showBooth = false } = {}) => {
+    let lastDayKey = null;
+    const spansMultipleDays = logs.some(
+      (log) => getDayKey(log.timestamp) !== getDayKey(logs[0]?.timestamp),
+    );
+    return (
+      <>
+        {logs.map((log, index) => {
+          const dayKey = getDayKey(log.timestamp);
+          const showHeader =
+            spansMultipleDays && dayKey && dayKey !== lastDayKey;
+          if (dayKey) lastDayKey = dayKey;
+          const booth =
+            showBooth === "auto"
+              ? resolveActionType(log) === "material_usage"
+              : !!showBooth;
+          return (
+            <React.Fragment
+              key={`${log.id || log.timestamp}-${log.itemId}-${index}`}
+            >
+              {showHeader ? (
+                <Text
+                  style={[
+                    styles.briefDayHeader,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {formatDayHeader(log.timestamp)}
+                </Text>
+              ) : null}
+              {renderBriefLogRow(log, index, { showBooth: booth })}
+            </React.Fragment>
+          );
+        })}
+      </>
+    );
+  };
+
   const getQuantity = (action, details, itemId) => {
     // Return the amount of gallons that were manipulated (changed)
     if (details) {
@@ -1235,59 +1308,6 @@ export default function DashboardScreen({
       fallback();
     }
   };
-
-  const openActivityPanel = (kind, cardRef) => {
-    const node = cardRef?.current;
-    setActivityKind(kind);
-    const fallback = () => {
-      setActivityPanelPos({
-        placement: "below",
-        top: 80,
-        bottom: undefined,
-        left: 12,
-        caretLeft: 24,
-        maxHeight: 320,
-      });
-      setActivityOpen(true);
-    };
-    if (node && typeof node.measureInWindow === "function") {
-      node.measureInWindow((x, y, w, h) => {
-        setActivityPanelPos(placeAnchoredPanel(x, y, w, h));
-        setActivityOpen(true);
-      });
-    } else {
-      fallback();
-    }
-  };
-
-  const activityPopupConfig = useMemo(() => {
-    if (!myActivityToday) return null;
-    if (activityKind === "checkedOut") {
-      return {
-        title: "Checked out today",
-        hint: "Gallons you checked out today.",
-        accent: colors.action.checkOut,
-        logs: myActivityToday.checkOutLogs || [],
-        empty: "No check-outs yet today.",
-      };
-    }
-    if (activityKind === "checkedIn") {
-      return {
-        title: "Checked in today",
-        hint: "Gallons you checked in today.",
-        accent: colors.action.checkIn,
-        logs: myActivityToday.checkInLogs || [],
-        empty: "No check-ins yet today.",
-      };
-    }
-    return {
-      title: "Actions today",
-      hint: "Your inventory actions today.",
-      accent: theme.colors.primary,
-      logs: myActivityToday.actionLogs || [],
-      empty: "No activity yet today.",
-    };
-  }, [activityKind, myActivityToday, theme.colors.primary]);
 
   const content = (
     <View
@@ -1486,209 +1506,6 @@ export default function DashboardScreen({
                     styles.attentionPopupCaretDown,
                     {
                       left: attentionPanelPos.caretLeft,
-                      borderTopColor: theme.colors.outlineVariant,
-                    },
-                  ]}
-                />
-              </>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
-
-      {/* My activity today — anchored popup */}
-      <Modal
-        visible={activityOpen && activityPopupConfig != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setActivityOpen(false)}
-      >
-        <View style={styles.attentionPopupRoot}>
-          <Pressable
-            style={styles.attentionPopupBackdrop}
-            onPress={() => setActivityOpen(false)}
-            accessibilityLabel="Dismiss"
-          />
-          <View
-            pointerEvents="box-none"
-            style={[
-              styles.attentionPopupAnchor,
-              {
-                left: activityPanelPos.left,
-                width: ATTENTION_PANEL_WIDTH,
-                ...(activityPanelPos.placement === "above"
-                  ? { bottom: activityPanelPos.bottom }
-                  : { top: activityPanelPos.top }),
-              },
-            ]}
-          >
-            {activityPanelPos.placement !== "above" ? (
-              <>
-                <View
-                  style={[
-                    styles.attentionPopupCaret,
-                    {
-                      left: activityPanelPos.caretLeft,
-                      borderBottomColor: theme.colors.outlineVariant,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.attentionPopupCaretInner,
-                    {
-                      left: activityPanelPos.caretLeft + 1,
-                      borderBottomColor: theme.colors.surfaceContainerHighest,
-                    },
-                  ]}
-                />
-              </>
-            ) : null}
-            <View
-              style={[
-                styles.attentionPopupPanel,
-                {
-                  maxHeight: activityPanelPos.maxHeight || 320,
-                  backgroundColor: theme.colors.surfaceContainerHighest,
-                  borderColor: theme.colors.outlineVariant,
-                  borderTopWidth: 3,
-                  borderTopColor: activityPopupConfig?.accent,
-                },
-              ]}
-            >
-              <View style={styles.attentionPopupHeader}>
-                <Text
-                  style={[
-                    styles.attentionPopupTitle,
-                    { color: theme.colors.onSurface },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {activityPopupConfig?.title}
-                </Text>
-                <IconButton
-                  icon="close"
-                  size={18}
-                  onPress={() => setActivityOpen(false)}
-                  style={styles.attentionPopupClose}
-                  accessibilityLabel="Close"
-                />
-              </View>
-              <Text
-                style={[
-                  styles.attentionPopupHint,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-                numberOfLines={2}
-              >
-                {activityPopupConfig?.hint}
-              </Text>
-              <ScrollFrame
-                bordered={false}
-                maxHeight={Math.max(
-                  120,
-                  (activityPanelPos.maxHeight || 320) - 110,
-                )}
-                contentContainerStyle={styles.attentionPopupList}
-              >
-                {(activityPopupConfig?.logs || []).length === 0 ? (
-                  <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                    {activityPopupConfig?.empty}
-                  </Text>
-                ) : (
-                  (activityPopupConfig?.logs || []).map((log, index) => {
-                    const accent = getActionColor(log.action, log.details);
-                    const time = log.timestamp
-                      ? new Date(log.timestamp).toLocaleTimeString("en-US", {
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })
-                      : "—";
-                    const qty = logQtyAbs(log);
-                    const name = getEventColorName(log);
-                    const verb = formatBriefVerb(log);
-                    const showVerb = activityKind === "actions";
-                    return (
-                      <React.Fragment
-                        key={`${log.timestamp}-${log.itemId}-${index}`}
-                      >
-                        {index > 0 ? (
-                          <Divider style={styles.attentionPopupDivider} />
-                        ) : null}
-                        <View style={styles.attentionPopupRow}>
-                          <View
-                            style={[
-                              styles.attentionPopupPill,
-                              { backgroundColor: accent },
-                            ]}
-                          >
-                            <Text style={styles.attentionPopupPillText}>
-                              {qty > 0 ? qty : "·"}
-                            </Text>
-                          </View>
-                          <View style={styles.attentionPopupRowText}>
-                            <Text
-                              style={[
-                                styles.attentionPopupRowTitle,
-                                { color: theme.colors.onSurface },
-                              ]}
-                              numberOfLines={2}
-                            >
-                              {showVerb ? (
-                                <Text style={{ color: accent, fontWeight: "700" }}>
-                                  {verb}
-                                </Text>
-                              ) : null}
-                              {showVerb && qty > 0 ? " " : null}
-                              {qty > 0
-                                ? `${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
-                                : showVerb
-                                  ? " "
-                                  : ""}
-                              <Text style={{ fontWeight: "700" }}>{name}</Text>
-                            </Text>
-                            <Text
-                              style={[
-                                styles.attentionPopupRowDetail,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {time}
-                            </Text>
-                          </View>
-                        </View>
-                      </React.Fragment>
-                    );
-                  })
-                )}
-              </ScrollFrame>
-              <View style={styles.attentionPopupActions}>
-                <Button
-                  mode="text"
-                  compact
-                  onPress={() => setActivityOpen(false)}
-                >
-                  Close
-                </Button>
-              </View>
-            </View>
-            {activityPanelPos.placement === "above" ? (
-              <>
-                <View
-                  style={[
-                    styles.attentionPopupCaretDownInner,
-                    {
-                      left: activityPanelPos.caretLeft + 1,
-                      borderTopColor: theme.colors.surfaceContainerHighest,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.attentionPopupCaretDown,
-                    {
-                      left: activityPanelPos.caretLeft,
                       borderTopColor: theme.colors.outlineVariant,
                     },
                   ]}
@@ -1991,7 +1808,7 @@ export default function DashboardScreen({
         </View>
       ) : null}
 
-      {!isAdmin && myRecentColors.length > 0 ? (
+      {!isAdmin && !isMobileLayout && myRecentColors.length > 0 ? (
         <View style={styles.recentColorsBlock}>
           <Text
             style={[
@@ -2051,7 +1868,18 @@ export default function DashboardScreen({
           >
             Transaction history
           </Text>
-          {!isAdmin ? (
+          {isAdmin ? (
+            <SegmentedButtons
+              value={activityPeriod}
+              onValueChange={setActivityPeriod}
+              style={styles.mobileHistoryTabs}
+              buttons={[
+                { value: "today", label: "Today" },
+                { value: "week", label: "This week" },
+                { value: "days30", label: "30 days" },
+              ]}
+            />
+          ) : (
             <SegmentedButtons
               value={historyScope}
               onValueChange={setHistoryScope}
@@ -2061,61 +1889,89 @@ export default function DashboardScreen({
                 { value: "all", label: "All activity" },
               ]}
             />
-          ) : null}
-          <View style={styles.activityPeriodRow}>
-            {[
-              { key: "today", label: "Today" },
-              { key: "week", label: "This week" },
-              { key: "days30", label: "30 days" },
-            ].map((opt) => (
-              <Button
-                key={opt.key}
-                mode={activityPeriod === opt.key ? "contained" : "outlined"}
-                compact
-                onPress={() => setActivityPeriod(opt.key)}
-                style={styles.historyToggleBtn}
-                contentStyle={styles.historyToggleContent}
-                labelStyle={styles.historyToggleLabel}
-              >
-                {opt.label}
-              </Button>
-            ))}
-          </View>
-          <SegmentedButtons
-            value={mobileHistoryTab}
-            onValueChange={setMobileHistoryTab}
-            style={styles.mobileHistoryTabs}
-            buttons={[
-              { value: "all", label: "All" },
-              { value: "checks", label: "Checks" },
-              { value: "usage", label: "Usage" },
-            ]}
-          />
-          {!auditLogsLoaded ? (
-            <View style={styles.statLoadingRow}>
-              <ActivityIndicator size="small" />
-              <Text style={styles.statLoadingLabel}>Loading…</Text>
-            </View>
-          ) : mobileHistoryLogs.length === 0 ? (
-            <View style={styles.briefHistoryEmptyWrap}>
-              <Text
-                style={[
-                  styles.dualBriefEmptyText,
-                  { color: theme.colors.onSurface },
-                ]}
-              >
-                No activity in this period
-              </Text>
-            </View>
-          ) : (
-            <View style={[styles.briefHistoryCard, surfaceCardStyle]}>
-              {mobileHistoryLogs.map((log, index) =>
-                renderBriefLogRow(log, index, {
-                  showBooth: resolveActionType(log) === "material_usage",
-                }),
-              )}
-            </View>
           )}
+          <View
+            style={[
+              styles.briefHistoryShell,
+              surfaceCardStyle,
+              { borderColor: theme.colors.outlineVariant },
+            ]}
+          >
+            <SegmentedButtons
+              value={mobileHistoryTab}
+              onValueChange={setMobileHistoryTab}
+              style={styles.briefHistoryListTabs}
+              buttons={[
+                {
+                  value: "all",
+                  label: "All",
+                  checkedColor: theme.colors.onPrimary,
+                  uncheckedColor: theme.colors.onSurfaceVariant,
+                  style:
+                    mobileHistoryTab === "all"
+                      ? {
+                          backgroundColor: theme.colors.primary,
+                          borderColor: theme.colors.primary,
+                        }
+                      : undefined,
+                },
+                {
+                  value: "checks",
+                  label: "Checks",
+                  checkedColor: theme.colors.onPrimary,
+                  uncheckedColor: theme.colors.onSurfaceVariant,
+                  style:
+                    mobileHistoryTab === "checks"
+                      ? {
+                          backgroundColor: theme.colors.primary,
+                          borderColor: theme.colors.primary,
+                        }
+                      : undefined,
+                },
+                {
+                  value: "usage",
+                  label: "Usage",
+                  checkedColor: theme.colors.onPrimary,
+                  uncheckedColor: theme.colors.onSurfaceVariant,
+                  style:
+                    mobileHistoryTab === "usage"
+                      ? {
+                          backgroundColor: theme.colors.primary,
+                          borderColor: theme.colors.primary,
+                        }
+                      : undefined,
+                },
+              ]}
+            />
+            {!auditLogsLoaded ? (
+              <View style={styles.statLoadingRow}>
+                <ActivityIndicator size="small" />
+                <Text style={styles.statLoadingLabel}>Loading…</Text>
+              </View>
+            ) : mobileHistoryLogs.length === 0 ? (
+              <View style={styles.briefHistoryEmptyWrap}>
+                <Text
+                  style={[
+                    styles.dualBriefEmptyText,
+                    { color: theme.colors.onSurface },
+                  ]}
+                >
+                  {mobileHistoryTab === "checks"
+                    ? "No check in/outs in this period"
+                    : mobileHistoryTab === "usage"
+                      ? "No material usage in this period"
+                      : "No activity in this period"}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.briefHistoryListBody}>
+                {renderPagedBriefLogs(mobileHistoryLogsVisible, {
+                  showBooth: "auto",
+                })}
+                {renderViewMoreButton(mobileHistoryHasMore)}
+              </View>
+            )}
+          </View>
         </View>
       ) : null}
 
@@ -2140,26 +1996,30 @@ export default function DashboardScreen({
                   { value: "all", label: "All activity" },
                 ]}
               />
+            ) : (
+              <SegmentedButtons
+                value={activityPeriod}
+                onValueChange={setActivityPeriod}
+                style={styles.historyScopeTabs}
+                buttons={[
+                  { value: "today", label: "Today" },
+                  { value: "week", label: "This week" },
+                  { value: "days30", label: "30 days" },
+                ]}
+              />
+            )}
+            {!isAdmin ? (
+              <SegmentedButtons
+                value={activityPeriod}
+                onValueChange={setActivityPeriod}
+                style={styles.historyScopeTabs}
+                buttons={[
+                  { value: "today", label: "Today" },
+                  { value: "week", label: "This week" },
+                  { value: "days30", label: "30 days" },
+                ]}
+              />
             ) : null}
-            <View style={styles.activityPeriodRow}>
-              {[
-                { key: "today", label: "Today" },
-                { key: "week", label: "This week" },
-                { key: "days30", label: "30 days" },
-              ].map((opt) => (
-                <Button
-                  key={opt.key}
-                  mode={activityPeriod === opt.key ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setActivityPeriod(opt.key)}
-                  style={styles.historyToggleBtn}
-                  contentStyle={styles.historyToggleContent}
-                  labelStyle={styles.historyToggleLabel}
-                >
-                  {opt.label}
-                </Button>
-              ))}
-            </View>
             <Text
               style={[
                 styles.activityPeriodHint,
@@ -2182,6 +2042,7 @@ export default function DashboardScreen({
             </View>
           ) : (
             <>
+              {isAdmin ? (
               <View style={styles.activityTotalsRow}>
                 <View
                   style={[
@@ -2285,6 +2146,7 @@ export default function DashboardScreen({
                   </Text>
                 </View>
               </View>
+              ) : null}
 
               <View style={styles.dualBriefRow}>
                 <View
@@ -2327,9 +2189,8 @@ export default function DashboardScreen({
                       contentContainerStyle={styles.dualBriefListContent}
                       style={styles.dualBriefScroll}
                     >
-                      {adminPeriodCheckOutLogs.map((log, index) =>
-                        renderBriefLogRow(log, index),
-                      )}
+                      {renderPagedBriefLogs(visibleCheckOutLogs)}
+                      {renderViewMoreButton(checkOutHasMore)}
                     </ScrollFrame>
                   )}
                 </View>
@@ -2374,9 +2235,8 @@ export default function DashboardScreen({
                       contentContainerStyle={styles.dualBriefListContent}
                       style={styles.dualBriefScroll}
                     >
-                      {adminPeriodCheckInLogs.map((log, index) =>
-                        renderBriefLogRow(log, index),
-                      )}
+                      {renderPagedBriefLogs(visibleCheckInLogs)}
+                      {renderViewMoreButton(checkInHasMore)}
                     </ScrollFrame>
                   )}
                 </View>
@@ -2421,9 +2281,10 @@ export default function DashboardScreen({
                       contentContainerStyle={styles.dualBriefListContent}
                       style={styles.dualBriefScroll}
                     >
-                      {adminPeriodUsageLogs.map((log, index) =>
-                        renderBriefLogRow(log, index, { showBooth: true }),
-                      )}
+                      {renderPagedBriefLogs(visibleUsageLogsPaged, {
+                        showBooth: true,
+                      })}
+                      {renderViewMoreButton(usageHasMore)}
                     </ScrollFrame>
                   )}
                 </View>
@@ -3316,11 +3177,43 @@ const styles = StyleSheet.create({
     marginBottom: space[5],
   },
   mobileHistoryTabs: {
-    marginBottom: space[2],
+    marginBottom: space[3],
   },
   historyScopeTabs: {
     marginBottom: space[3],
     alignSelf: "stretch",
+  },
+  briefHistoryShell: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  briefHistoryListTabs: {
+    marginHorizontal: space[2],
+    marginTop: space[2],
+    marginBottom: space[1],
+  },
+  briefHistoryListBody: {
+    overflow: "hidden",
+  },
+  briefDayHeader: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  viewMoreHistoryBtn: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewMoreHistoryBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
   briefHistoryEmpty: {
     fontSize: 13,
