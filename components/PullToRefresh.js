@@ -25,7 +25,9 @@ function isScrollTreeAtTop(rootEl) {
   for (let i = 0; i < all.length; i += 1) {
     const el = all[i];
     if (!el || el.nodeType !== 1) continue;
-    const style = window.getComputedStyle?.(el);
+    const style = typeof window !== "undefined"
+      ? window.getComputedStyle?.(el)
+      : null;
     if (!style) continue;
     const oy = style.overflowY;
     const scrollable = oy === "auto" || oy === "scroll" || oy === "overlay";

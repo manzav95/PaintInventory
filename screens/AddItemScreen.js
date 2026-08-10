@@ -17,7 +17,6 @@ import {
   IconButton,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
-import ItemAdvancedFields from "../components/ItemAdvancedFields";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { normalizeItemNameForSave } from "../utils/itemNameUtils";
@@ -46,6 +45,10 @@ function nameImpliesCustomPaint(name) {
   const t = String(name ?? "").trim();
   if (!t) return false;
   return t.startsWith("#") || /^\d/.test(t);
+}
+
+function textMentionsFlorenza(...parts) {
+  return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
 }
 
 function idImpliesPrecat(id) {
@@ -141,9 +144,8 @@ export default function AddItemScreen({
   const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
   const [poCategory, setPoCategory] = useState("mixing");
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [unitLabel, setUnitLabel] = useState("");
   const [catalystPercentInput, setCatalystPercentInput] = useState("");
+  const [colorLabel, setColorLabel] = useState("");
   const [fieldErrors, setFieldErrors] = useState({
     itemId: false,
     name: false,
@@ -152,23 +154,17 @@ export default function AddItemScreen({
   const isCustomType = CUSTOM_TYPES.includes(type);
   const usesCustomContainer = isCustomType || type === "precat";
   const inputStyle = isWideDesktop ? styles.inputDesktop : styles.input;
-  const unitAffix = (unitLabel || "").trim() || "gal";
-  const advancedToggle = (
-    <Button
-      mode={advancedOpen ? "contained" : "outlined"}
-      compact
-      icon="tune"
-      onPress={() => setAdvancedOpen((o) => !o)}
-    >
-      Advanced
-    </Button>
-  );
+  const showFlorenzaCatalyst = textMentionsFlorenza(name, colorLabel);
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type) || type === "precat") {
       setLocation(CUSTOM_CONTAINER_LOCATION);
     }
   }, [type]);
+
+  useEffect(() => {
+    if (!showFlorenzaCatalyst) setCatalystPercentInput("");
+  }, [showFlorenzaCatalyst]);
 
   const handleItemIdChange = (text) => {
     setItemId(text);
@@ -282,16 +278,18 @@ export default function AddItemScreen({
     }
 
     let catalystPercentVal = null;
-    const catRaw = catalystPercentInput.trim();
-    if (catRaw !== "") {
-      const n = parseFloat(catRaw);
-      if (isNaN(n) || n < 0) {
-        showAlert("Invalid", "Catalyst % must be 0 or greater.");
-        return;
+    if (showFlorenzaCatalyst) {
+      const catRaw = catalystPercentInput.trim();
+      if (catRaw !== "") {
+        const n = parseFloat(catRaw);
+        if (isNaN(n) || n < 0) {
+          showAlert("Invalid", "Catalyst % must be 0 or greater.");
+          return;
+        }
+        catalystPercentVal = n;
       }
-      catalystPercentVal = n;
     }
-    const unitLabelVal = unitLabel.trim() || null;
+    const colorLabelVal = colorLabel.trim() || null;
 
     const item = {
       id: tid,
@@ -309,8 +307,8 @@ export default function AddItemScreen({
       ...(extRaw && { external_code: extRaw }),
       ...(rexRaw && { rex: rexRaw }),
       ...(lotDateVal && { lot_date: lotDateVal }),
-      ...(unitLabelVal && { unit_label: unitLabelVal }),
-      ...(catalystPercentVal != null && { catalyst_percent: catalystPercentVal }),
+      ...(colorLabelVal && { color_label: colorLabelVal }),
+      catalyst_percent: catalystPercentVal,
     };
 
     onSave(item);
@@ -503,42 +501,74 @@ export default function AddItemScreen({
   };
 
   const colorSection = (
-    <View style={isWideDesktop ? styles.colorRowDesktop : styles.colorRow}>
-      <TextInput
-        label="Hex color"
-        value={hexColor}
-        onChangeText={setHexColor}
-        mode="outlined"
-        style={[inputStyle, styles.colorInput, isWideDesktop && { marginBottom: 0 }]}
-        dense={isWideDesktop}
-        placeholder="#aabbcc"
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {isWeb && (
-        <View style={styles.colorPickerWrap}>
-          <input
-            type="color"
-            value={
-              hexColor && /^#?[0-9A-Fa-f]{6}$/.test(hexColor.trim())
-                ? hexColor.trim().startsWith("#")
-                  ? hexColor.trim()
-                  : "#" + hexColor.trim()
-                : "#808080"
-            }
-            onChange={handleColorPickerChange}
-            style={styles.nativeColorInput}
-            title="Pick color"
-          />
-        </View>
-      )}
-      {!isWeb && (
-        <IconButton
-          icon="camera"
-          size={24}
-          onPress={() => setCameraPickerVisible(true)}
+    <View style={isWideDesktop ? undefined : { marginBottom: 15 }}>
+      <View style={isWideDesktop ? styles.colorRowDesktop : styles.colorRow}>
+        <TextInput
+          label="Color name (optional)"
+          value={colorLabel}
+          onChangeText={setColorLabel}
+          mode="outlined"
+          style={[
+            inputStyle,
+            styles.colorNameInput,
+            isWideDesktop && { marginBottom: 0 },
+          ]}
+          dense={isWideDesktop}
+          placeholder="Actual paint color name"
         />
-      )}
+        <TextInput
+          label="Hex color"
+          value={hexColor}
+          onChangeText={setHexColor}
+          mode="outlined"
+          style={[
+            inputStyle,
+            styles.colorInput,
+            isWideDesktop && { marginBottom: 0 },
+          ]}
+          dense={isWideDesktop}
+          placeholder="#aabbcc"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {isWeb && (
+          <View style={styles.colorPickerWrap}>
+            <input
+              type="color"
+              value={
+                hexColor && /^#?[0-9A-Fa-f]{6}$/.test(hexColor.trim())
+                  ? hexColor.trim().startsWith("#")
+                    ? hexColor.trim()
+                    : "#" + hexColor.trim()
+                  : "#808080"
+              }
+              onChange={handleColorPickerChange}
+              style={styles.nativeColorInput}
+              title="Pick color"
+            />
+          </View>
+        )}
+        {!isWeb && (
+          <IconButton
+            icon="camera"
+            size={24}
+            onPress={() => setCameraPickerVisible(true)}
+          />
+        )}
+      </View>
+      {showFlorenzaCatalyst ? (
+        <TextInput
+          label="Custom catalyst %"
+          value={catalystPercentInput}
+          onChangeText={setCatalystPercentInput}
+          mode="outlined"
+          style={[inputStyle, isWideDesktop && { marginTop: 8, marginBottom: 0 }]}
+          dense={isWideDesktop}
+          keyboardType="decimal-pad"
+          placeholder="e.g. 3.9"
+          right={<TextInput.Affix text="%" />}
+        />
+      ) : null}
     </View>
   );
 
@@ -553,7 +583,6 @@ export default function AddItemScreen({
           title="Add New Paint"
           onBack={handleBack}
           embeddedInShell={embeddedInShell}
-          actions={!isWideDesktop ? advancedToggle : null}
         />
         <Card
           style={[
@@ -631,7 +660,7 @@ export default function AddItemScreen({
                       keyboardType={
                         allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
                       }
-                      right={<TextInput.Affix text={unitAffix} />}
+                      right={<TextInput.Affix text="gal" />}
                     />
                   </FormCol>
                   <FormCol desktop flex={0.7}>
@@ -723,17 +752,7 @@ export default function AddItemScreen({
                   <Button mode="outlined" onPress={onCancel}>
                     Cancel
                   </Button>
-                  <View style={styles.advancedDesktopSlot}>{advancedToggle}</View>
                 </View>
-                <ItemAdvancedFields
-                  visible={advancedOpen}
-                  unitLabel={unitLabel}
-                  onUnitLabelChange={setUnitLabel}
-                  catalystPercent={catalystPercentInput}
-                  onCatalystPercentChange={setCatalystPercentInput}
-                  materialType={type}
-                  dense
-                />
               </>
             ) : (
               <>
@@ -783,7 +802,7 @@ export default function AddItemScreen({
                   keyboardType={
                     allowsHalfGallon(type) ? "decimal-pad" : "number-pad"
                   }
-                  right={<TextInput.Affix text={unitAffix} />}
+                  right={<TextInput.Affix text="gal" />}
                 />
                 <TextInput
                   label="Minimum quantity (low stock threshold)"
@@ -843,14 +862,6 @@ export default function AddItemScreen({
                     </Text>
                   </View>
                 )}
-                <ItemAdvancedFields
-                  visible={advancedOpen}
-                  unitLabel={unitLabel}
-                  onUnitLabelChange={setUnitLabel}
-                  catalystPercent={catalystPercentInput}
-                  onCatalystPercentChange={setCatalystPercentInput}
-                  materialType={type}
-                />
                 <View style={styles.buttonContainer}>
                   <Button
                     mode="contained"
@@ -970,13 +981,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 12,
-    marginBottom: 15,
+    marginBottom: 0,
   },
   colorRowDesktop: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     flex: 1,
+    marginBottom: 0,
+  },
+  colorNameInput: {
+    flex: 1.2,
     marginBottom: 0,
   },
   colorInput: {
@@ -1002,8 +1017,5 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     alignItems: "center",
     flexWrap: "wrap",
-  },
-  advancedDesktopSlot: {
-    marginLeft: "auto",
   },
 });

@@ -41,6 +41,8 @@ export default function AppShell({
   onOpenSettings,
   onSignOut,
   notifications,
+  /** Optional controls rendered in the top bar immediately before Refresh (desktop). */
+  topBarExtras = null,
 }) {
   const theme = useTheme();
   const { enablePullToRefresh } = useAppLayout();
@@ -165,6 +167,9 @@ export default function AppShell({
 
   const topActions = (
     <View style={styles.topActions}>
+      {topBarExtras ? (
+        <View style={styles.topBarExtras}>{topBarExtras}</View>
+      ) : null}
       {showRefreshButton ? (
         <View style={styles.topActionSlot}>
           <Animated.View style={{ transform: [{ rotate: refreshRotate }] }}>
@@ -449,6 +454,13 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     gap: 2,
     paddingRight: space[2],
+  },
+  topBarExtras: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: space[2],
+    marginRight: space[1],
   },
   topActionSlot: {
     width: 40,

@@ -262,6 +262,8 @@ export default function InventoryListScreen({
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
   const [recycleDueOnly, setRecycleDueOnly] = useState(false);
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
+  /** Mobile: item keys that currently show their color_label instead of name. */
+  const [revealedColorLabels, setRevealedColorLabels] = useState(() => new Set());
   const [itemActionMenu, setItemActionMenu] = useState(null); // { item, pageX, pageY }
   const [copiedItemId, setCopiedItemId] = useState(null);
   const copiedItemIdTimerRef = useRef(null);
@@ -308,6 +310,15 @@ export default function InventoryListScreen({
     return () => clearTimeout(timer);
   }, []);
 
+  // Keep in sync when shell top-bar controls change view mode / book filter.
+  useEffect(() => {
+    if (initialViewMode != null) setViewMode(initialViewMode);
+  }, [initialViewMode]);
+
+  useEffect(() => {
+    if (initialBookFilter != null) setBookFilter(initialBookFilter);
+  }, [initialBookFilter]);
+
   useEffect(() => {
     return () => {
       if (copiedItemIdTimerRef.current) {
@@ -324,6 +335,28 @@ export default function InventoryListScreen({
       scrollOffset,
       ...next,
     });
+  };
+
+  const changeViewMode = (next) => {
+    setViewMode(next);
+    notifyViewState({ viewMode: next });
+  };
+
+  const changeBookFilter = (next) => {
+    const value =
+      typeof next === "function" ? next(bookFilter) : next;
+    setBookFilter(value);
+    notifyViewState({ bookFilter: value });
+  };
+
+  const toggleBookFilter = () => {
+    changeBookFilter((prev) =>
+      prev === "standard" ? "custom" : "standard",
+    );
+  };
+
+  const toggleViewMode = () => {
+    changeViewMode(viewMode === "colorBook" ? "inventory" : "colorBook");
   };
 
   const isCustomInventoryView =
@@ -549,8 +582,7 @@ export default function InventoryListScreen({
 
   useEffect(() => {
     if (recycleDueFilter) {
-      setBookFilter("custom");
-      notifyViewState({ bookFilter: "custom" });
+      changeBookFilter("custom");
     }
   }, [recycleDueFilter]);
 
@@ -1020,6 +1052,7 @@ export default function InventoryListScreen({
   const renderColorCard = ({ item, desktop = false }) => {
     const bgHex = getValidHex(item.hex_color) || "#e0e0e0";
     const name = item.name || "Unnamed";
+    const colorLabel = String(item.color_label || "").trim();
     return (
       <Pressable
         style={
@@ -1034,6 +1067,17 @@ export default function InventoryListScreen({
         >
           {name}
         </Text>
+        {colorLabel ? (
+          <Text
+            style={[
+              styles.colorBookCardLabel,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+            numberOfLines={2}
+          >
+            {colorLabel}
+          </Text>
+        ) : null}
       </Pressable>
     );
   };
@@ -1043,6 +1087,7 @@ export default function InventoryListScreen({
     if (!it) return null;
     const bgHex = getValidHex(it.hex_color) || "#e0e0e0";
     const name = it.name || "Unnamed";
+    const colorLabel = String(it.color_label || "").trim();
     const type = (it.type || "").toLowerCase();
     const isStain = type === "stain" || type === "custom_stain";
     return (
@@ -1107,6 +1152,17 @@ export default function InventoryListScreen({
               >
                 {name}
               </Text>
+              {colorLabel ? (
+                <Text
+                  style={[
+                    styles.colorModalColorLabel,
+                    { color: theme.colors.onSurface },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {colorLabel}
+                </Text>
+              ) : null}
               {it.id ? (
                 <Text
                   style={[
@@ -1438,11 +1494,53 @@ export default function InventoryListScreen({
           >
             <View style={styles.itemHeader}>
               <View style={styles.itemNameBlock}>
-                <Text
-                  style={[styles.itemName, isLowStock && styles.lowStockText]}
-                >
-                  {item.name || "Unnamed Item"}
-                </Text>
+                {(() => {
+                  const colorLabel = String(item.color_label || "").trim();
+                  const itemKey = String(item.id || item.name || "");
+                  const showLabel =
+                    colorLabel && revealedColorLabels.has(itemKey);
+                  const titleText = showLabel
+                    ? colorLabel
+                    : item.name || "Unnamed Item";
+                  return (
+                    <Pressable
+                      onPress={(e) => {
+                        if (colorLabel) {
+                          e?.stopPropagation?.();
+                          setRevealedColorLabels((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(itemKey)) next.delete(itemKey);
+                            else next.add(itemKey);
+                            return next;
+                          });
+                          return;
+                        }
+                        handleItemActivate(item, e);
+                      }}
+                      hitSlop={6}
+                    >
+                      <Text
+                        style={[
+                          styles.itemName,
+                          isLowStock && styles.lowStockText,
+                        ]}
+                      >
+                        {titleText}
+                      </Text>
+                      {colorLabel && !showLabel ? (
+                        <Text
+                          style={[
+                            styles.itemColorLabelHint,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          Tap for color name
+                        </Text>
+                      ) : null}
+                    </Pressable>
+                  );
+                })()}
                 {isCustomInventoryView ? (
                   <RecycleDateUnderName
                     item={item}
@@ -1619,44 +1717,6 @@ export default function InventoryListScreen({
             title="Inventory"
             showBack={false}
             embeddedInShell={embeddedInShell}
-            actions={
-              <>
-                {viewMode === "colorBook" && (
-                  <Button
-                    mode={bookFilter === "standard" ? "outlined" : "contained"}
-                    compact
-                    onPress={() =>
-                      setBookFilter((prev) =>
-                        prev === "standard" ? "custom" : "standard",
-                      )
-                    }
-                    style={styles.viewModeButton}
-                    contentStyle={invBtnContentStyle}
-                    labelStyle={invBtnLabelStyle}
-                  >
-                    {bookFilter === "standard" ? "Custom" : "Stock"}
-                  </Button>
-                )}
-                <Button
-                  mode={viewMode === "colorBook" ? "contained" : "outlined"}
-                  compact
-                  onPress={() =>
-                    setViewMode(
-                      viewMode === "colorBook" ? "inventory" : "colorBook",
-                    )
-                  }
-                  style={[
-                    styles.viewModeButton,
-                    styles.viewModeButtonColorBook,
-                  ]}
-                  contentStyle={invBtnContentStyle}
-                  labelStyle={invBtnLabelStyle}
-                  icon="palette-outline"
-                >
-                  {viewMode === "colorBook" ? "Inventory" : "Color Book"}
-                </Button>
-              </>
-            }
           />
 
           {effectiveRecycleDue && (
@@ -1820,8 +1880,7 @@ export default function InventoryListScreen({
                         setRecycleDueOnly((v) => {
                           const next = !v;
                           if (next) {
-                            setBookFilter("custom");
-                            notifyViewState({ bookFilter: "custom" });
+                            changeBookFilter("custom");
                           }
                           return next;
                         });
@@ -2133,11 +2192,7 @@ export default function InventoryListScreen({
                                     : "contained"
                                 }
                                 compact
-                                onPress={() =>
-                                  setBookFilter((prev) =>
-                                    prev === "standard" ? "custom" : "standard",
-                                  )
-                                }
+                                onPress={toggleBookFilter}
                                 style={styles.viewModeButton}
                                 contentStyle={invBtnContentStyle}
                                 labelStyle={invBtnLabelStyle}
@@ -2795,11 +2850,7 @@ export default function InventoryListScreen({
                 <Button
                   mode={bookFilter === "standard" ? "outlined" : "contained"}
                   compact
-                  onPress={() =>
-                    setBookFilter((prev) =>
-                      prev === "standard" ? "custom" : "standard",
-                    )
-                  }
+                  onPress={toggleBookFilter}
                   style={styles.viewModeButtonMobile}
                   contentStyle={invBtnContentStyle}
                   labelStyle={invBtnLabelStyle}
@@ -2822,11 +2873,7 @@ export default function InventoryListScreen({
               <Button
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}
                 compact
-                onPress={() =>
-                  setViewMode(
-                    viewMode === "colorBook" ? "inventory" : "colorBook",
-                  )
-                }
+                onPress={toggleViewMode}
                 style={[
                   styles.viewModeButtonMobile,
                   styles.viewModeButtonColorBook,
@@ -2980,8 +3027,7 @@ export default function InventoryListScreen({
                     setRecycleDueOnly((v) => {
                       const next = !v;
                       if (next) {
-                        setBookFilter("custom");
-                        notifyViewState({ bookFilter: "custom" });
+                        changeBookFilter("custom");
                       }
                       return next;
                     });
@@ -3298,11 +3344,7 @@ export default function InventoryListScreen({
             <Button
               mode={bookFilter === "standard" ? "outlined" : "contained"}
               compact
-              onPress={() =>
-                setBookFilter((prev) =>
-                  prev === "standard" ? "custom" : "standard",
-                )
-              }
+              onPress={toggleBookFilter}
               style={styles.viewModeButtonMobile}
               contentStyle={invBtnContentStyle}
               labelStyle={invBtnLabelStyle}
@@ -3314,11 +3356,7 @@ export default function InventoryListScreen({
             <Button
               mode={viewMode === "colorBook" ? "contained" : "outlined"}
               compact
-              onPress={() =>
-                setViewMode(
-                  viewMode === "colorBook" ? "inventory" : "colorBook",
-                )
-              }
+              onPress={toggleViewMode}
               style={[
                 styles.viewModeButtonMobile,
                 styles.viewModeButtonColorBook,
@@ -3841,6 +3879,11 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginRight: 0,
   },
+  itemColorLabelHint: {
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: "500",
+  },
   itemQuantity: {
     fontSize: 16,
     fontWeight: "600",
@@ -3964,6 +4007,11 @@ const styles = StyleSheet.create({
   colorModalName: {
     fontSize: 18,
     fontWeight: "600",
+  },
+  colorModalColorLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 4,
   },
   colorModalId: {
     fontSize: 13,
@@ -4447,6 +4495,12 @@ const styles = StyleSheet.create({
   colorBookCardName: {
     fontSize: 11,
     marginTop: 4,
+    marginLeft: 2,
+    fontWeight: "500",
+  },
+  colorBookCardLabel: {
+    fontSize: 10,
+    marginTop: 2,
     marginLeft: 2,
     fontWeight: "500",
   },

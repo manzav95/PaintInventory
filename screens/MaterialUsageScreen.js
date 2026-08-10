@@ -58,6 +58,10 @@ import {
   formatWeekRangeLabel,
   addDaysIso,
 } from "../utils/wasteDrumConversion";
+import {
+  getMaterialUsageBusinessDate as getLogDate,
+  getMaterialUsageShift as getShift,
+} from "../utils/materialUsageDay";
 import { getMaterialTypeColor } from "../utils/materialTypes";
 import {
   colors,
@@ -413,61 +417,6 @@ function dayTotalsFromRows(rows, inventory) {
   return t;
 }
 
-/** Parse entry_time (e.g. "3:25 PM", "15:25", "12:30 AM") to minutes since midnight. Returns NaN if unparseable. */
-function parseTimeToMinutes(entryTime) {
-  if (!entryTime || typeof entryTime !== "string") return NaN;
-  const s = entryTime.trim();
-  const match12 = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (match12) {
-    let h = parseInt(match12[1], 10);
-    const m = parseInt(match12[2], 10);
-    const ampm = (match12[3] || "").toUpperCase();
-    if (ampm === "PM" && h !== 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-    return h * 60 + m;
-  }
-  const match24 = s.match(/^(\d{1,2}):(\d{2})$/);
-  if (match24) {
-    const h = parseInt(match24[1], 10);
-    const m = parseInt(match24[2], 10);
-    return h * 60 + m;
-  }
-  return NaN;
-}
-
-/** Standard: day 6:00–15:25 (360–925), swing 15:26–00:30 (926–1440 or 0–30). OT: day 6:00–16:25 (360–985), swing 16:26–02:30 (986–1440 or 0–150). */
-function getShift(entryTime, isOvertime) {
-  const M = parseTimeToMinutes(entryTime);
-  if (Number.isNaN(M)) return null;
-  if (isOvertime) {
-    if (M >= 360 && M <= 985) return "day";
-    if (M >= 986 || M <= 150) return "swing";
-  } else {
-    if (M >= 360 && M <= 925) return "day";
-    if (M >= 926 || M <= 30) return "swing";
-  }
-  return null;
-}
-
-/** Date key for grouping/stats: swing entries after midnight (e.g. 12:01am–12:30am) count as the previous calendar day. */
-function getLogDate(row, isOvertime) {
-  const dateStr = row.entry_date || "";
-  if (!dateStr) return dateStr;
-  const shift = getShift(row.entry_time, isOvertime);
-  if (shift !== "swing") return dateStr;
-  const M = parseTimeToMinutes(row.entry_time);
-  if (Number.isNaN(M)) return dateStr;
-  const overnightEnd = isOvertime ? 150 : 30;
-  if (M > overnightEnd) return dateStr;
-  try {
-    const d = new Date(dateStr + "T12:00:00.000Z");
-    d.setUTCDate(d.getUTCDate() - 1);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  } catch (e) {
-    return dateStr;
-  }
-}
-
 export default function MaterialUsageScreen({
   inventory = [],
   userName,
@@ -476,6 +425,7 @@ export default function MaterialUsageScreen({
   onBack,
   embeddedInShell = false,
   formRefreshKey = 0,
+  onUsageDataChanged,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -1036,6 +986,12 @@ export default function MaterialUsageScreen({
     setEditRow(null);
   };
 
+  const notifyUsageDataChanged = useCallback(() => {
+    if (typeof onUsageDataChanged === "function") {
+      onUsageDataChanged();
+    }
+  }, [onUsageDataChanged]);
+
   const handleSaveEdit = async (payload) => {
     if (!editRow?.id) return;
     setEditSaving(true);
@@ -1043,6 +999,7 @@ export default function MaterialUsageScreen({
       await MaterialUsageService.update(editRow.id, payload);
       setEditRow(null);
       await loadLogs();
+      notifyUsageDataChanged();
       showToast({ title: "Updated", message: "Material usage saved." });
     } catch (e) {
       showToast({
@@ -1069,6 +1026,7 @@ export default function MaterialUsageScreen({
       await MaterialUsageService.delete(row.id);
       if (editRow?.id === row.id) setEditRow(null);
       await loadLogs();
+      notifyUsageDataChanged();
       showToast({ title: "Deleted", message: "Material usage removed." });
     } catch (e) {
       showToast({
@@ -1092,6 +1050,7 @@ export default function MaterialUsageScreen({
         setBoothFilter(entry.booth);
       }
       await loadLogs();
+      notifyUsageDataChanged();
     } catch (e) {
       console.error("Submit material usage:", e);
       showToast({

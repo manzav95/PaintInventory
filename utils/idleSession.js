@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const IDLE_LOGOUT_MS = 5 * 60 * 60 * 1000;
+export const IDLE_LOGOUT_MS = 2 * 60 * 60 * 1000;
 const LAST_ACTIVITY_KEY = "@inventory_last_activity_at";
 
 export function isAdminUser(userName) {

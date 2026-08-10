@@ -19,7 +19,6 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
-import ItemAdvancedFields from "../components/ItemAdvancedFields";
 import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
 import showAlert from "../utils/showAlert";
@@ -42,6 +41,10 @@ import { resolveUnitPrice } from "../utils/pricing";
 import { colors, fontFamily } from "../theme/tokens";
 
 const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+
+function textMentionsFlorenza(...parts) {
+  return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
+}
 
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
@@ -160,24 +163,15 @@ export default function ItemDetailScreen({
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [poCategory, setPoCategory] = useState("mixing");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [unitLabel, setUnitLabel] = useState("");
   const [catalystPercentInput, setCatalystPercentInput] = useState("");
+  const [colorLabelInput, setColorLabelInput] = useState(
+    item?.color_label != null ? String(item.color_label) : "",
+  );
   const isCustomType = CUSTOM_TYPES.includes(type);
   const recycleDueDisplay =
     formatDateDisplay(item?.recycle_date) ||
     formatRecycleDueFromLotDate(lotDateInput);
-  const unitAffix = unitLabel.trim() || "gal";
-  const advancedToggle = (
-    <Button
-      mode={advancedOpen ? "contained" : "outlined"}
-      compact
-      icon="tune"
-      onPress={() => setAdvancedOpen((o) => !o)}
-    >
-      Advanced
-    </Button>
-  );
+  const showFlorenzaCatalyst = textMentionsFlorenza(name, colorLabelInput);
 
   const normalizeHex = (raw) => {
     const s = String(raw).trim().replace(/^#/, "");
@@ -230,9 +224,6 @@ export default function ItemDetailScreen({
     setRexInput(item?.rex != null ? String(item.rex) : "");
   }, [item?.id, item?.rex]);
 
-  useEffect(() => {
-    setUnitLabel(item?.unit_label != null ? String(item.unit_label) : "");
-  }, [item?.id, item?.unit_label]);
 
   useEffect(() => {
     setCatalystPercentInput(
@@ -241,6 +232,11 @@ export default function ItemDetailScreen({
         : "",
     );
   }, [item?.id, item?.catalyst_percent]);
+  useEffect(() => {
+    setColorLabelInput(
+      item?.color_label != null ? String(item.color_label) : "",
+    );
+  }, [item?.id, item?.color_label]);
 
   useEffect(() => {
     setFieldErrors({});
@@ -384,14 +380,16 @@ export default function ItemDetailScreen({
     qtyVal = qtyParsed.value;
 
     let catalystPercentVal = null;
-    const catRaw = catalystPercentInput.trim();
-    if (catRaw !== "") {
-      const n = parseFloat(catRaw);
-      if (isNaN(n) || n < 0) {
-        showAlert("Invalid", "Catalyst % must be 0 or greater.");
-        return;
+    if (showFlorenzaCatalyst) {
+      const catRaw = catalystPercentInput.trim();
+      if (catRaw !== "") {
+        const n = parseFloat(catRaw);
+        if (isNaN(n) || n < 0) {
+          showAlert("Invalid", "Catalyst % must be 0 or greater.");
+          return;
+        }
+        catalystPercentVal = n;
       }
-      catalystPercentVal = n;
     }
 
     const updatedItem = {
@@ -410,8 +408,9 @@ export default function ItemDetailScreen({
       lot_date: lotDateVal,
       external_code: externalCodeVal,
       rex: rexVal,
-      unit_label: unitLabel.trim() || null,
-      catalyst_percent: catalystPercentVal,
+      unit_label: item?.unit_label != null ? item.unit_label : null,
+      catalyst_percent: showFlorenzaCatalyst ? catalystPercentVal : null,
+      color_label: colorLabelInput.trim() || null,
       is_mixing: poCategory !== "ap",
       po_label_ap: poCategory === "ap",
       po_label_mixing: poCategory !== "ap",
@@ -478,56 +477,92 @@ export default function ItemDetailScreen({
       keyboardType={allowsHalfGallon(type) ? "decimal-pad" : "number-pad"}
       style={inputStyle}
       dense={isWideDesktop}
-      right={<TextInput.Affix text={unitAffix} />}
+      right={<TextInput.Affix text="gal" />}
     />
   ) : (
     <ReadOnlyValue>
-      {formatGallonQuantity(quantity)} {unitAffix}
+      {formatGallonQuantity(quantity)} gal
     </ReadOnlyValue>
   );
 
   const colorSection = isAdmin ? (
-    <View style={isWideDesktop ? styles.colorRowDesktop : styles.colorRow}>
-      <TextInput
-        label="Hex color"
-        value={hexColorInput}
-        onChangeText={setHexColorInput}
-        mode="outlined"
-        style={[inputStyle, styles.colorInput, isWideDesktop && { marginBottom: 0 }]}
-        dense={isWideDesktop}
-        placeholder="#aabbcc"
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {isWeb && (
-        <View style={styles.colorPickerWrap}>
-          <input
-            type="color"
-            value={
-              hexColorInput && /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim())
-                ? hexColorInput.trim().startsWith("#")
-                  ? hexColorInput.trim()
-                  : "#" + hexColorInput.trim()
-                : "#808080"
-            }
-            onChange={(e) =>
-              e?.target?.value && setHexColorInput(e.target.value)
-            }
-            style={styles.nativeColorInput}
-            title="Pick color"
-          />
-        </View>
-      )}
-      {!isWeb && (
-        <IconButton
-          icon="camera"
-          size={24}
-          onPress={() => setCameraPickerVisible(true)}
+    <View style={isWideDesktop ? undefined : { marginBottom: 15 }}>
+      <View style={isWideDesktop ? styles.colorRowDesktop : styles.colorRow}>
+        <TextInput
+          label="Color name (optional)"
+          value={colorLabelInput}
+          onChangeText={setColorLabelInput}
+          mode="outlined"
+          style={[
+            inputStyle,
+            styles.colorNameInput,
+            isWideDesktop && { marginBottom: 0 },
+          ]}
+          dense={isWideDesktop}
+          placeholder="Actual paint color name"
         />
-      )}
+        <TextInput
+          label="Hex color"
+          value={hexColorInput}
+          onChangeText={setHexColorInput}
+          mode="outlined"
+          style={[
+            inputStyle,
+            styles.colorInput,
+            isWideDesktop && { marginBottom: 0 },
+          ]}
+          dense={isWideDesktop}
+          placeholder="#aabbcc"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {isWeb && (
+          <View style={styles.colorPickerWrap}>
+            <input
+              type="color"
+              value={
+                hexColorInput && /^#?[0-9A-Fa-f]{6}$/.test(hexColorInput.trim())
+                  ? hexColorInput.trim().startsWith("#")
+                    ? hexColorInput.trim()
+                    : "#" + hexColorInput.trim()
+                  : "#808080"
+              }
+              onChange={(e) =>
+                e?.target?.value && setHexColorInput(e.target.value)
+              }
+              style={styles.nativeColorInput}
+              title="Pick color"
+            />
+          </View>
+        )}
+        {!isWeb && (
+          <IconButton
+            icon="camera"
+            size={24}
+            onPress={() => setCameraPickerVisible(true)}
+          />
+        )}
+      </View>
+      {showFlorenzaCatalyst ? (
+        <TextInput
+          label="Custom catalyst %"
+          value={catalystPercentInput}
+          onChangeText={setCatalystPercentInput}
+          mode="outlined"
+          style={[inputStyle, isWideDesktop && { marginTop: 8, marginBottom: 0 }]}
+          dense={isWideDesktop}
+          keyboardType="decimal-pad"
+          placeholder="e.g. 3.9"
+        />
+      ) : null}
     </View>
   ) : (
     <View style={styles.colorPreviewReadOnly}>
+      {colorLabelInput.trim() ? (
+        <ReadOnlyValue style={{ marginRight: 8 }}>
+          {colorLabelInput.trim()}
+        </ReadOnlyValue>
+      ) : null}
       {hexColorInput ? (
         <>
           <View
@@ -677,9 +712,6 @@ export default function ItemDetailScreen({
         >
           Delete Item
         </Button>
-      )}
-      {isWideDesktop && isAdmin && (
-        <View style={styles.advancedDesktopSlot}>{advancedToggle}</View>
       )}
     </View>
   );
@@ -956,7 +988,6 @@ export default function ItemDetailScreen({
             title="Item Details"
             onBack={onBack}
             embeddedInShell={embeddedInShell}
-            actions={!isWideDesktop && isAdmin ? advancedToggle : null}
           />
           <Card
             style={[
@@ -999,20 +1030,20 @@ export default function ItemDetailScreen({
                       )}
                     </FormCol>
                     <FormCol desktop flex={1.3}>
-                      <TextInput
-                        label={isAdmin ? "Paint Name *" : "Paint Name"}
-                        value={name}
-                        onChangeText={(t) => {
-                          setName(t);
-                          setFieldErrors((e) => ({ ...e, name: false }));
-                        }}
-                        mode="outlined"
-                        style={inputStyle}
-                        dense
-                        disabled={!isAdmin}
-                        editable={isAdmin}
-                        error={!!fieldErrors.name}
-                      />
+                    <TextInput
+                      label={isAdmin ? "Paint Name *" : "Paint Name"}
+                      value={name}
+                      onChangeText={(t) => {
+                        setName(t);
+                        setFieldErrors((e) => ({ ...e, name: false }));
+                      }}
+                      mode="outlined"
+                      style={inputStyle}
+                      dense
+                      disabled={!isAdmin}
+                      editable={isAdmin}
+                      error={!!fieldErrors.name}
+                    />
                     </FormCol>
                     <FormCol desktop flex={1}>
                       {isAdmin ? (
@@ -1149,17 +1180,6 @@ export default function ItemDetailScreen({
 
                   {recycleBlock}
                   {lastScannedLine}
-                  {isAdmin && (
-                    <ItemAdvancedFields
-                      visible={advancedOpen}
-                      unitLabel={unitLabel}
-                      onUnitLabelChange={setUnitLabel}
-                      catalystPercent={catalystPercentInput}
-                      onCatalystPercentChange={setCatalystPercentInput}
-                      materialType={type}
-                      dense
-                    />
-                  )}
                   {actionButtons}
                 </>
               ) : (
@@ -1299,16 +1319,6 @@ export default function ItemDetailScreen({
                   {colorSection}
                   {recycleBlock}
                   {lastScannedLine}
-                  {isAdmin && (
-                    <ItemAdvancedFields
-                      visible={advancedOpen}
-                      unitLabel={unitLabel}
-                      onUnitLabelChange={setUnitLabel}
-                      catalystPercent={catalystPercentInput}
-                      onCatalystPercentChange={setCatalystPercentInput}
-                      materialType={type}
-                    />
-                  )}
                   {actionButtons}
                 </>
               )}
@@ -1458,13 +1468,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 12,
-    marginBottom: 15,
+    marginBottom: 0,
   },
   colorRowDesktop: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     flex: 1,
+    marginBottom: 0,
+  },
+  colorNameInput: {
+    flex: 1.2,
     marginBottom: 0,
   },
   colorInput: {

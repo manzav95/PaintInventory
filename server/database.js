@@ -337,6 +337,13 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'items' AND column_name = 'color_label') THEN
+          ALTER TABLE items ADD COLUMN color_label TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
     console.log("Items table ready");
 
     // Backfill missing unit prices (blank / null → default)
@@ -674,6 +681,10 @@ class Database {
       const n = Number(item.catalyst_percent);
       if (Number.isFinite(n) && n >= 0) catalystPercent = n;
     }
+    const colorLabel =
+      item.color_label != null && String(item.color_label).trim() !== ""
+        ? String(item.color_label).trim()
+        : null;
     try {
       // Pre-check duplicate name (case-insensitive)
       const nameTrim = item.name != null ? String(item.name).trim() : "";
@@ -690,8 +701,8 @@ class Database {
         }
       }
       await this.pool.query(
-        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing, unit_label, catalyst_percent)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
+        `INSERT INTO items (id, name, quantity, description, location, "lastScanned", "lastScannedBy", "createdAt", "updatedAt", "minQuantity", price, "type", "display_order", hex_color, lot_date, recycle_date, external_code, rex, is_mixing, unit_label, catalyst_percent, color_label)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
         [
           item.id,
           item.name,
@@ -714,6 +725,7 @@ class Database {
           isMixing,
           unitLabel,
           catalystPercent,
+          colorLabel,
         ],
       );
     } catch (e) {
@@ -747,6 +759,7 @@ class Database {
         is_mixing: isMixing,
         unit_label: unitLabel,
         catalyst_percent: catalystPercent,
+        color_label: colorLabel,
       }),
     };
   }
@@ -774,6 +787,7 @@ class Database {
       "is_mixing",
       "unit_label",
       "catalyst_percent",
+      "color_label",
       // Legacy PO fields (kept for backward compatibility)
       "po_label_ap",
       "po_label_mixing",
@@ -846,6 +860,11 @@ class Database {
             const n = Number(v);
             values.push(Number.isFinite(n) && n >= 0 ? n : null);
           }
+        } else if (key === "color_label") {
+          const v = updates[key];
+          values.push(
+            v != null && String(v).trim() !== "" ? String(v).trim() : null,
+          );
         } else if (key === "po_label_ap" || key === "po_label_mixing") {
           const v = updates[key];
           if (v === true || v === false) values.push(v);

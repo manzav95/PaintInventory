@@ -340,9 +340,9 @@ export default function App() {
             setCurrentScreen('login');
             return;
           }
-          if (!last) {
-            await recordUserActivity();
-          }
+          // Treat a page reload as activity so refresh does not feel like a logout
+          // as long as the idle window has not expired.
+          await recordUserActivity();
         }
         idleLogoutTriggeredRef.current = false;
         setUserName(stored);
@@ -391,7 +391,7 @@ export default function App() {
     setCurrentScreen('login');
     Alert.alert(
       'Session ended',
-      'You were logged out after 5 hours of inactivity.',
+      'You were logged out after 2 hours of inactivity.',
     );
   }, []);
 
@@ -986,6 +986,15 @@ export default function App() {
         ...(Object.prototype.hasOwnProperty.call(item, 'rex') && {
           rex: item.rex,
         }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'unit_label') && {
+          unit_label: item.unit_label,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'catalyst_percent') && {
+          catalyst_percent: item.catalyst_percent,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'color_label') && {
+          color_label: item.color_label,
+        }),
       };
       result = await InventoryService.updateItem(idForApi, updates);
     } else {
@@ -1063,7 +1072,7 @@ export default function App() {
       Alert.alert('Not Allowed', 'Only admin can delete inventory.');
       return;
     }
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.confirm) {
       if (window.confirm('Are you sure you want to delete this item?')) {
         await performDelete(itemId);
       }
@@ -1102,7 +1111,7 @@ export default function App() {
     try {
       const API_URL = config.API_URL;
       const url = `${API_URL}/api/export/excel`;
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.open) {
         window.open(url, '_blank');
         showToast({ title: 'Export', message: 'Excel file download started.' });
       } else {
@@ -1425,6 +1434,7 @@ export default function App() {
           auditLogs={auditLogsCache ?? []}
           auditLogsLoaded={auditLogsCache !== null}
           materialUsageLogs={materialUsageLogsCache}
+          materialUsageOvertime={materialUsageOvertime}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
           showTransactionTable={true}
@@ -1464,6 +1474,7 @@ export default function App() {
           embeddedInShell
           formRefreshKey={formRefreshKey}
           onBack={() => navigateTo('home')}
+          onUsageDataChanged={() => refreshAuditLogs(true)}
         />
       </KeepAlivePane>
     ) : null;
@@ -1500,6 +1511,53 @@ export default function App() {
           currentScreen === 'add' ||
           // Inventory mobile/native list has its own pull-to-refresh.
           (currentScreen === 'list' && !isWebDesktop)
+        }
+        topBarExtras={
+          currentScreen === 'list' && isWebDesktop ? (
+            <>
+              {inventoryViewState.viewMode === 'colorBook' ? (
+                <Button
+                  mode={
+                    inventoryViewState.bookFilter === 'standard'
+                      ? 'outlined'
+                      : 'contained'
+                  }
+                  compact
+                  onPress={() =>
+                    setInventoryViewState((s) => ({
+                      ...s,
+                      bookFilter:
+                        s.bookFilter === 'standard' ? 'custom' : 'standard',
+                    }))
+                  }
+                >
+                  {inventoryViewState.bookFilter === 'standard'
+                    ? 'Custom'
+                    : 'Stock'}
+                </Button>
+              ) : null}
+              <Button
+                mode={
+                  inventoryViewState.viewMode === 'colorBook'
+                    ? 'contained'
+                    : 'outlined'
+                }
+                compact
+                icon="palette-outline"
+                onPress={() =>
+                  setInventoryViewState((s) => ({
+                    ...s,
+                    viewMode:
+                      s.viewMode === 'colorBook' ? 'inventory' : 'colorBook',
+                  }))
+                }
+              >
+                {inventoryViewState.viewMode === 'colorBook'
+                  ? 'Inventory'
+                  : 'Color Book'}
+              </Button>
+            </>
+          ) : null
         }
         onOpenSettings={() => navigateTo('settings')}
         onSignOut={handleSwitchUser}

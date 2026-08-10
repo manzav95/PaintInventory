@@ -72,7 +72,7 @@ export const MATERIAL_USAGE_FORM_HELP = {
       bullets: [
         "Normal mode: quantity in gallons (snaps to 0.25 gal steps).",
         "Cup gun: check “Cup gun?” and enter ounces instead.",
-        "Paint uses 3.9% catalyst (~5 oz/gal); clear/primer use 4%. Confirm when prompted. Custom items can override % in Advanced.",
+        "Paint uses 3.9% catalyst (~5 oz/gal); clear/primer use 4%. Confirm when prompted. If the paint name or color name includes Florenza, set a custom catalyst % on the item.",
         "Your entry shows in today’s log (admins see more history and filters).",
       ],
     },

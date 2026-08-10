@@ -27,6 +27,10 @@ import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import DashboardGreeting from "../components/DashboardGreeting";
 import ScrollFrame from "../components/ScrollFrame";
 import { getDayKey, formatDayHeader } from "../utils/transactionDayUtils";
+import {
+  getHistoryActivityMs,
+  getHistoryDayKey,
+} from "../utils/materialUsageDay";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 import { useAppLayout } from "../utils/layout";
 import {
@@ -89,46 +93,48 @@ function logBelongsToUser(log, userName) {
   return u === target;
 }
 
-function sortLogsNewestFirst(logs) {
+function sortLogsNewestFirst(logs, isOvertime = false) {
   return [...(Array.isArray(logs) ? logs : [])].sort(
     (a, b) =>
-      (b.timestamp ? new Date(b.timestamp).getTime() : 0) -
-      (a.timestamp ? new Date(a.timestamp).getTime() : 0),
+      getHistoryActivityMs(b, isOvertime) - getHistoryActivityMs(a, isOvertime),
   );
 }
 
 const HISTORY_PAGE_SIZE = 20;
 
-/** Initial window: newest calendar day, capped at 20 txs. */
-function initialHistoryVisibleCount(logs) {
-  const sorted = sortLogsNewestFirst(logs);
+/** Initial window: newest calendar/business day, capped at 20 txs. */
+function initialHistoryVisibleCount(logs, isOvertime = false) {
+  const sorted = sortLogsNewestFirst(logs, isOvertime);
   if (sorted.length === 0) return 0;
-  const firstDay = getDayKey(sorted[0].timestamp);
+  const firstDay = getHistoryDayKey(sorted[0], isOvertime);
   let dayCount = 0;
   for (const log of sorted) {
-    if (getDayKey(log.timestamp) !== firstDay) break;
+    if (getHistoryDayKey(log, isOvertime) !== firstDay) break;
     dayCount += 1;
   }
   return Math.min(dayCount, HISTORY_PAGE_SIZE);
 }
 
-function visibleHistoryCount(logs, extraPages) {
+function visibleHistoryCount(logs, extraPages, isOvertime = false) {
   const sortedLen = Array.isArray(logs) ? logs.length : 0;
   if (sortedLen === 0) return 0;
-  const initial = initialHistoryVisibleCount(logs);
-  return Math.min(initial + Math.max(0, extraPages) * HISTORY_PAGE_SIZE, sortedLen);
+  const initial = initialHistoryVisibleCount(logs, isOvertime);
+  return Math.min(
+    initial + Math.max(0, extraPages) * HISTORY_PAGE_SIZE,
+    sortedLen,
+  );
 }
 
-function limitLogsForHistoryPage(logs, extraPages) {
-  const sorted = sortLogsNewestFirst(logs);
-  const limit = visibleHistoryCount(sorted, extraPages);
+function limitLogsForHistoryPage(logs, extraPages, isOvertime = false) {
+  const sorted = sortLogsNewestFirst(logs, isOvertime);
+  const limit = visibleHistoryCount(sorted, extraPages, isOvertime);
   return sorted.slice(0, limit);
 }
 
-function historyHasMorePages(logs, extraPages) {
+function historyHasMorePages(logs, extraPages, isOvertime = false) {
   const sortedLen = Array.isArray(logs) ? logs.length : 0;
   if (sortedLen === 0) return false;
-  return visibleHistoryCount(logs, extraPages) < sortedLen;
+  return visibleHistoryCount(logs, extraPages, isOvertime) < sortedLen;
 }
 
 function isRecycleDue(item) {
@@ -152,6 +158,7 @@ export default function DashboardScreen({
   auditLogs: auditLogsFromApp = [],
   auditLogsLoaded: auditLogsLoadedFromApp = false,
   materialUsageLogs = [],
+  materialUsageOvertime = false,
   onRefresh,
   isRefreshing = false,
   showTransactionTable = true,
@@ -697,10 +704,10 @@ export default function DashboardScreen({
   const inActivityPeriod = useCallback(
     (log) => {
       const { start, end } = adminActivityRange;
-      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      const t = getHistoryActivityMs(log, materialUsageOvertime);
       return t >= start && t <= end;
     },
-    [adminActivityRange],
+    [adminActivityRange, materialUsageOvertime],
   );
 
   const matchesStandardScope = useCallback(
@@ -858,49 +865,78 @@ export default function DashboardScreen({
 
   const mobileHistoryLogs = useMemo(() => {
     const checks = [...adminPeriodCheckOutLogs, ...adminPeriodCheckInLogs];
-    if (mobileHistoryTab === "checks") return sortLogsNewestFirst(checks);
+    if (mobileHistoryTab === "checks")
+      return sortLogsNewestFirst(checks, materialUsageOvertime);
     if (mobileHistoryTab === "usage")
-      return sortLogsNewestFirst(adminPeriodUsageLogs);
-    return sortLogsNewestFirst([...checks, ...adminPeriodUsageLogs]);
+      return sortLogsNewestFirst(adminPeriodUsageLogs, materialUsageOvertime);
+    return sortLogsNewestFirst(
+      [...checks, ...adminPeriodUsageLogs],
+      materialUsageOvertime,
+    );
   }, [
     mobileHistoryTab,
     adminPeriodCheckOutLogs,
     adminPeriodCheckInLogs,
     adminPeriodUsageLogs,
+    materialUsageOvertime,
   ]);
 
   const mobileHistoryLogsVisible = useMemo(
-    () => limitLogsForHistoryPage(mobileHistoryLogs, historyExtraPages),
-    [mobileHistoryLogs, historyExtraPages],
+    () =>
+      limitLogsForHistoryPage(
+        mobileHistoryLogs,
+        historyExtraPages,
+        materialUsageOvertime,
+      ),
+    [mobileHistoryLogs, historyExtraPages, materialUsageOvertime],
   );
   const mobileHistoryHasMore = historyHasMorePages(
     mobileHistoryLogs,
     historyExtraPages,
+    materialUsageOvertime,
   );
 
   const visibleCheckOutLogs = useMemo(
-    () => limitLogsForHistoryPage(adminPeriodCheckOutLogs, historyExtraPages),
-    [adminPeriodCheckOutLogs, historyExtraPages],
+    () =>
+      limitLogsForHistoryPage(
+        adminPeriodCheckOutLogs,
+        historyExtraPages,
+        materialUsageOvertime,
+      ),
+    [adminPeriodCheckOutLogs, historyExtraPages, materialUsageOvertime],
   );
   const visibleCheckInLogs = useMemo(
-    () => limitLogsForHistoryPage(adminPeriodCheckInLogs, historyExtraPages),
-    [adminPeriodCheckInLogs, historyExtraPages],
+    () =>
+      limitLogsForHistoryPage(
+        adminPeriodCheckInLogs,
+        historyExtraPages,
+        materialUsageOvertime,
+      ),
+    [adminPeriodCheckInLogs, historyExtraPages, materialUsageOvertime],
   );
   const visibleUsageLogsPaged = useMemo(
-    () => limitLogsForHistoryPage(adminPeriodUsageLogs, historyExtraPages),
-    [adminPeriodUsageLogs, historyExtraPages],
+    () =>
+      limitLogsForHistoryPage(
+        adminPeriodUsageLogs,
+        historyExtraPages,
+        materialUsageOvertime,
+      ),
+    [adminPeriodUsageLogs, historyExtraPages, materialUsageOvertime],
   );
   const checkOutHasMore = historyHasMorePages(
     adminPeriodCheckOutLogs,
     historyExtraPages,
+    materialUsageOvertime,
   );
   const checkInHasMore = historyHasMorePages(
     adminPeriodCheckInLogs,
     historyExtraPages,
+    materialUsageOvertime,
   );
   const usageHasMore = historyHasMorePages(
     adminPeriodUsageLogs,
     historyExtraPages,
+    materialUsageOvertime,
   );
 
   useEffect(() => {
@@ -926,9 +962,41 @@ export default function DashboardScreen({
     </View>
   );
 
-  const formatBriefTime = (timestamp) => {
-    if (!timestamp) return "—";
-    return new Date(timestamp).toLocaleString("en-US", {
+  const formatBriefTime = (logOrTs) => {
+    // Material usage: prefer the time entered on the log form.
+    if (logOrTs && typeof logOrTs === "object") {
+      const log = logOrTs;
+      const isMu =
+        log.action === "material_usage" ||
+        log.details?._source === "material_usage";
+      if (isMu) {
+        const entryTime = String(log.details?.entry_time || "").trim();
+        const dayKey = getHistoryDayKey(log, materialUsageOvertime);
+        const dayShort = dayKey
+          ? (() => {
+              const d = new Date(`${dayKey}T12:00:00`);
+              if (Number.isNaN(d.getTime())) return "";
+              return d.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              });
+            })()
+          : "";
+        if (entryTime) {
+          return dayShort ? `${dayShort}, ${entryTime}` : entryTime;
+        }
+      }
+      const timestamp = log.timestamp;
+      if (!timestamp) return "—";
+      return new Date(timestamp).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
+    if (!logOrTs) return "—";
+    return new Date(logOrTs).toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -983,7 +1051,7 @@ export default function DashboardScreen({
               ]}
               numberOfLines={1}
             >
-              {formatBriefTime(log.timestamp)}
+              {formatBriefTime(log)}
             </Text>
             <Text
               style={[
@@ -1115,13 +1183,16 @@ export default function DashboardScreen({
 
   const renderPagedBriefLogs = (logs, { showBooth = false } = {}) => {
     let lastDayKey = null;
+    const firstKey = logs[0]
+      ? getHistoryDayKey(logs[0], materialUsageOvertime)
+      : null;
     const spansMultipleDays = logs.some(
-      (log) => getDayKey(log.timestamp) !== getDayKey(logs[0]?.timestamp),
+      (log) => getHistoryDayKey(log, materialUsageOvertime) !== firstKey,
     );
     return (
       <>
         {logs.map((log, index) => {
-          const dayKey = getDayKey(log.timestamp);
+          const dayKey = getHistoryDayKey(log, materialUsageOvertime);
           const showHeader =
             spansMultipleDays && dayKey && dayKey !== lastDayKey;
           if (dayKey) lastDayKey = dayKey;
@@ -1140,7 +1211,9 @@ export default function DashboardScreen({
                     { color: theme.colors.onSurfaceVariant },
                   ]}
                 >
-                  {formatDayHeader(log.timestamp)}
+                  {formatDayHeader(
+                    dayKey ? `${dayKey}T12:00:00` : log.timestamp,
+                  )}
                 </Text>
               ) : null}
               {renderBriefLogRow(log, index, { showBooth: booth })}

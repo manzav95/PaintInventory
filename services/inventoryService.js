@@ -244,6 +244,15 @@ class InventoryService {
         ...(item.is_mixing === true || item.is_mixing === false
           ? { is_mixing: item.is_mixing }
           : {}),
+        ...(Object.prototype.hasOwnProperty.call(item, "unit_label") && {
+          unit_label: item.unit_label,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, "catalyst_percent") && {
+          catalyst_percent: item.catalyst_percent,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, "color_label") && {
+          color_label: item.color_label,
+        }),
       };
 
       const result = await _fetch('/api/items', {
