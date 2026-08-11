@@ -11,6 +11,7 @@ import { IconButton, Text, useTheme } from "react-native-paper";
 import { layout, space, colors } from "../theme/tokens";
 import { useAppLayout } from "../utils/layout";
 import UserMenuAvatar from "./UserMenuAvatar";
+import BrandLogo from "./BrandLogo";
 import PullToRefresh from "./PullToRefresh";
 
 const DRAWER_MS = 200;
@@ -38,6 +39,8 @@ export default function AppShell({
   onRefresh,
   isRefreshing = false,
   disablePullToRefresh = false,
+  /** When true, main pane does not scroll — child fills height (e.g. Settings split view). */
+  lockMainScroll = false,
   onOpenSettings,
   onSignOut,
   notifications,
@@ -210,11 +213,7 @@ export default function AppShell({
           { borderBottomColor: theme.colors.outlineVariant },
         ]}
       >
-        <Text
-          style={[styles.drawerBrand, { color: theme.colors.onBackground }]}
-        >
-          Paint Inventory
-        </Text>
+        <BrandLogo variant="drawer" style={styles.drawerBrandLogo} />
         <IconButton
           icon="close"
           size={22}
@@ -296,9 +295,12 @@ export default function AppShell({
               styles.webMain,
               isNarrowDesktop && styles.webMainNarrow,
               mobile && styles.webMainMobile,
+              lockMainScroll && styles.webMainLocked,
             ]}
             contentStyle={
-              mobile ? styles.webMainScrollMobile : styles.webMainScroll
+              mobile || lockMainScroll
+                ? styles.webMainScrollMobile
+                : styles.webMainScroll
             }
             refreshing={isRefreshing}
             onRefresh={onRefresh}
@@ -478,6 +480,11 @@ const styles = StyleSheet.create({
     paddingBottom: space[6],
     minHeight: 0,
   },
+  webMainLocked: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
   webMainNarrow: {
     paddingHorizontal: space[6],
   },
@@ -539,9 +546,10 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  drawerBrand: {
-    fontSize: 16,
-    fontWeight: "700",
+  drawerBrandLogo: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: space[2],
   },
   drawerBody: {
     flex: 1,

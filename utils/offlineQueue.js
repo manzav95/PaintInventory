@@ -26,13 +26,14 @@ async function saveQueue(queue) {
 }
 
 /** Enqueue a pending quantity change / receiving action to be replayed when back online. */
-export async function enqueueQuantityAction({ itemId, change, userName, actionType, orderId }) {
+export async function enqueueQuantityAction({ itemId, change, userName, actionType, orderId, location }) {
   const entry = {
     id: String(itemId ?? "").trim(),
     change: Number(change) || 0,
     userName: userName || null,
     actionType: actionType || null, // 'check_in' | 'check_out' | 'receiving' | 'recycled' | null
     orderId: orderId || null,
+    location: location ? String(location).trim() : null,
     createdAt: new Date().toISOString(),
   };
   if (!entry.id || !entry.change) return;
@@ -52,6 +53,7 @@ export async function syncPendingQuantity(userNameFallback) {
 
   for (const entry of queue) {
     const userName = entry.userName || userNameFallback || "offline";
+    const extras = entry.location ? { location: entry.location } : {};
     try {
       let result;
       if (entry.actionType === "receiving" && entry.orderId) {
@@ -69,6 +71,7 @@ export async function syncPendingQuantity(userNameFallback) {
           entry.change,
           userName,
           "receiving",
+          extras,
         );
       } else {
         result = await InventoryService.updateQuantity(
@@ -76,6 +79,7 @@ export async function syncPendingQuantity(userNameFallback) {
           entry.change,
           userName,
           entry.actionType || null,
+          extras,
         );
       }
       if (result && result.success) {

@@ -45,7 +45,9 @@ export function getMaterialTypeLabel(type) {
 export function getMaterialTypeColor(type, theme) {
   const t = String(type || "").toLowerCase();
   const mt = colors.materialType;
-  if (t === "paint" || t === "custom_paint" || t === "precat") return mt.paint;
+  if (t === "paint" || t === "custom_paint" || t === "precat") {
+    return theme?.dark ? colors.brand.primaryOnDark : mt.paint;
+  }
   if (t === "clear") return mt.clear;
   if (t === "stain" || t === "custom_stain") return mt.stain;
   if (t === "primer") return mt.primer || (theme?.dark ? mt.primerDark : mt.primerLight);

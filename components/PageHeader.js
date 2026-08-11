@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet } from "react-native";
-import { Button, useTheme } from "react-native-paper";
+import { useTheme } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import FadeIn from "./FadeIn";
 import { AppText } from "./ui";
 import { space, motion } from "../theme/tokens";
@@ -30,14 +31,14 @@ export default function PageHeader({
     >
       <View style={styles.left}>
         {showBackBtn ? (
-          <Button
+          <AppButton
             icon="arrow-left"
             onPress={onBack}
             mode="text"
             style={styles.backButton}
           >
             Back
-          </Button>
+          </AppButton>
         ) : null}
         {!hideTitle ? (
           <AppText

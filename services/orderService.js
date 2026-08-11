@@ -13,8 +13,13 @@ async function _fetch(endpoint, options = {}) {
   console.log('[OrderService] Request:', method, url);
   try {
     const res = await fetch(url, {
+      cache: 'no-store',
       ...options,
-      headers,
+      headers: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+        ...headers,
+      },
     });
     let data;
     try {

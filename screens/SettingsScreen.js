@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import {
   Text,
-  Button,
   Switch,
   Divider,
   useTheme,
@@ -18,7 +17,9 @@ import {
   ActivityIndicator,
   SegmentedButtons,
   Menu,
+  Icon,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import version from "../version";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
@@ -45,6 +46,18 @@ const MONTH_NAMES = [
   "November",
   "December",
 ];
+
+const PANEL = {
+  root: { title: "Settings", parent: null },
+  appearance: { title: "Appearance", parent: "root" },
+  account: { title: "Account", parent: "root" },
+  admin: { title: "Admin", parent: "root" },
+  "admin-users": { title: "Users", parent: "admin" },
+  "admin-export": { title: "Export", parent: "admin" },
+  "admin-overtime": { title: "Overtime", parent: "admin" },
+  "admin-zeros": { title: "Zero quantities", parent: "admin" },
+  "admin-codes": { title: "External codes", parent: "admin" },
+};
 
 function formatGal(n) {
   const v = Number(n) || 0;
@@ -82,6 +95,76 @@ function rangeForYear(year) {
   return { from: `${y}-01-01`, to: `${y}-12-31` };
 }
 
+function SettingsMenuRow({
+  icon,
+  title,
+  description,
+  onPress,
+  danger = false,
+  selected = false,
+  showChevron = true,
+  compact = false,
+}) {
+  const theme = useTheme();
+  const titleColor = danger
+    ? theme.colors.error
+    : selected
+      ? theme.colors.primary
+      : theme.colors.onSurface;
+  const iconColor = danger
+    ? theme.colors.error
+    : selected
+      ? theme.colors.primary
+      : theme.colors.onSurfaceVariant;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.menuRow,
+        compact && styles.menuRowCompact,
+        selected && {
+          backgroundColor: theme.dark
+            ? "rgba(255,255,255,0.1)"
+            : "rgba(0,0,0,0.06)",
+        },
+        pressed &&
+          !selected && {
+            backgroundColor: theme.dark
+              ? "rgba(255,255,255,0.06)"
+              : "rgba(0,0,0,0.04)",
+          },
+      ]}
+    >
+      {icon ? (
+        <Icon source={icon} size={compact ? 20 : 22} color={iconColor} />
+      ) : (
+        <View style={styles.menuIconSpacer} />
+      )}
+      <View style={styles.menuRowText}>
+        <AppText variant="bodyStrong" style={{ color: titleColor }}>
+          {title}
+        </AppText>
+        {description ? (
+          <AppText
+            variant="caption"
+            tone="muted"
+            style={styles.menuRowDescription}
+          >
+            {description}
+          </AppText>
+        ) : null}
+      </View>
+      {showChevron ? (
+        <Icon
+          source="chevron-right"
+          size={22}
+          color={theme.colors.onSurfaceVariant}
+        />
+      ) : null}
+    </Pressable>
+  );
+}
+
 export default function SettingsScreen({
   onBack,
   userName,
@@ -93,12 +176,15 @@ export default function SettingsScreen({
   onSetMaterialUsageOvertime,
   onExportExcel,
   onExportMaterialUsageExcel,
+  onZeroCustomQuantities,
+  onZeroStaleCustomQuantities,
   embeddedInShell = false,
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
+  const [panel, setPanel] = useState("root");
   const [exportTab, setExportTab] = useState("month");
   const [exportMonths, setExportMonths] = useState([]);
   const [exportYears, setExportYears] = useState([]);
@@ -114,6 +200,26 @@ export default function SettingsScreen({
   const [usersLoading, setUsersLoading] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [creatingUser, setCreatingUser] = useState(false);
+
+  // Desktop uses a persistent sidebar; land on a content panel (not a hub).
+  useEffect(() => {
+    if (!isDesktop) return;
+    if (panel === "root" || panel === "admin") {
+      setPanel("appearance");
+    }
+  }, [isDesktop, panel]);
+
+  const panelMeta = PANEL[panel] || PANEL.root;
+  const panelTitle = panelMeta.title;
+
+  const goBackPanel = useCallback(() => {
+    const parent = (PANEL[panel] || PANEL.root).parent;
+    if (parent) {
+      setPanel(parent);
+      return;
+    }
+    onBack?.();
+  }, [panel, onBack]);
 
   const loadUsers = async () => {
     if (!isAdmin) return;
@@ -139,7 +245,6 @@ export default function SettingsScreen({
         months = Array.isArray(data?.months) ? data.months : [];
         years = Array.isArray(data?.years) ? data.years : [];
       } catch (apiErr) {
-        // Older servers / failed route — derive from recent usage rows.
         console.warn(
           "export-periods API unavailable, falling back to usage list:",
           apiErr?.message || apiErr,
@@ -221,9 +326,18 @@ export default function SettingsScreen({
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) {
+      if (String(panel).startsWith("admin")) setPanel("root");
+      return;
+    }
     loadUsers();
     loadExportPeriods();
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (panel === "admin-users" && isAdmin) loadUsers();
+    if (panel === "admin-export" && isAdmin) loadExportPeriods();
+  }, [panel, isAdmin]);
 
   const selectedMonthLabel = useMemo(() => {
     const row = exportMonths.find((m) => m.key === selectedMonthKey);
@@ -348,391 +462,685 @@ export default function SettingsScreen({
     ? colors.dark.background
     : theme.colors.background;
 
+  const showPanelBack = !isDesktop && panel !== "root";
+  const headerBack = showPanelBack ? goBackPanel : onBack;
+
+  const renderDesktopSidebar = () => {
+    const sideBg = theme.dark
+      ? colors.dark.sidebar
+      : theme.colors.surfaceContainerHighest;
+    return (
+      <View
+        style={[
+          styles.desktopSidebar,
+          {
+            backgroundColor: sideBg,
+            borderRightColor: theme.dark
+              ? colors.dark.border
+              : theme.colors.outlineVariant,
+          },
+        ]}
+      >
+        <ScrollView
+          style={styles.desktopSidebarScroll}
+          contentContainerStyle={styles.desktopSidebarContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <AppText
+            variant="caption"
+            tone="muted"
+            style={styles.desktopNavSection}
+          >
+            General
+          </AppText>
+          <SettingsMenuRow
+            icon="palette-outline"
+            title="Appearance"
+            compact
+            showChevron={false}
+            selected={panel === "appearance"}
+            onPress={() => setPanel("appearance")}
+          />
+          <SettingsMenuRow
+            icon="account-outline"
+            title="Account"
+            compact
+            showChevron={false}
+            selected={panel === "account"}
+            onPress={() => setPanel("account")}
+          />
+          {isAdmin ? (
+            <>
+              <AppText
+                variant="caption"
+                tone="muted"
+                style={[styles.desktopNavSection, styles.desktopNavSectionSpaced]}
+              >
+                Admin
+              </AppText>
+              <SettingsMenuRow
+                icon="account-group-outline"
+                title="Users"
+                compact
+                showChevron={false}
+                selected={panel === "admin-users"}
+                onPress={() => setPanel("admin-users")}
+              />
+              <SettingsMenuRow
+                icon="file-excel-outline"
+                title="Export"
+                compact
+                showChevron={false}
+                selected={panel === "admin-export"}
+                onPress={() => setPanel("admin-export")}
+              />
+              <SettingsMenuRow
+                icon="clock-outline"
+                title="Overtime"
+                compact
+                showChevron={false}
+                selected={panel === "admin-overtime"}
+                onPress={() => setPanel("admin-overtime")}
+              />
+              <SettingsMenuRow
+                icon="numeric-0-box-outline"
+                title="Zero quantities"
+                compact
+                showChevron={false}
+                danger
+                selected={panel === "admin-zeros"}
+                onPress={() => setPanel("admin-zeros")}
+              />
+              <SettingsMenuRow
+                icon="barcode"
+                title="External codes"
+                compact
+                showChevron={false}
+                selected={panel === "admin-codes"}
+                onPress={() => setPanel("admin-codes")}
+              />
+            </>
+          ) : null}
+        </ScrollView>
+        <View style={styles.desktopSidebarFooter}>
+          <AppText variant="caption" tone="muted">
+            {userName || "Unknown"}
+          </AppText>
+          <AppText variant="caption" tone="dim" style={styles.footerVersion}>
+            v1.{version?.build ?? "?"}
+          </AppText>
+        </View>
+      </View>
+    );
+  };
+
+  const renderRoot = () => (
+    <AppSurface contentStyle={styles.menuSurfaceContent}>
+      <SettingsMenuRow
+        icon="palette-outline"
+        title="Appearance"
+        description="Theme and display"
+        onPress={() => setPanel("appearance")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="account-outline"
+        title="Account"
+        description={`Signed in as ${userName || "Unknown"}`}
+        onPress={() => setPanel("account")}
+      />
+      {isAdmin ? (
+        <>
+          <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+          <SettingsMenuRow
+            icon="shield-account-outline"
+            title="Admin"
+            description="Users, export, overtime, inventory tools"
+            onPress={() => setPanel("admin")}
+          />
+        </>
+      ) : null}
+    </AppSurface>
+  );
+
+  const renderAppearance = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Appearance
+      </AppText>
+      <View style={styles.settingRow}>
+        <View style={styles.settingInfo}>
+          <AppText variant="bodyStrong">Dark Mode</AppText>
+          <AppText
+            variant="caption"
+            tone="muted"
+            style={styles.settingDescription}
+          >
+            Use a dark color scheme across the app
+          </AppText>
+        </View>
+        <Switch
+          value={isDarkMode}
+          onValueChange={onToggleDarkMode}
+          color={theme.colors.primary}
+        />
+      </View>
+    </AppSurface>
+  );
+
+  const renderAccount = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Account
+      </AppText>
+      <View style={styles.settingRow}>
+        <View style={styles.settingInfo}>
+          <AppText variant="bodyStrong">Current user</AppText>
+          <AppText
+            variant="caption"
+            tone="muted"
+            style={styles.settingDescription}
+          >
+            Logged in as: {userName || "Unknown"}
+          </AppText>
+        </View>
+      </View>
+      <Divider
+        style={[
+          styles.divider,
+          { backgroundColor: theme.colors.outlineVariant },
+        ]}
+      />
+      <AppButton
+        mode="outlined"
+        onPress={onSwitchUser}
+        style={styles.switchUserButton}
+        icon="account-switch"
+      >
+        Sign out / Switch user
+      </AppButton>
+    </AppSurface>
+  );
+
+  const renderAdminHub = () => (
+    <AppSurface contentStyle={styles.menuSurfaceContent}>
+      <SettingsMenuRow
+        icon="account-group-outline"
+        title="Users"
+        description="Create accounts, reset passwords, login history"
+        onPress={() => setPanel("admin-users")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="file-excel-outline"
+        title="Export"
+        description="Inventory and material usage Excel downloads"
+        onPress={() => setPanel("admin-export")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="clock-outline"
+        title="Overtime"
+        description="Material usage day / swing cutoffs"
+        onPress={() => setPanel("admin-overtime")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="numeric-0-box-outline"
+        title="Zero quantities"
+        description="Reset custom color stock to 0"
+        onPress={() => setPanel("admin-zeros")}
+        danger
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="barcode"
+        title="External codes"
+        description="Paint barcode / external ID suffix"
+        onPress={() => setPanel("admin-codes")}
+      />
+    </AppSurface>
+  );
+
+  const renderAdminUsers = () => (
+    <>
+      <AppSurface>
+        <AppText variant="sectionTitle" style={styles.sectionTitle}>
+          User accounts
+        </AppText>
+        <AppText
+          variant="caption"
+          tone="muted"
+          style={styles.settingDescription}
+        >
+          Create named accounts. Default password is "password"; on first login
+          they must choose a new one. Reset sets it back to "password" and
+          requires a change on next login.
+        </AppText>
+        <TextInput
+          label="New user name"
+          value={newUserName}
+          onChangeText={setNewUserName}
+          mode="outlined"
+          autoCapitalize="words"
+          autoCorrect={false}
+          style={styles.userInput}
+        />
+        <AppButton
+          mode="contained"
+          onPress={handleCreateUser}
+          loading={creatingUser}
+          disabled={creatingUser || !newUserName.trim()}
+          icon="account-plus"
+          style={styles.userCreateBtn}
+        >
+          Create user
+        </AppButton>
+        {usersLoading ? (
+          <ActivityIndicator style={{ marginTop: 12 }} />
+        ) : users.length === 0 ? (
+          <AppText variant="caption" tone="muted" style={{ marginTop: 10 }}>
+            No users yet. Created accounts appear in the login dropdown.
+          </AppText>
+        ) : (
+          <View style={styles.userList}>
+            {users.map((u) => (
+              <View key={u.id || u.user_name} style={styles.userRow}>
+                <View style={styles.userRowInfo}>
+                  <AppText variant="bodyStrong">{u.user_name}</AppText>
+                  <AppText
+                    variant="caption"
+                    tone="muted"
+                    style={styles.userPasswordLine}
+                  >
+                    Password:{" "}
+                    {u.password_plain
+                      ? String(u.password_plain)
+                      : "— (unknown until next change)"}
+                    {u.must_change_password ? " · must change" : ""}
+                  </AppText>
+                </View>
+                <View style={styles.userRowActions}>
+                  <AppButton
+                    mode="text"
+                    compact
+                    onPress={() => handleResetPassword(u.user_name)}
+                  >
+                    Reset
+                  </AppButton>
+                  <AppButton
+                    mode="text"
+                    compact
+                    textColor={theme.colors.error}
+                    onPress={() => handleDeleteUser(u.user_name)}
+                  >
+                    Delete
+                  </AppButton>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </AppSurface>
+      <AppSurface>
+        <AppText variant="sectionTitle" style={styles.sectionTitle}>
+          Login history
+        </AppText>
+        <AppText variant="caption" tone="muted" style={styles.blockHint}>
+          View sign-in history for all users (timestamp per login).
+        </AppText>
+        <AppButton
+          mode="outlined"
+          onPress={() => setLoginHistoryOpen(true)}
+          style={styles.adminButton}
+          icon="account-clock"
+        >
+          User login history
+        </AppButton>
+      </AppSurface>
+    </>
+  );
+
+  const renderAdminExport = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Inventory
+      </AppText>
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Export current inventory to an Excel file.
+      </AppText>
+      <AppButton
+        mode="outlined"
+        onPress={onExportExcel}
+        style={styles.adminButton}
+        icon="file-excel"
+      >
+        Export inventory to Excel
+      </AppButton>
+      <Divider
+        style={[
+          styles.divider,
+          { backgroundColor: theme.colors.outlineVariant },
+        ]}
+      />
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Material usage
+      </AppText>
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Export by month or year (only periods with logged quantity are listed).
+      </AppText>
+      <SegmentedButtons
+        value={exportTab}
+        onValueChange={setExportTab}
+        style={styles.exportTabs}
+        buttons={[
+          { value: "month", label: "Month" },
+          { value: "year", label: "Year" },
+        ]}
+      />
+      {exportPeriodsLoading ? (
+        <ActivityIndicator style={{ marginVertical: 12 }} />
+      ) : exportTab === "month" ? (
+        <Menu
+          visible={monthMenuOpen}
+          onDismiss={() => setMonthMenuOpen(false)}
+          anchor={
+            <Pressable onPress={() => setMonthMenuOpen(true)}>
+              <TextInput
+                label="Month"
+                value={selectedMonthLabel}
+                mode="outlined"
+                editable={false}
+                pointerEvents="none"
+                style={styles.adminInput}
+                right={<TextInput.Icon icon="menu-down" />}
+              />
+            </Pressable>
+          }
+          contentStyle={styles.exportMenuContent}
+        >
+          {exportMonths.length === 0 ? (
+            <Menu.Item disabled title="No months with usage yet" />
+          ) : (
+            exportMonths.map((m) => (
+              <Menu.Item
+                key={m.key}
+                onPress={() => {
+                  setSelectedMonthKey(m.key);
+                  setMonthMenuOpen(false);
+                }}
+                title={formatMonthLabel(m.key, m.totalGal)}
+              />
+            ))
+          )}
+        </Menu>
+      ) : (
+        <Menu
+          visible={yearMenuOpen}
+          onDismiss={() => setYearMenuOpen(false)}
+          anchor={
+            <Pressable onPress={() => setYearMenuOpen(true)}>
+              <TextInput
+                label="Year"
+                value={selectedYearLabel}
+                mode="outlined"
+                editable={false}
+                pointerEvents="none"
+                style={styles.adminInput}
+                right={<TextInput.Icon icon="menu-down" />}
+              />
+            </Pressable>
+          }
+          contentStyle={styles.exportMenuContent}
+        >
+          {exportYears.length === 0 ? (
+            <Menu.Item disabled title="No years with usage yet" />
+          ) : (
+            exportYears.map((y) => (
+              <Menu.Item
+                key={y.key}
+                onPress={() => {
+                  setSelectedYearKey(y.key);
+                  setYearMenuOpen(false);
+                }}
+                title={formatYearLabel(y.key, y.totalGal)}
+              />
+            ))
+          )}
+        </Menu>
+      )}
+      <AppButton
+        mode="outlined"
+        onPress={handleExportMaterialUsage}
+        style={styles.adminButton}
+        icon="file-excel"
+        disabled={
+          exportPeriodsLoading ||
+          (exportTab === "month" ? !selectedMonthKey : !selectedYearKey)
+        }
+      >
+        Export Material Usage to Excel
+      </AppButton>
+    </AppSurface>
+  );
+
+  const renderAdminOvertime = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Overtime
+      </AppText>
+      <View style={styles.settingRow}>
+        <View style={styles.settingInfo}>
+          <AppText variant="bodyStrong">Material Usage Overtime</AppText>
+          <AppText
+            variant="caption"
+            tone="muted"
+            style={styles.settingDescription}
+          >
+            On: Day 6:00am–4:25pm · Swing 4:26pm–2:30am
+            {"\n"}
+            Off: Day 6:00am–3:25pm · Swing 3:26pm–12:30am
+          </AppText>
+        </View>
+        <Switch
+          value={materialUsageOvertime}
+          onValueChange={(v) => onSetMaterialUsageOvertime?.(v)}
+          color={theme.colors.primary}
+        />
+      </View>
+    </AppSurface>
+  );
+
+  const renderAdminZeros = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Zero quantities
+      </AppText>
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Sets every custom paint/stain quantity to 0. Does not delete items. Use
+        after a physical recount reset.
+      </AppText>
+      <AppButton
+        mode="outlined"
+        onPress={onZeroCustomQuantities}
+        style={styles.adminButton}
+        icon="numeric-0-box"
+        textColor={theme.colors.error}
+      >
+        Zero all custom color quantities
+      </AppButton>
+      <Divider
+        style={[
+          styles.divider,
+          { backgroundColor: theme.colors.outlineVariant },
+        ]}
+      />
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Zeros only custom paint/stain items with no check-in, check-out,
+        receiving, or quantity change in the past 2 days. Skips recently active
+        stock.
+      </AppText>
+      <AppButton
+        mode="outlined"
+        onPress={onZeroStaleCustomQuantities}
+        style={styles.adminButton}
+        icon="timer-sand"
+        textColor={theme.colors.error}
+      >
+        Zero custom colors idle 2+ days
+      </AppButton>
+    </AppSurface>
+  );
+
+  const renderAdminCodes = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Paint external code suffix
+      </AppText>
+      <AppText
+        variant="caption"
+        tone="muted"
+        style={styles.settingDescription}
+      >
+        Optional ending sequence automatically appended to Paint and Custom
+        Paint IDs (for bucket barcodes). Example:{" "}
+        <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text> turns ID{" "}
+        <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text> into
+        external code{" "}
+        <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323-794394</Text>.
+      </AppText>
+      <TextInput
+        label="Suffix (optional)"
+        value={paintSuffix}
+        onChangeText={setPaintSuffix}
+        mode="outlined"
+        style={styles.adminInput}
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder=""
+        editable={!savingSuffix}
+      />
+      <AppButton
+        mode="outlined"
+        style={styles.adminButton}
+        disabled={savingSuffix}
+        onPress={async () => {
+          try {
+            setSavingSuffix(true);
+            const result = await InventoryService.setPaintExternalSuffix(
+              paintSuffix,
+              userName || "unknown",
+            );
+            if (!result?.success) {
+              Alert.alert("Error", result?.error || "Failed to save suffix.");
+            } else {
+              const confirmed =
+                await InventoryService.getPaintExternalSuffix();
+              setPaintSuffix(confirmed || "");
+              Alert.alert("Saved", "Paint external suffix updated.");
+            }
+          } catch (e) {
+            console.error("Save paint suffix error:", e);
+            Alert.alert("Error", e?.message || "Failed to save suffix.");
+          } finally {
+            setSavingSuffix(false);
+          }
+        }}
+      >
+        {savingSuffix ? "Saving..." : "Save Suffix"}
+      </AppButton>
+    </AppSurface>
+  );
+
+  const renderPanelBody = () => {
+    switch (panel) {
+      case "appearance":
+        return renderAppearance();
+      case "account":
+        return renderAccount();
+      case "admin":
+        return isAdmin ? renderAdminHub() : renderRoot();
+      case "admin-users":
+        return isAdmin ? renderAdminUsers() : renderRoot();
+      case "admin-export":
+        return isAdmin ? renderAdminExport() : renderRoot();
+      case "admin-overtime":
+        return isAdmin ? renderAdminOvertime() : renderRoot();
+      case "admin-zeros":
+        return isAdmin ? renderAdminZeros() : renderRoot();
+      case "admin-codes":
+        return isAdmin ? renderAdminCodes() : renderRoot();
+      case "root":
+      default:
+        return renderRoot();
+    }
+  };
+
+  if (isDesktop) {
+    return (
+      <View
+        style={[
+          styles.container,
+          styles.desktopContainer,
+          { backgroundColor: canvasBg },
+        ]}
+      >
+        <View style={styles.desktopSplit}>
+          {renderDesktopSidebar()}
+          <ScrollView
+            style={styles.desktopContentScroll}
+            contentContainerStyle={styles.desktopContentInner}
+          >
+            {!embeddedInShell ? (
+              <PageHeader title={panelTitle} onBack={onBack} />
+            ) : null}
+            <View style={styles.desktopContentBody}>{renderPanelBody()}</View>
+          </ScrollView>
+        </View>
+        {savingSuffix && (
+          <View
+            style={[
+              styles.suffixSavingOverlay,
+              { backgroundColor: colors.semantic.scrimLight },
+            ]}
+          >
+            <View
+              style={[
+                styles.suffixSavingBox,
+                {
+                  backgroundColor: theme.colors.surfaceContainerHighest,
+                  borderColor: theme.colors.outlineVariant,
+                },
+              ]}
+            >
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+              <AppText variant="body" style={styles.suffixSavingText}>
+                Saving suffix…
+              </AppText>
+            </View>
+          </View>
+        )}
+        <LoginHistoryModal
+          visible={loginHistoryOpen}
+          onDismiss={() => setLoginHistoryOpen(false)}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: canvasBg }]}>
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={[
-          styles.scrollContent,
-          isDesktop && styles.webScrollContent,
-        ]}
+        contentContainerStyle={styles.scrollContent}
       >
         <PageHeader
-          title="Settings"
-          onBack={onBack}
-          embeddedInShell={embeddedInShell}
+          title={panelTitle}
+          onBack={headerBack}
+          embeddedInShell={embeddedInShell && panel === "root"}
         />
-        <View style={isDesktop && styles.webWrapper}>
-          <AppSurface>
-            <AppText variant="sectionTitle" style={styles.sectionTitle}>
-              Appearance
-            </AppText>
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <AppText variant="bodyStrong">Dark Mode</AppText>
-              </View>
-              <Switch
-                value={isDarkMode}
-                onValueChange={onToggleDarkMode}
-                color={theme.colors.primary}
-              />
-            </View>
-          </AppSurface>
-
-          <AppSurface>
-            <AppText variant="sectionTitle" style={styles.sectionTitle}>
-              Account
-            </AppText>
-            <View style={styles.settingRow}>
-              <View style={styles.settingInfo}>
-                <AppText variant="bodyStrong">Current User</AppText>
-                <AppText
-                  variant="caption"
-                  tone="muted"
-                  style={styles.settingDescription}
-                >
-                  Logged in as: {userName || "Unknown"}
-                </AppText>
-              </View>
-            </View>
-            <Divider
-              style={[
-                styles.divider,
-                { backgroundColor: theme.colors.outlineVariant },
-              ]}
-            />
-            <Button
-              mode="outlined"
-              onPress={onSwitchUser}
-              style={styles.switchUserButton}
-              icon="account-switch"
-            >
-              Switch User
-            </Button>
-          </AppSurface>
-
-          {isAdmin && (
-            <AppSurface>
-              <AppText variant="sectionTitle" style={styles.sectionTitle}>
-                User accounts
-              </AppText>
-              <AppText
-                variant="caption"
-                tone="muted"
-                style={styles.settingDescription}
-              >
-                Create named accounts. Default password is "password"; on first
-                login they must choose a new one. Reset sets it back to
-                "password" and requires a change on next login. Current
-                passwords are shown below for admin reference.
-              </AppText>
-              <TextInput
-                label="New user name"
-                value={newUserName}
-                onChangeText={setNewUserName}
-                mode="outlined"
-                autoCapitalize="words"
-                autoCorrect={false}
-                style={styles.userInput}
-              />
-              <Button
-                mode="contained"
-                onPress={handleCreateUser}
-                loading={creatingUser}
-                disabled={creatingUser || !newUserName.trim()}
-                icon="account-plus"
-                style={styles.userCreateBtn}
-              >
-                Create user
-              </Button>
-              {usersLoading ? (
-                <ActivityIndicator style={{ marginTop: 12 }} />
-              ) : users.length === 0 ? (
-                <AppText
-                  variant="caption"
-                  tone="muted"
-                  style={{ marginTop: 10 }}
-                >
-                  No users yet. Created accounts appear in the login dropdown.
-                </AppText>
-              ) : (
-                <View style={styles.userList}>
-                  {users.map((u) => (
-                    <View key={u.id || u.user_name} style={styles.userRow}>
-                      <View style={styles.userRowInfo}>
-                        <AppText variant="bodyStrong">
-                          {u.user_name}
-                        </AppText>
-                        <AppText
-                          variant="caption"
-                          tone="muted"
-                          style={styles.userPasswordLine}
-                        >
-                          Password:{" "}
-                          {u.password_plain
-                            ? String(u.password_plain)
-                            : "— (unknown until next change)"}
-                          {u.must_change_password ? " · must change" : ""}
-                        </AppText>
-                      </View>
-                      <View style={styles.userRowActions}>
-                        <Button
-                          mode="text"
-                          compact
-                          onPress={() => handleResetPassword(u.user_name)}
-                        >
-                          Reset
-                        </Button>
-                        <Button
-                          mode="text"
-                          compact
-                          textColor={theme.colors.error}
-                          onPress={() => handleDeleteUser(u.user_name)}
-                        >
-                          Delete
-                        </Button>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </AppSurface>
-          )}
-
-          {isAdmin && (
-            <AppSurface>
-              <AppText variant="sectionTitle" style={styles.sectionTitle}>
-                Admin Settings
-              </AppText>
-              <View style={styles.settingRow}>
-                <View style={styles.settingInfo}>
-                  <AppText variant="bodyStrong">Overtime</AppText>
-                  <AppText
-                    variant="caption"
-                    tone="muted"
-                    style={styles.settingDescription}
-                  >
-                    Material Usage Overtime
-                    {"\n"}On: Day 6:00am–4:25pm · Swing 4:26pm–2:30am
-                    {"\n"}Off: Day 6:00am–3:25pm · Swing 3:26pm–12:30am
-                  </AppText>
-                </View>
-                <Switch
-                  value={materialUsageOvertime}
-                  onValueChange={(v) => onSetMaterialUsageOvertime?.(v)}
-                  color={theme.colors.primary}
-                />
-              </View>
-              <Divider
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.outlineVariant },
-                ]}
-              />
-              <AppText variant="caption" tone="muted" style={styles.blockHint}>
-                View sign-in history for all users (timestamp per login).
-              </AppText>
-              <Button
-                mode="outlined"
-                onPress={() => setLoginHistoryOpen(true)}
-                style={styles.adminButton}
-                icon="account-clock"
-              >
-                User login history
-              </Button>
-              <Divider
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.outlineVariant },
-                ]}
-              />
-              <AppText variant="caption" tone="muted" style={styles.blockHint}>
-                Export current inventory to Excel file
-              </AppText>
-              <Button
-                mode="outlined"
-                onPress={onExportExcel}
-                style={styles.adminButton}
-                icon="file-excel"
-              >
-                Export inventory to Excel
-              </Button>
-              <Divider
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.outlineVariant },
-                ]}
-              />
-              <AppText variant="caption" tone="muted" style={styles.blockHint}>
-                Export Material Usage to Excel — by month or by year (only
-                periods with logged quantity are listed).
-              </AppText>
-              <SegmentedButtons
-                value={exportTab}
-                onValueChange={setExportTab}
-                style={styles.exportTabs}
-                buttons={[
-                  { value: "month", label: "Month" },
-                  { value: "year", label: "Year" },
-                ]}
-              />
-              {exportPeriodsLoading ? (
-                <ActivityIndicator style={{ marginVertical: 12 }} />
-              ) : exportTab === "month" ? (
-                <Menu
-                  visible={monthMenuOpen}
-                  onDismiss={() => setMonthMenuOpen(false)}
-                  anchor={
-                    <Pressable onPress={() => setMonthMenuOpen(true)}>
-                      <TextInput
-                        label="Month"
-                        value={selectedMonthLabel}
-                        mode="outlined"
-                        editable={false}
-                        pointerEvents="none"
-                        style={styles.adminInput}
-                        right={<TextInput.Icon icon="menu-down" />}
-                      />
-                    </Pressable>
-                  }
-                  contentStyle={styles.exportMenuContent}
-                >
-                  {exportMonths.length === 0 ? (
-                    <Menu.Item disabled title="No months with usage yet" />
-                  ) : (
-                    exportMonths.map((m) => (
-                      <Menu.Item
-                        key={m.key}
-                        onPress={() => {
-                          setSelectedMonthKey(m.key);
-                          setMonthMenuOpen(false);
-                        }}
-                        title={formatMonthLabel(m.key, m.totalGal)}
-                      />
-                    ))
-                  )}
-                </Menu>
-              ) : (
-                <Menu
-                  visible={yearMenuOpen}
-                  onDismiss={() => setYearMenuOpen(false)}
-                  anchor={
-                    <Pressable onPress={() => setYearMenuOpen(true)}>
-                      <TextInput
-                        label="Year"
-                        value={selectedYearLabel}
-                        mode="outlined"
-                        editable={false}
-                        pointerEvents="none"
-                        style={styles.adminInput}
-                        right={<TextInput.Icon icon="menu-down" />}
-                      />
-                    </Pressable>
-                  }
-                  contentStyle={styles.exportMenuContent}
-                >
-                  {exportYears.length === 0 ? (
-                    <Menu.Item disabled title="No years with usage yet" />
-                  ) : (
-                    exportYears.map((y) => (
-                      <Menu.Item
-                        key={y.key}
-                        onPress={() => {
-                          setSelectedYearKey(y.key);
-                          setYearMenuOpen(false);
-                        }}
-                        title={formatYearLabel(y.key, y.totalGal)}
-                      />
-                    ))
-                  )}
-                </Menu>
-              )}
-              <Button
-                mode="outlined"
-                onPress={handleExportMaterialUsage}
-                style={styles.adminButton}
-                icon="file-excel"
-                disabled={
-                  exportPeriodsLoading ||
-                  (exportTab === "month"
-                    ? !selectedMonthKey
-                    : !selectedYearKey)
-                }
-              >
-                Export Material Usage to Excel
-              </Button>
-              <Divider
-                style={[
-                  styles.divider,
-                  { backgroundColor: theme.colors.outlineVariant },
-                ]}
-              />
-              <AppText variant="bodyStrong">Paint external code suffix</AppText>
-              <AppText
-                variant="caption"
-                tone="muted"
-                style={styles.settingDescription}
-              >
-                Optional ending sequence automatically appended to Paint and
-                Custom Paint IDs (for bucket barcodes). Example:{" "}
-                <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text>{" "}
-                turns ID{" "}
-                <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text>{" "}
-                into external code{" "}
-                <Text style={{ fontFamily: fontFamily.mono }}>
-                  H66LNL49323-794394
-                </Text>
-                .
-              </AppText>
-              <TextInput
-                label="Suffix (optional)"
-                value={paintSuffix}
-                onChangeText={setPaintSuffix}
-                mode="outlined"
-                style={styles.adminInput}
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder=""
-                editable={!savingSuffix}
-              />
-              <Button
-                mode="outlined"
-                style={styles.adminButton}
-                disabled={savingSuffix}
-                onPress={async () => {
-                  try {
-                    setSavingSuffix(true);
-                    const result =
-                      await InventoryService.setPaintExternalSuffix(
-                        paintSuffix,
-                        userName || "unknown",
-                      );
-                    if (!result?.success) {
-                      Alert.alert(
-                        "Error",
-                        result?.error || "Failed to save suffix.",
-                      );
-                    } else {
-                      const confirmed =
-                        await InventoryService.getPaintExternalSuffix();
-                      setPaintSuffix(confirmed || "");
-                      Alert.alert("Saved", "Paint external suffix updated.");
-                    }
-                  } catch (e) {
-                    console.error("Save paint suffix error:", e);
-                    Alert.alert(
-                      "Error",
-                      e?.message || "Failed to save suffix.",
-                    );
-                  } finally {
-                    setSavingSuffix(false);
-                  }
-                }}
-              >
-                {savingSuffix ? "Saving..." : "Save Suffix"}
-              </Button>
-            </AppSurface>
-          )}
+        {renderPanelBody()}
+        {panel === "root" ? (
           <View style={styles.footer}>
             <AppText variant="caption" tone="muted">
               Signed in as {userName || "Unknown"}
@@ -741,7 +1149,7 @@ export default function SettingsScreen({
               v1.{version?.build ?? "?"}
             </AppText>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
       {savingSuffix && (
         <View
@@ -777,6 +1185,10 @@ export default function SettingsScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  desktopContainer: {
+    minHeight: 0,
+    ...(Platform.OS === "web" ? { height: "100%" } : null),
   },
   scrollView: {
     flex: 1,
@@ -893,5 +1305,81 @@ const styles = StyleSheet.create({
   },
   suffixSavingText: {
     marginLeft: space[1],
+  },
+  menuSurfaceContent: {
+    paddingVertical: space[1],
+    paddingHorizontal: 0,
+    gap: 0,
+  },
+  menuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space[3],
+    paddingVertical: space[3],
+    paddingHorizontal: space[4],
+  },
+  menuIconSpacer: {
+    width: 22,
+  },
+  menuRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  menuRowDescription: {
+    marginTop: 2,
+  },
+  menuRowCompact: {
+    paddingVertical: space[2] + 2,
+    paddingHorizontal: space[3],
+    borderRadius: radius.md,
+    marginHorizontal: space[2],
+  },
+  desktopSplit: {
+    flex: 1,
+    flexDirection: "row",
+    minHeight: 0,
+  },
+  desktopSidebar: {
+    width: 260,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    flexShrink: 0,
+  },
+  desktopSidebarScroll: {
+    flex: 1,
+  },
+  desktopSidebarContent: {
+    paddingTop: space[3],
+    paddingBottom: space[4],
+  },
+  desktopNavSection: {
+    paddingHorizontal: space[4],
+    marginBottom: space[1],
+    marginTop: space[1],
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    fontSize: 11,
+  },
+  desktopNavSectionSpaced: {
+    marginTop: space[4],
+  },
+  desktopSidebarFooter: {
+    paddingHorizontal: space[4],
+    paddingVertical: space[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(128,128,128,0.25)",
+    gap: 2,
+  },
+  desktopContentScroll: {
+    flex: 1,
+    minWidth: 0,
+  },
+  desktopContentInner: {
+    padding: space[4],
+    paddingTop: space[2],
+    paddingBottom: space[8],
+    maxWidth: 720,
+  },
+  desktopContentBody: {
+    width: "100%",
   },
 });

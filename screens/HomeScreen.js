@@ -10,13 +10,13 @@ import {
 } from "react-native";
 import {
   Card,
-  Button,
   Text,
   useTheme,
   IconButton,
   ActivityIndicator,
   Chip,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import AuditService from "../services/auditService";
 import NotificationsBell from "../components/NotificationsBell";
 import version from "../version";
@@ -360,7 +360,7 @@ export default function HomeScreen({
         ) : null}
         {isAdmin && (
           <View style={styles.transactionToggleRow}>
-            <Button
+            <AppButton
               mode={shiftFilter === "day" ? "contained" : "outlined"}
               compact
               onPress={() =>
@@ -369,8 +369,8 @@ export default function HomeScreen({
               style={styles.transactionToggleBtn}
             >
               {SHIFT_LABELS.day}
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               mode={shiftFilter === "swing" ? "contained" : "outlined"}
               compact
               onPress={() =>
@@ -379,8 +379,8 @@ export default function HomeScreen({
               style={styles.transactionToggleBtn}
             >
               {SHIFT_LABELS.swing}
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               mode="contained"
               compact
               onPress={() =>
@@ -391,7 +391,7 @@ export default function HomeScreen({
               style={styles.transactionToggleBtn}
             >
               {transactionHistoryView === "all" ? "All" : "Reduced"}
-            </Button>
+            </AppButton>
           </View>
         )}
         {(!useCachedAudit && (!auditLogsLoaded || auditLogsLoading)) ? (
@@ -627,82 +627,82 @@ export default function HomeScreen({
   const actionButtons = (
     <View style={!isWeb ? styles.actionButtonsWrapMobile : undefined}>
       {isAdmin && (
-        <Button
+        <AppButton
           mode="contained"
           onPress={onAddManual}
           style={styles.button}
           icon="plus-circle"
         >
           Add Item
-        </Button>
+        </AppButton>
       )}
       {!isDesktop && (
-        <Button
+        <AppButton
           mode="contained"
           onPress={onScanQR}
           style={styles.button}
           icon="qrcode-scan"
         >
           {qrButtonText}
-        </Button>
+        </AppButton>
       )}
-      <Button
+      <AppButton
         mode="outlined"
         onPress={onViewInventory}
         style={styles.button}
         icon="format-list-bulleted"
       >
         View Inventory
-      </Button>
+      </AppButton>
       {isAdmin && onOpenPlaceOrder && (
-        <Button
+        <AppButton
           mode="contained"
           onPress={onOpenPlaceOrder}
           style={styles.button}
           icon="cart-plus"
         >
           Place Order
-        </Button>
+        </AppButton>
       )}
       {isAdmin && onOpenUpcomingOrders && (
-        <Button
+        <AppButton
           mode="outlined"
           onPress={onOpenUpcomingOrders}
           style={styles.button}
           icon="truck-delivery"
         >
           Purchase Orders
-        </Button>
+        </AppButton>
       )}
       {onOpenMaterialUsage && (
-        <Button
+        <AppButton
           mode="outlined"
           onPress={onOpenMaterialUsage}
           style={styles.button}
           icon="chart-box"
         >
           Material Usage
-        </Button>
+        </AppButton>
       )}
       {onOpenWasteTracking && (
-        <Button
+        <AppButton
           mode="outlined"
           onPress={onOpenWasteTracking}
           style={styles.button}
           icon="delete-variant"
         >
           Waste Tracking
-        </Button>
+        </AppButton>
       )}
       {onOpenReports && (
-        <Button
+        <AppButton
           mode="outlined"
           onPress={onOpenReports}
           style={styles.button}
           icon="chart-line"
         >
           Reports
-        </Button>
+        </AppButton>
       )}
     </View>
   );
@@ -718,7 +718,7 @@ export default function HomeScreen({
       {!isWeb && (
         <View style={styles.headerBar}>
           <AppText variant="pageTitleLg" style={styles.title}>
-            Paint Inventory
+            CURE
           </AppText>
           <View style={styles.headerButtons}>
             <NotificationsBell
@@ -768,7 +768,7 @@ export default function HomeScreen({
       )}
       {isWeb && (
         <View style={styles.webHeader}>
-          <AppText variant="pageTitle">Paint Inventory</AppText>
+          <AppText variant="pageTitle">CURE</AppText>
           <View style={styles.webHeaderButtons}>
             <NotificationsBell
               inventory={inventory}
@@ -940,7 +940,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textAlign: "center",
     marginTop: 10,
-    color: colors.brand.primary,
   },
   statHint: {
     fontSize: 12,

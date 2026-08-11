@@ -14,12 +14,12 @@ import {
   Card,
   Title,
   Text,
-  Button,
   useTheme,
   IconButton,
   TextInput,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
@@ -901,7 +901,7 @@ export default function UpcomingOrdersScreen({
           )}
           {isOpen && (
             <View style={styles.orderActions}>
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={() => openEditOrder(order)}
                 style={styles.orderActionBtn}
@@ -912,8 +912,8 @@ export default function UpcomingOrdersScreen({
                 disabled={deletingId === Number(order.id)}
               >
                 Edit
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="outlined"
                 onPress={() => handleMarkReceived(order.id)}
                 disabled={
@@ -926,8 +926,8 @@ export default function UpcomingOrdersScreen({
                 compact
               >
                 Mark Received
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="outlined"
                 onPress={() => confirmDeleteOrder(order)}
                 disabled={
@@ -942,7 +942,7 @@ export default function UpcomingOrdersScreen({
                 compact
               >
                 Delete
-              </Button>
+              </AppButton>
             </View>
           )}
           {!isOpen && (
@@ -958,7 +958,7 @@ export default function UpcomingOrdersScreen({
                 </Text>
               ) : null}
               <View style={styles.orderActions}>
-                <Button
+                <AppButton
                   mode="outlined"
                   onPress={() => openEditReceived(order)}
                   style={styles.orderActionBtn}
@@ -969,8 +969,8 @@ export default function UpcomingOrdersScreen({
                   disabled={deletingId === Number(order.id)}
                 >
                   Edit
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode="outlined"
                   onPress={() => confirmDeleteOrder(order)}
                   disabled={deletingId === Number(order.id)}
@@ -983,7 +983,7 @@ export default function UpcomingOrdersScreen({
                   compact
                 >
                   Delete
-                </Button>
+                </AppButton>
               </View>
             </>
           )}
@@ -1160,13 +1160,13 @@ export default function UpcomingOrdersScreen({
           embeddedInShell={embeddedInShell}
           actions={
             !showForm && !isCompactLayout ? (
-              <Button mode="contained" onPress={openNewOrder} icon="plus" compact>
+              <AppButton mode="contained" onPress={openNewOrder} icon="plus" compact>
                 Add Order
-              </Button>
+              </AppButton>
             ) : showForm && !isCompactLayout ? (
-              <Button mode="outlined" onPress={closeForm} compact>
+              <AppButton mode="outlined" onPress={closeForm} compact>
                 Cancel
-              </Button>
+              </AppButton>
             ) : undefined
           }
         />
@@ -1175,7 +1175,7 @@ export default function UpcomingOrdersScreen({
           <>
             <MetricStrip items={metricItems} />
             {isCompactLayout ? (
-              <Button
+              <AppButton
                 mode="contained"
                 onPress={openNewOrder}
                 icon="plus"
@@ -1183,7 +1183,7 @@ export default function UpcomingOrdersScreen({
                 contentStyle={styles.addOrderFullWidthContent}
               >
                 Add Order
-              </Button>
+              </AppButton>
             ) : null}
             <ToolbarCard>
               <TextInput
@@ -1202,15 +1202,15 @@ export default function UpcomingOrdersScreen({
                 By date
               </Text>
               <View style={styles.filterRow}>
-                <Button
+                <AppButton
                   mode={dateViewMode === null ? "contained" : "outlined"}
                   compact
                   onPress={() => setDateViewMode(null)}
                   style={styles.filterBtn}
                 >
                   List
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode={dateViewMode === "week" ? "contained" : "outlined"}
                   compact
                   onPress={() => {
@@ -1221,8 +1221,8 @@ export default function UpcomingOrdersScreen({
                   style={styles.filterBtn}
                 >
                   Week
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode={dateViewMode === "month" ? "contained" : "outlined"}
                   compact
                   onPress={() => {
@@ -1233,7 +1233,7 @@ export default function UpcomingOrdersScreen({
                   style={styles.filterBtn}
                 >
                   Month
-                </Button>
+                </AppButton>
               </View>
             </ToolbarCard>
           </>
@@ -1245,9 +1245,9 @@ export default function UpcomingOrdersScreen({
               { justifyContent: "flex-end", marginBottom: 8 },
             ]}
           >
-            <Button mode="outlined" onPress={closeForm} compact>
+            <AppButton mode="outlined" onPress={closeForm} compact>
               Cancel
-            </Button>
+            </AppButton>
           </View>
         )}
         {showForm && (
@@ -1436,14 +1436,14 @@ export default function UpcomingOrdersScreen({
                   </View>
                 );
               })}
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={addLine}
                 style={styles.addLineBtn}
               >
                 Add Line
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="contained"
                 onPress={handleSaveOrder}
                 loading={saving}
@@ -1452,7 +1452,7 @@ export default function UpcomingOrdersScreen({
                 icon="content-save"
               >
                 {editingOrder ? "Update Order" : "Save Order"}
-              </Button>
+              </AppButton>
             </Card.Content>
           </Card>
         )}
@@ -1709,20 +1709,20 @@ export default function UpcomingOrdersScreen({
                 })}
             </ScrollFrame>
             <View style={styles.receivedModalActions}>
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={() => setEditingReceivedOrder(null)}
               >
                 Cancel
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="contained"
                 onPress={handleSaveReceivedLines}
                 loading={saving}
                 disabled={saving}
               >
                 Save
-              </Button>
+              </AppButton>
             </View>
           </Pressable>
         </Pressable>

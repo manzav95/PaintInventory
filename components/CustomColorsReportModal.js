@@ -8,13 +8,13 @@ import {
 } from "react-native";
 import {
   Text,
-  Button,
   Card,
   useTheme,
   ActivityIndicator,
   IconButton,
   Divider,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import DateField from "./DateField";
 import OutlinedSearchInput from "./OutlinedSearchInput";
 import SimpleLineChart from "./SimpleLineChart";
@@ -293,34 +293,34 @@ export default function CustomColorsReportModal({
 
           <View style={styles.toolbar}>
             <View style={styles.toggleRow}>
-              <Button
+              <AppButton
                 mode={groupBy === "week" ? "contained" : "outlined"}
                 compact
                 onPress={() => selectGroupBy("week")}
               >
                 Week
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode={groupBy === "month" ? "contained" : "outlined"}
                 compact
                 onPress={() => selectGroupBy("month")}
               >
                 Month
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode={groupBy === "year" ? "contained" : "outlined"}
                 compact
                 onPress={() => selectGroupBy("year")}
               >
                 Year
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode={groupBy === "lifetime" ? "contained" : "outlined"}
                 compact
                 onPress={() => selectGroupBy("lifetime")}
               >
                 Lifetime
-              </Button>
+              </AppButton>
             </View>
             <View style={styles.dateRow}>
               <View style={styles.dateField}>
@@ -344,9 +344,9 @@ export default function CustomColorsReportModal({
                 </Text>
                 <DateField value={toDate} onChange={setToDate} />
               </View>
-              <Button mode="contained" onPress={load} compact loading={loading}>
+              <AppButton mode="contained" onPress={load} compact loading={loading}>
                 Apply
-              </Button>
+              </AppButton>
             </View>
             <OutlinedSearchInput
               placeholder="Search by color name or ID…"

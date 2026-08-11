@@ -11,10 +11,10 @@ import {
 import {
   Card,
   Text,
-  Button,
   useTheme,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
@@ -382,14 +382,14 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
               ["year", "Year"],
               ["lifetime", "Lifetime"],
             ].map(([value, label]) => (
-              <Button
+              <AppButton
                 key={value}
                 mode={groupBy === value ? "contained" : "outlined"}
                 compact
                 onPress={() => selectGroupBy(value)}
               >
                 {label}
-              </Button>
+              </AppButton>
             ))}
           </View>
           <View style={styles.dateRow}>
@@ -416,7 +416,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
                 disabled={loading}
               />
             </View>
-            <Button
+            <AppButton
               mode="outlined"
               onPress={() => load()}
               compact
@@ -424,7 +424,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
               disabled={loading}
             >
               Apply
-            </Button>
+            </AppButton>
           </View>
           <OutlinedSearchInput
             placeholder="Search by color name, ID, or external code…"
@@ -434,22 +434,22 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
             autoCapitalize="none"
           />
           <View style={styles.reportButtons}>
-            <Button
+            <AppButton
               mode="contained"
               icon="palette"
               onPress={() => setCustomColorsOpen(true)}
               compact
             >
               Custom colors
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               mode="contained"
               icon="spray-bottle"
               onPress={() => setMaterialUsageOpen(true)}
               compact
             >
               Material usage
-            </Button>
+            </AppButton>
           </View>
         </ToolbarCard>
 

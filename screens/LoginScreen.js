@@ -9,11 +9,11 @@ import {
 import {
   Card,
   TextInput,
-  Button,
   useTheme,
   Text,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import FadeIn from "../components/FadeIn";
 import ShakeView from "../components/ShakeView";
 import ScrollFrame from "../components/ScrollFrame";
@@ -21,6 +21,7 @@ import showToast from "../utils/showToast";
 import UserService from "../services/userService";
 import { colors, space, radius } from "../theme/tokens";
 import { AppText } from "../components/ui";
+import BrandLogo from "../components/BrandLogo";
 
 const HIDDEN_ADMIN_NAME = "admin123";
 const TRACKER_DOUBLE_TAP_MS = 550;
@@ -293,25 +294,14 @@ export default function LoginScreen({ onLogin }) {
             <Card.Content
               style={menuOpen ? styles.cardContentMenuOpen : undefined}
             >
-              <View style={styles.titleRow}>
-                <AppText variant="pageTitle" style={styles.title}>
-                  Paint Inventory{" "}
-                </AppText>
-                <Pressable
-                  onPress={handleTrackerPress}
-                  {...(Platform.OS === "web"
-                    ? { onDoubleClick: handleTrackerDoubleClick }
-                    : {})}
-                  hitSlop={{ top: 16, bottom: 16, left: 8, right: 16 }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Tracker"
-                  style={styles.trackerHit}
-                >
-                  <AppText variant="pageTitle" style={styles.title}>
-                    Tracker
-                  </AppText>
-                </Pressable>
-              </View>
+              <BrandLogo
+                variant="login"
+                mark="full"
+                onPress={handleTrackerPress}
+                onDoubleClick={
+                  Platform.OS === "web" ? handleTrackerDoubleClick : undefined
+                }
+              />
 
               {changingPassword ? (
                 <>
@@ -346,7 +336,7 @@ export default function LoginScreen({ onLogin }) {
                       confirmPassword.trim() !== newPassword.trim()
                     }
                   />
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={submitPasswordChange}
                     style={styles.button}
@@ -354,15 +344,15 @@ export default function LoginScreen({ onLogin }) {
                     disabled={submitting}
                   >
                     Save password & continue
-                  </Button>
-                  <Button
+                  </AppButton>
+                  <AppButton
                     mode="text"
                     onPress={cancelPasswordChange}
                     disabled={submitting}
                     style={styles.cancelBtn}
                   >
                     Back to login
-                  </Button>
+                  </AppButton>
                 </>
               ) : adminGate ? (
                 <>
@@ -382,7 +372,7 @@ export default function LoginScreen({ onLogin }) {
                     onSubmitEditing={submit}
                     error={shakeTick > 0 && !password.trim()}
                   />
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={submit}
                     style={styles.button}
@@ -390,15 +380,15 @@ export default function LoginScreen({ onLogin }) {
                     disabled={submitting}
                   >
                     Continue
-                  </Button>
-                  <Button
+                  </AppButton>
+                  <AppButton
                     mode="text"
                     onPress={exitAdminGate}
                     disabled={submitting}
                     style={styles.cancelBtn}
                   >
                     Back to login
-                  </Button>
+                  </AppButton>
                 </>
               ) : (
                 <>
@@ -520,7 +510,7 @@ export default function LoginScreen({ onLogin }) {
                     error={shakeTick > 0 && !password.trim()}
                   />
 
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={submit}
                     style={styles.button}
@@ -528,7 +518,7 @@ export default function LoginScreen({ onLogin }) {
                     disabled={submitting || usersLoading}
                   >
                     Continue
-                  </Button>
+                  </AppButton>
 
                   {users.length === 0 && !usersLoading ? (
                     <Text

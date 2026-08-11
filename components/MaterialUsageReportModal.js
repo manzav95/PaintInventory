@@ -8,12 +8,12 @@ import {
 } from "react-native";
 import {
   Text,
-  Button,
   Card,
   useTheme,
   ActivityIndicator,
   IconButton,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import DateField from "./DateField";
 import SimpleLineChart from "./SimpleLineChart";
 import ScrollFrame from "./ScrollFrame";
@@ -167,27 +167,27 @@ export default function MaterialUsageReportModal({
 
           <View style={styles.toolbar}>
             <View style={styles.toggleRow}>
-              <Button
+              <AppButton
                 mode={groupBy === "day" ? "contained" : "outlined"}
                 compact
                 onPress={() => setGroupBy("day")}
               >
                 Day
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode={groupBy === "week" ? "contained" : "outlined"}
                 compact
                 onPress={() => setGroupBy("week")}
               >
                 Week
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode={groupBy === "month" ? "contained" : "outlined"}
                 compact
                 onPress={() => setGroupBy("month")}
               >
                 Month
-              </Button>
+              </AppButton>
             </View>
             <View style={styles.dateRow}>
               <View style={styles.dateField}>
@@ -212,9 +212,9 @@ export default function MaterialUsageReportModal({
                 </Text>
                 <DateField value={toDate} onChange={setToDate} />
               </View>
-              <Button mode="contained" onPress={load} compact loading={loading}>
+              <AppButton mode="contained" onPress={load} compact loading={loading}>
                 Apply
-              </Button>
+              </AppButton>
             </View>
           </View>
 

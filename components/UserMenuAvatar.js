@@ -9,6 +9,21 @@ import {
 import { Text, Avatar, useTheme } from "react-native-paper";
 import { colors, space, radius } from "../theme/tokens";
 
+/** One letter for a single name; first + last initials when there are two+ words. */
+function initialsFromName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) {
+    return parts[0].charAt(0).toUpperCase() || "?";
+  }
+  const a = parts[0].charAt(0);
+  const b = parts[parts.length - 1].charAt(0);
+  return `${a}${b}`.toUpperCase() || "?";
+}
+
 /**
  * Circular user avatar that opens a small menu: Settings / Sign out.
  */
@@ -26,8 +41,9 @@ export default function UserMenuAvatar({
   const [anchor, setAnchor] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const btnRef = useRef(null);
 
-  const initial = (userName || "?").trim().charAt(0).toUpperCase() || "?";
+  const initial = initialsFromName(userName);
   const displayName = (userName || "").trim() || "User";
+  const labelFontSize = initial.length > 1 ? Math.round(size * 0.38) : undefined;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -76,7 +92,10 @@ export default function UserMenuAvatar({
           style={{
             backgroundColor: theme.colors.primaryContainer,
           }}
-          labelStyle={{ color: theme.colors.onPrimaryContainer }}
+          labelStyle={{
+            color: theme.colors.onPrimaryContainer,
+            ...(labelFontSize ? { fontSize: labelFontSize } : null),
+          }}
         />
       </Pressable>
 
@@ -117,7 +136,10 @@ export default function UserMenuAvatar({
                 style={{
                   backgroundColor: theme.colors.primaryContainer,
                 }}
-                labelStyle={{ color: theme.colors.onPrimaryContainer }}
+                labelStyle={{
+                  color: theme.colors.onPrimaryContainer,
+                  ...(initial.length > 1 ? { fontSize: 14 } : null),
+                }}
               />
               <View style={styles.userHeaderText}>
                 <Text

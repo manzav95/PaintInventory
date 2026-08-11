@@ -9,13 +9,13 @@ import {
 } from "react-native";
 import {
   TextInput,
-  Button,
   Text,
   Card,
   useTheme,
   Menu,
   IconButton,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
@@ -37,9 +37,12 @@ import {
   DEFAULT_UNIT_PRICE,
   resolveUnitPrice,
 } from "../utils/pricing";
-
-const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
-const CUSTOM_CONTAINER_LOCATION = "Custom Container";
+import {
+  CUSTOM_TYPES,
+  DEFAULT_CUSTOM_STACK,
+  CUSTOM_STACK_OPTIONS,
+  resolveCustomStackLocation,
+} from "../utils/customStacks";
 
 function nameImpliesCustomPaint(name) {
   const t = String(name ?? "").trim();
@@ -61,7 +64,6 @@ function idImpliesPrecat(id) {
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
   { label: "Stock Container", value: "Stock Container" },
-  { label: "Custom Container", value: "Custom Container" },
 ];
 
 const PO_CATEGORY_OPTIONS = [
@@ -152,13 +154,15 @@ export default function AddItemScreen({
   });
 
   const isCustomType = CUSTOM_TYPES.includes(type);
-  const usesCustomContainer = isCustomType || type === "precat";
   const inputStyle = isWideDesktop ? styles.inputDesktop : styles.input;
   const showFlorenzaCatalyst = textMentionsFlorenza(name, colorLabel);
+  const locationOptions = isCustomType
+    ? CUSTOM_STACK_OPTIONS
+    : CONTAINER_OPTIONS;
 
   useEffect(() => {
-    if (CUSTOM_TYPES.includes(type) || type === "precat") {
-      setLocation(CUSTOM_CONTAINER_LOCATION);
+    if (CUSTOM_TYPES.includes(type)) {
+      setLocation((prev) => resolveCustomStackLocation(prev));
     }
   }, [type]);
 
@@ -171,7 +175,6 @@ export default function AddItemScreen({
     setFieldErrors((e) => ({ ...e, itemId: false }));
     if (idImpliesPrecat(text)) {
       setType("precat");
-      setLocation(CUSTOM_CONTAINER_LOCATION);
     }
   };
 
@@ -180,6 +183,7 @@ export default function AddItemScreen({
     setFieldErrors((e) => ({ ...e, name: false }));
     if (nameImpliesCustomPaint(text)) {
       setType("custom_paint");
+      setLocation((prev) => resolveCustomStackLocation(prev || DEFAULT_CUSTOM_STACK));
     }
   };
 
@@ -254,10 +258,9 @@ export default function AddItemScreen({
     } else if (nameImpliesCustomPaint(nname)) {
       typeVal = "custom_paint";
     }
-    const locationVal =
-      CUSTOM_TYPES.includes(typeVal) || typeVal === "precat"
-        ? CUSTOM_CONTAINER_LOCATION
-        : location.trim();
+    const locationVal = CUSTOM_TYPES.includes(typeVal)
+      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      : location.trim();
     const hexVal = normalizeHex(hexColor);
     const rexRaw = rex.trim();
     let lotDateVal = null;
@@ -429,31 +432,34 @@ export default function AddItemScreen({
   };
 
   const renderContainerField = () => {
+    const fieldLabel = isCustomType ? "Stack (Custom)" : "Container";
+    const placeholder = isCustomType ? "Select stack" : "Select container";
+    const displayValue = isCustomType
+      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      : location;
     if (isWeb && isWideDesktop) {
       return (
         <View>
-          <FieldLabel theme={theme}>Container</FieldLabel>
+          <FieldLabel theme={theme}>{fieldLabel}</FieldLabel>
           <WebSelect
-            value={usesCustomContainer ? CUSTOM_CONTAINER_LOCATION : location}
+            value={displayValue}
             onChange={setLocation}
-            options={CONTAINER_OPTIONS}
-            placeholder="Select container"
+            options={locationOptions}
+            placeholder={placeholder}
             theme={theme}
-            disabled={usesCustomContainer}
           />
         </View>
       );
     }
     return (
       <>
-        <FieldLabel theme={theme}>Container</FieldLabel>
+        <FieldLabel theme={theme}>{fieldLabel}</FieldLabel>
         <Menu
           visible={locationMenuOpen}
           onDismiss={() => setLocationMenuOpen(false)}
           anchor={
             <Pressable
-              onPress={() => !usesCustomContainer && setLocationMenuOpen(true)}
-              disabled={usesCustomContainer}
+              onPress={() => setLocationMenuOpen(true)}
               style={[
                 styles.typeTrigger,
                 {
@@ -464,28 +470,20 @@ export default function AddItemScreen({
             >
               <Text
                 style={{
-                  color: location
+                  color: displayValue
                     ? theme.colors.onSurface
                     : theme.colors.onSurfaceVariant,
                 }}
               >
-                {(usesCustomContainer ? CUSTOM_CONTAINER_LOCATION : location)
-                  ? (CONTAINER_OPTIONS.find(
-                      (o) =>
-                        o.value ===
-                        (usesCustomContainer
-                          ? CUSTOM_CONTAINER_LOCATION
-                          : location),
-                    )?.label ??
-                    (usesCustomContainer
-                      ? CUSTOM_CONTAINER_LOCATION
-                      : location))
-                  : "Select container"}
+                {displayValue
+                  ? locationOptions.find((o) => o.value === displayValue)
+                      ?.label ?? displayValue
+                  : placeholder}
               </Text>
             </Pressable>
           }
         >
-          {CONTAINER_OPTIONS.map((o) => (
+          {locationOptions.map((o) => (
             <Menu.Item
               key={o.value}
               onPress={() => {
@@ -746,12 +744,12 @@ export default function AddItemScreen({
                 )}
 
                 <View style={styles.buttonRowDesktop}>
-                  <Button mode="contained" onPress={handleSave} icon="content-save">
+                  <AppButton mode="contained" onPress={handleSave} icon="content-save">
                     Save Item
-                  </Button>
-                  <Button mode="outlined" onPress={onCancel}>
+                  </AppButton>
+                  <AppButton mode="outlined" onPress={onCancel}>
                     Cancel
-                  </Button>
+                  </AppButton>
                 </View>
               </>
             ) : (
@@ -863,16 +861,16 @@ export default function AddItemScreen({
                   </View>
                 )}
                 <View style={styles.buttonContainer}>
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={handleSave}
                     style={[styles.button, styles.saveButton]}
                   >
                     Save Item
-                  </Button>
-                  <Button mode="outlined" onPress={onCancel} style={styles.button}>
+                  </AppButton>
+                  <AppButton mode="outlined" onPress={onCancel} style={styles.button}>
                     Cancel
-                  </Button>
+                  </AppButton>
                 </View>
               </>
             )}

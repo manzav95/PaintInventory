@@ -7,8 +7,11 @@ const API_URL = config.API_URL;
 async function _fetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
   const defaultOptions = {
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
     },
   };
 
@@ -59,6 +62,33 @@ class InventoryService {
       });
     } catch (error) {
       console.error('Error syncing recycle dates:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async zeroCustomQuantities(userName) {
+    try {
+      return await _fetch('/api/items/zero-custom-quantities', {
+        method: 'POST',
+        body: JSON.stringify({ userName: userName || 'admin' }),
+      });
+    } catch (error) {
+      console.error('Error zeroing custom quantities:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async zeroStaleCustomQuantities(userName, staleDays = 2) {
+    try {
+      return await _fetch('/api/items/zero-stale-custom-quantities', {
+        method: 'POST',
+        body: JSON.stringify({
+          userName: userName || 'admin',
+          staleDays: staleDays != null ? Number(staleDays) : 2,
+        }),
+      });
+    } catch (error) {
+      console.error('Error zeroing stale custom quantities:', error);
       return { success: false, error: error.message };
     }
   }
@@ -304,7 +334,7 @@ class InventoryService {
     }
   }
 
-  async updateQuantity(itemId, change, userName, actionType = null) {
+  async updateQuantity(itemId, change, userName, actionType = null, extras = {}) {
     try {
       const item = await this.getItem(itemId);
       if (!item) {
@@ -333,6 +363,14 @@ class InventoryService {
         lastScannedBy: userName || null,
         userName,
       };
+
+      if (
+        extras &&
+        extras.location != null &&
+        String(extras.location).trim() !== ''
+      ) {
+        updateData.location = String(extras.location).trim();
+      }
       
       // Add action type flag for check_in/check_out
       if (actionType) {

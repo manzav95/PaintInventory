@@ -8,7 +8,8 @@ import {
   Modal,
   Pressable,
 } from "react-native";
-import { Card, Text, Button, TextInput, useTheme } from "react-native-paper";
+import { Card, Text, TextInput, useTheme, Menu } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import { getContrastingTextColors } from "../utils/colorUtils";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
@@ -22,6 +23,12 @@ import ScrollFrame from "../components/ScrollFrame";
 import { colors, fontFamily } from "../theme/tokens";
 import showAlertUtil from "../utils/showAlert";
 import showToast from "../utils/showToast";
+import {
+  CUSTOM_STACK_OPTIONS,
+  DEFAULT_CUSTOM_STACK,
+  resolveCustomStackLocation,
+  stackLetterFromLocation,
+} from "../utils/customStacks";
 
 const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
 
@@ -97,6 +104,17 @@ export default function CheckInOutScreen({
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [receiveQty, setReceiveQty] = useState("");
   const [receiveSubmitting, setReceiveSubmitting] = useState(false);
+  const [stackLocation, setStackLocation] = useState(() =>
+    resolveCustomStackLocation(item?.location || DEFAULT_CUSTOM_STACK),
+  );
+  const [stackMenuOpen, setStackMenuOpen] = useState(false);
+  const [receiveStackMenuOpen, setReceiveStackMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setStackLocation(
+      resolveCustomStackLocation(item?.location || DEFAULT_CUSTOM_STACK),
+    );
+  }, [item?.id, item?.location]);
 
   const quickQtyEnabledTypes = new Set([
     "paint",
@@ -196,7 +214,12 @@ export default function CheckInOutScreen({
     }
 
     if (action === "in") {
-      onCheckIn(qty);
+      onCheckIn(
+        qty,
+        isCustomColor
+          ? { location: resolveCustomStackLocation(stackLocation) }
+          : undefined,
+      );
     } else if (action === "out") {
       onCheckOut(qty);
     } else if (action === "recycle") {
@@ -273,7 +296,13 @@ export default function CheckInOutScreen({
     }
     setReceiveSubmitting(true);
     try {
-      await onReceiveDelivery(selectedOrder.id, qty);
+      await onReceiveDelivery(
+        selectedOrder.id,
+        qty,
+        isCustomColor
+          ? { location: resolveCustomStackLocation(stackLocation) }
+          : undefined,
+      );
       setShowReceiveModal(false);
       setSelectedOrder(null);
       setReceiveQty("");
@@ -362,7 +391,7 @@ export default function CheckInOutScreen({
           >
             <Card.Content>
               <View style={styles.buttonRow}>
-                <Button
+                <AppButton
                   mode={action === "in" ? "contained" : "outlined"}
                   onPress={handleCheckInPress}
                   style={[
@@ -379,8 +408,8 @@ export default function CheckInOutScreen({
                   icon="arrow-up"
                 >
                   Check In
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode={action === "out" ? "contained" : "outlined"}
                   onPress={() => {
                     if (currentStock <= 0) {
@@ -406,9 +435,9 @@ export default function CheckInOutScreen({
                   icon="arrow-down"
                 >
                   Check Out
-                </Button>
+                </AppButton>
                 {showReceivingButton && (
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={openReceiveModal}
                     style={styles.actionButton}
@@ -417,10 +446,10 @@ export default function CheckInOutScreen({
                     textColor="#fff"
                   >
                     Receiving Delivery
-                  </Button>
+                  </AppButton>
                 )}
                 {showRecycleButton ? (
-                  <Button
+                  <AppButton
                     mode={action === "recycle" ? "contained" : "outlined"}
                     onPress={() => setAction("recycle")}
                     style={[
@@ -434,7 +463,7 @@ export default function CheckInOutScreen({
                     textColor={action === "recycle" ? "#fff" : undefined}
                   >
                     Recycle
-                  </Button>
+                  </AppButton>
                 ) : null}
               </View>
 
@@ -453,7 +482,7 @@ export default function CheckInOutScreen({
                       <View style={styles.quickQtyRow}>
                         {quickQtyOptions.map((v) => (
                           <View key={String(v)} style={styles.quickQtyCell}>
-                            <Button
+                            <AppButton
                               mode="outlined"
                               compact
                               onPress={() => setQuantity(String(v))}
@@ -461,7 +490,7 @@ export default function CheckInOutScreen({
                               contentStyle={styles.quickQtyButtonContent}
                             >
                               {v}
-                            </Button>
+                            </AppButton>
                           </View>
                         ))}
                       </View>
@@ -482,6 +511,44 @@ export default function CheckInOutScreen({
                     style={styles.input}
                     right={<TextInput.Affix text={unitAffix} />}
                   />
+                  {action === "in" && isCustomColor ? (
+                    <View style={styles.stackField}>
+                      <Text
+                        style={[
+                          styles.stackLabel,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        Stack location
+                      </Text>
+                      <Menu
+                        visible={stackMenuOpen}
+                        onDismiss={() => setStackMenuOpen(false)}
+                        anchor={
+                          <AppButton
+                            mode="outlined"
+                            onPress={() => setStackMenuOpen(true)}
+                            icon="chevron-down"
+                            contentStyle={styles.stackButtonContent}
+                            style={styles.input}
+                          >
+                            {stackLetterFromLocation(stackLocation)}
+                          </AppButton>
+                        }
+                      >
+                        {CUSTOM_STACK_OPTIONS.map((o) => (
+                          <Menu.Item
+                            key={o.value}
+                            onPress={() => {
+                              setStackLocation(o.value);
+                              setStackMenuOpen(false);
+                            }}
+                            title={o.label}
+                          />
+                        ))}
+                      </Menu>
+                    </View>
+                  ) : null}
                   {(action === "out" || action === "recycle") &&
                   currentStock <= 0 ? (
                     <Text
@@ -494,14 +561,14 @@ export default function CheckInOutScreen({
                     </Text>
                   ) : null}
                   <View style={styles.submitRow}>
-                    <Button
+                    <AppButton
                       mode="outlined"
                       onPress={onCancel}
                       style={styles.button}
                     >
                       Cancel
-                    </Button>
-                    <Button
+                    </AppButton>
+                    <AppButton
                       mode="contained"
                       onPress={handleSubmit}
                       style={styles.button}
@@ -516,19 +583,19 @@ export default function CheckInOutScreen({
                       }
                     >
                       {action === "recycle" ? "Confirm Recycle" : "Submit"}
-                    </Button>
+                    </AppButton>
                   </View>
                 </>
               )}
 
               {!action && (
-                <Button
+                <AppButton
                   mode="outlined"
                   onPress={onCancel}
                   style={styles.cancelButton}
                 >
                   Cancel
-                </Button>
+                </AppButton>
               )}
             </Card.Content>
           </Card>
@@ -588,20 +655,20 @@ export default function CheckInOutScreen({
               </Text>
             ) : null}
             <View style={styles.promptActions}>
-              <Button
+              <AppButton
                 mode="contained"
                 onPress={handleDeliveryPromptYes}
                 icon="truck-delivery"
                 style={styles.promptPrimaryBtn}
               >
                 Yes — select PO
-              </Button>
-              <Button mode="outlined" onPress={handleDeliveryPromptNo}>
+              </AppButton>
+              <AppButton mode="outlined" onPress={handleDeliveryPromptNo}>
                 No — regular check-in
-              </Button>
-              <Button mode="text" onPress={() => setShowDeliveryPrompt(false)}>
+              </AppButton>
+              <AppButton mode="text" onPress={() => setShowDeliveryPrompt(false)}>
                 Cancel
-              </Button>
+              </AppButton>
             </View>
           </Pressable>
         </Pressable>
@@ -699,14 +766,52 @@ export default function CheckInOutScreen({
                   keyboardType="number-pad"
                   style={styles.receiveInput}
                 />
+                {isCustomColor ? (
+                  <View style={styles.stackField}>
+                    <Text
+                      style={[
+                        styles.stackLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Stack location
+                    </Text>
+                    <Menu
+                      visible={receiveStackMenuOpen}
+                      onDismiss={() => setReceiveStackMenuOpen(false)}
+                      anchor={
+                        <AppButton
+                          mode="outlined"
+                          onPress={() => setReceiveStackMenuOpen(true)}
+                          icon="chevron-down"
+                          contentStyle={styles.stackButtonContent}
+                          style={styles.receiveInput}
+                        >
+                          {stackLetterFromLocation(stackLocation)}
+                        </AppButton>
+                      }
+                    >
+                      {CUSTOM_STACK_OPTIONS.map((o) => (
+                        <Menu.Item
+                          key={o.value}
+                          onPress={() => {
+                            setStackLocation(o.value);
+                            setReceiveStackMenuOpen(false);
+                          }}
+                          title={o.label}
+                        />
+                      ))}
+                    </Menu>
+                  </View>
+                ) : null}
                 <View style={styles.modalActions}>
-                  <Button
+                  <AppButton
                     mode="outlined"
                     onPress={() => setShowReceiveModal(false)}
                   >
                     Cancel
-                  </Button>
-                  <Button
+                  </AppButton>
+                  <AppButton
                     mode="contained"
                     onPress={handleReceiveSubmit}
                     loading={receiveSubmitting}
@@ -717,7 +822,7 @@ export default function CheckInOutScreen({
                     }
                   >
                     Receive
-                  </Button>
+                  </AppButton>
                 </View>
               </>
             )}
@@ -887,5 +992,16 @@ const styles = StyleSheet.create({
   receiveInput: {
     marginBottom: 12,
     marginTop: 4,
+  },
+  stackField: {
+    marginBottom: 8,
+  },
+  stackLabel: {
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  stackButtonContent: {
+    flexDirection: "row-reverse",
+    justifyContent: "space-between",
   },
 });

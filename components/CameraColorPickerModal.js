@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Modal, View, StyleSheet, Pressable } from "react-native";
-import { Text, Button, ActivityIndicator, useTheme } from "react-native-paper";
+import { Text, ActivityIndicator, useTheme } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import { DARK_SURFACE_ELEVATED } from "../utils/themeColors";
 import { CameraView, useCameraPermissions } from "expo-camera";
 
@@ -75,9 +76,9 @@ export default function CameraColorPickerModal({
                   <Text style={styles.permissionText}>
                     Camera access is needed to pick a color.
                   </Text>
-                  <Button mode="contained" onPress={requestPermission}>
+                  <AppButton mode="contained" onPress={requestPermission}>
                     Grant permission
-                  </Button>
+                  </AppButton>
                 </>
               )}
             </View>
@@ -104,16 +105,16 @@ export default function CameraColorPickerModal({
           )}
 
           <View style={styles.actions}>
-            <Button mode="text" onPress={onClose}>
+            <AppButton mode="text" onPress={onClose}>
               Cancel
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               mode="contained"
               onPress={handleUseColor}
               disabled={!canShowCamera}
             >
               Use color
-            </Button>
+            </AppButton>
           </View>
         </View>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />

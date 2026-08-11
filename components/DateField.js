@@ -7,8 +7,9 @@ import {
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Button, Text, TextInput, useTheme } from "react-native-paper";
+import { Text, TextInput, useTheme } from "react-native-paper";
 
+import AppButton from "./ui/AppButton";
 function toYmd(d) {
   if (!(d instanceof Date) || isNaN(d.getTime())) return "";
   const y = d.getFullYear();
@@ -196,9 +197,9 @@ export default function DateField({
                 >
                   {label || "Date"}
                 </Text>
-                <Button mode="text" compact onPress={() => setShow(false)}>
+                <AppButton mode="text" compact onPress={() => setShow(false)}>
                   Cancel
-                </Button>
+                </AppButton>
               </View>
               <DateTimePicker
                 value={draft}
@@ -212,13 +213,13 @@ export default function DateField({
                   if (selectedDate) setDraft(selectedDate);
                 }}
               />
-              <Button
+              <AppButton
                 mode="contained"
                 onPress={confirmIos}
                 style={styles.doneBtn}
               >
                 Done
-              </Button>
+              </AppButton>
             </Pressable>
           </Pressable>
         </Modal>

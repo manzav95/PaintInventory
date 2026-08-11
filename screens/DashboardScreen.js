@@ -13,7 +13,6 @@ import {
   Text,
   Title,
   Paragraph,
-  Button,
   useTheme,
   DataTable,
   Chip,
@@ -23,6 +22,7 @@ import {
   Divider,
   SegmentedButtons,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import DashboardGreeting from "../components/DashboardGreeting";
 import ScrollFrame from "../components/ScrollFrame";
@@ -159,6 +159,7 @@ export default function DashboardScreen({
   auditLogsLoaded: auditLogsLoadedFromApp = false,
   materialUsageLogs = [],
   materialUsageOvertime = false,
+  dataRefreshKey = 0,
   onRefresh,
   isRefreshing = false,
   showTransactionTable = true,
@@ -943,6 +944,12 @@ export default function DashboardScreen({
     setHistoryExtraPages(0);
   }, [activityPeriod, historyScope, mobileHistoryTab, isAdmin]);
 
+  // Shell refresh: snap history back to the newest window so new txs are visible.
+  useEffect(() => {
+    if (!dataRefreshKey) return;
+    setHistoryExtraPages(0);
+  }, [dataRefreshKey]);
+
   // Desktop: 3-column activity brief for admin and standard users.
   // Mobile: stacked brief list. (Standard no longer uses the wide history table.)
   const showDualBriefActivity = showTransactionTable && !isMobileLayout;
@@ -1095,7 +1102,7 @@ export default function DashboardScreen({
                       color: isPrimer
                         ? theme.dark
                           ? "#eceff1"
-                          : "#546e7a"
+                          : "#6B6458"
                         : accent,
                       fontWeight: "700",
                       ...(isPrimer
@@ -1142,7 +1149,7 @@ export default function DashboardScreen({
                   ? isPrimer
                     ? theme.dark
                       ? "#eceff1"
-                      : "#546e7a"
+                      : "#6B6458"
                     : accent
                   : accent,
                 fontWeight: "700",
@@ -1554,13 +1561,13 @@ export default function DashboardScreen({
                 )}
               </ScrollFrame>
               <View style={styles.attentionPopupActions}>
-                <Button
+                <AppButton
                   mode="text"
                   compact
                   onPress={() => setAttentionOpen(false)}
                 >
                   Close
-                </Button>
+                </AppButton>
               </View>
             </View>
             {attentionPanelPos.placement === "above" ? (
@@ -1617,9 +1624,9 @@ export default function DashboardScreen({
               >
                 Checked out this {checkedOutListIsWeek ? "week" : "month"}
               </Text>
-              <Button compact onPress={() => setCheckedOutListOpen(false)}>
+              <AppButton compact onPress={() => setCheckedOutListOpen(false)}>
                 Close
-              </Button>
+              </AppButton>
             </View>
             <Text
               style={[
@@ -2396,7 +2403,7 @@ export default function DashboardScreen({
                 {isAdmin && isWeb && (
                   <View style={styles.historyAdminControls}>
                     <View style={styles.historyShiftGroup}>
-                      <Button
+                      <AppButton
                         mode={shiftFilter === "day" ? "contained" : "outlined"}
                         compact
                         onPress={() =>
@@ -2407,8 +2414,8 @@ export default function DashboardScreen({
                         labelStyle={styles.historyToggleLabel}
                       >
                         {SHIFT_LABELS.day}
-                      </Button>
-                      <Button
+                      </AppButton>
+                      <AppButton
                         mode={
                           shiftFilter === "swing" ? "contained" : "outlined"
                         }
@@ -2421,9 +2428,9 @@ export default function DashboardScreen({
                         labelStyle={styles.historyToggleLabel}
                       >
                         {SHIFT_LABELS.swing}
-                      </Button>
+                      </AppButton>
                     </View>
-                    <Button
+                    <AppButton
                       mode={reducedHistory ? "contained" : "outlined"}
                       compact
                       onPress={() => setReducedHistory((p) => !p)}
@@ -2432,7 +2439,7 @@ export default function DashboardScreen({
                       labelStyle={styles.historyToggleLabel}
                     >
                       {reducedHistory ? "Reduced" : "Standard"}
-                    </Button>
+                    </AppButton>
                   </View>
                 )}
                 <OutlinedSearchInput

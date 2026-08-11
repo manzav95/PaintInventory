@@ -10,11 +10,11 @@ import {
 import {
   Card,
   Text,
-  Button,
   useTheme,
   IconButton,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import AuditService from "../services/auditService";
 import { AppText, AppEmptyState } from "../components/ui";
 import { getActionColor } from "../utils/actionColors";

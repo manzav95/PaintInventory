@@ -54,6 +54,37 @@ app.post('/api/items/sync-recycle-dates', async (req, res) => {
   }
 });
 
+// Zero quantity on all custom paint/stain items (admin inventory reset).
+app.post('/api/items/zero-custom-quantities', async (req, res) => {
+  try {
+    const userName =
+      (req.body && req.body.userName && String(req.body.userName).trim()) ||
+      'admin';
+    const result = await db.zeroAllCustomQuantities(userName);
+    res.json(result);
+  } catch (error) {
+    console.error('Error zeroing custom quantities:', error);
+    res.status(500).json({ error: 'Failed to zero custom quantities' });
+  }
+});
+
+// Zero custom paint/stain with no quantity transaction in the past N days (default 2).
+app.post('/api/items/zero-stale-custom-quantities', async (req, res) => {
+  try {
+    const userName =
+      (req.body && req.body.userName && String(req.body.userName).trim()) ||
+      'admin';
+    const rawDays = req.body && req.body.staleDays;
+    const staleDays =
+      rawDays != null && Number(rawDays) > 0 ? Number(rawDays) : 2;
+    const result = await db.zeroCustomQuantities({ userName, staleDays });
+    res.json(result);
+  } catch (error) {
+    console.error('Error zeroing stale custom quantities:', error);
+    res.status(500).json({ error: 'Failed to zero stale custom quantities' });
+  }
+});
+
 // Backfill custom color job history from existing order lines (past + present).
 app.post('/api/items/sync-job-history', async (req, res) => {
   try {
@@ -967,7 +998,7 @@ app.delete('/api/orders/:id', handleDeleteOrder);
 // Root route - helpful info
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Paint Inventory Tracker API',
+    message: 'CURE API',
     version: '1.0.0',
     orders: true,
     endpoints: {
@@ -1165,7 +1196,7 @@ app.post('/api/notifications/low-stock-alert', async (req, res) => {
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Paint Inventory API server running on http://0.0.0.0:${PORT}`);
+  console.log(`CURE API server running on http://0.0.0.0:${PORT}`);
   console.log(`Access from other devices: http://YOUR_IP:${PORT}`);
 });
 

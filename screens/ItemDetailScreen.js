@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import {
   TextInput,
-  Button,
   Text,
   Card,
   IconButton,
@@ -18,6 +17,7 @@ import {
   Menu,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
 import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
@@ -39,8 +39,12 @@ import {
 } from "../utils/gallonQuantity";
 import { resolveUnitPrice } from "../utils/pricing";
 import { colors, fontFamily } from "../theme/tokens";
-
-const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
+import {
+  CUSTOM_TYPES,
+  DEFAULT_CUSTOM_STACK,
+  CUSTOM_STACK_OPTIONS,
+  resolveCustomStackLocation,
+} from "../utils/customStacks";
 
 function textMentionsFlorenza(...parts) {
   return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
@@ -49,15 +53,12 @@ function textMentionsFlorenza(...parts) {
 const CONTAINER_OPTIONS = [
   { label: "White Container", value: "White Container" },
   { label: "Stock Container", value: "Stock Container" },
-  { label: "Custom Container", value: "Custom Container" },
 ];
 
 const PO_CATEGORY_OPTIONS = [
   { label: "Mixing", value: "mixing" },
   { label: "AP", value: "ap" },
 ];
-
-const CUSTOM_CONTAINER_LOCATION = "Custom Container";
 
 function FormRow({ children, desktop }) {
   if (!desktop) return <>{children}</>;
@@ -112,7 +113,18 @@ function WebSelect({
 }
 
 function ReadOnlyValue({ children, style }) {
-  return <Text style={[styles.readOnlyValue, style]}>{children}</Text>;
+  const theme = useTheme();
+  return (
+    <Text
+      style={[
+        styles.readOnlyValue,
+        { color: theme.colors.primary },
+        style,
+      ]}
+    >
+      {children}
+    </Text>
+  );
 }
 
 export default function ItemDetailScreen({
@@ -135,7 +147,13 @@ export default function ItemDetailScreen({
   const [name, setName] = useState(item?.name || "");
   const [quantity, setQuantity] = useState(item?.quantity?.toString() || "0");
   const [type, setType] = useState(item?.type || "");
-  const [location, setLocation] = useState(item?.location || "");
+  const [location, setLocation] = useState(() => {
+    const loc = item?.location || "";
+    if (CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase())) {
+      return resolveCustomStackLocation(loc);
+    }
+    return loc;
+  });
   const [idInput, setIdInput] = useState(item?.id?.toString() || "");
   const [minQuantityInput, setMinQuantityInput] = useState(
     item?.minQuantity != null ? String(item.minQuantity) : "",
@@ -202,6 +220,14 @@ export default function ItemDetailScreen({
     setType(item?.type || "");
   }, [item?.id, item?.type]);
   useEffect(() => {
+    const loc = item?.location || "";
+    if (CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase())) {
+      setLocation(resolveCustomStackLocation(loc));
+    } else {
+      setLocation(loc);
+    }
+  }, [item?.id, item?.location, item?.type]);
+  useEffect(() => {
     setDisplayOrderInput(
       item?.display_order != null && item?.display_order !== ""
         ? String(item.display_order)
@@ -248,7 +274,7 @@ export default function ItemDetailScreen({
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type)) {
-      setLocation(CUSTOM_CONTAINER_LOCATION);
+      setLocation((prev) => resolveCustomStackLocation(prev));
     }
   }, [type]);
 
@@ -392,12 +418,16 @@ export default function ItemDetailScreen({
       }
     }
 
+    const locationVal = CUSTOM_TYPES.includes(typeVal)
+      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      : location;
+
     const updatedItem = {
       ...item,
       id: trimmedId || item?.id,
       name: trimmedName,
       quantity: qtyVal,
-      location,
+      location: locationVal,
       ...(type !== "custom_paint" &&
         type !== "custom_stain" &&
         minQ !== undefined && { minQuantity: minQ }),
@@ -462,8 +492,15 @@ export default function ItemDetailScreen({
   const typeDisplay =
     type ? (TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type) : "—";
 
-  const containerDisplay = location
-    ? (CONTAINER_OPTIONS.find((o) => o.value === location)?.label ?? location)
+  const locationOptions = isCustomType
+    ? CUSTOM_STACK_OPTIONS
+    : CONTAINER_OPTIONS;
+  const stackOrLocation = isCustomType
+    ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+    : location;
+  const containerDisplay = stackOrLocation
+    ? locationOptions.find((o) => o.value === stackOrLocation)?.label ??
+      stackOrLocation
     : "—";
 
   const quantityField = isAdmin ? (
@@ -678,7 +715,7 @@ export default function ItemDetailScreen({
   const actionButtons = (
     <View style={isWideDesktop ? styles.buttonRowDesktop : styles.buttonContainer}>
       {isAdmin && (
-        <Button
+        <AppButton
           mode="contained"
           onPress={handleSave}
           icon="content-save"
@@ -687,7 +724,7 @@ export default function ItemDetailScreen({
           style={!isWideDesktop ? styles.button : undefined}
         >
           Save Changes
-        </Button>
+        </AppButton>
       )}
       {!isAdmin && (
         <Text
@@ -700,7 +737,7 @@ export default function ItemDetailScreen({
         </Text>
       )}
       {isAdmin && item?.id && (
-        <Button
+        <AppButton
           mode="outlined"
           onPress={() => onDelete(item.id)}
           icon="delete"
@@ -711,7 +748,7 @@ export default function ItemDetailScreen({
           ]}
         >
           Delete Item
-        </Button>
+        </AppButton>
       )}
     </View>
   );
@@ -867,18 +904,19 @@ export default function ItemDetailScreen({
   };
 
   const renderContainerField = () => {
+    const fieldLabel = isCustomType ? "Stack (Custom)" : "Container";
+    const placeholder = isCustomType ? "Select stack" : "Select container";
     if (isWeb && isWideDesktop) {
       return (
         <View>
-          <FieldLabel theme={theme}>Container</FieldLabel>
+          <FieldLabel theme={theme}>{fieldLabel}</FieldLabel>
           {isAdmin ? (
             <WebSelect
-              value={isCustomType ? CUSTOM_CONTAINER_LOCATION : location}
+              value={stackOrLocation}
               onChange={setLocation}
-              options={CONTAINER_OPTIONS}
-              placeholder="Select container"
+              options={locationOptions}
+              placeholder={placeholder}
               theme={theme}
-              disabled={isCustomType}
             />
           ) : (
             <ReadOnlyValue>{containerDisplay}</ReadOnlyValue>
@@ -888,15 +926,14 @@ export default function ItemDetailScreen({
     }
     return (
       <>
-        <FieldLabel theme={theme}>Container</FieldLabel>
+        <FieldLabel theme={theme}>{fieldLabel}</FieldLabel>
         {isAdmin ? (
           <Menu
             visible={locationMenuOpen}
             onDismiss={() => setLocationMenuOpen(false)}
             anchor={
               <Pressable
-                onPress={() => !isCustomType && setLocationMenuOpen(true)}
-                disabled={isCustomType}
+                onPress={() => setLocationMenuOpen(true)}
                 style={[
                   styles.typeTrigger,
                   {
@@ -907,24 +944,20 @@ export default function ItemDetailScreen({
               >
                 <Text
                   style={{
-                    color: location
+                    color: stackOrLocation
                       ? theme.colors.onSurface
                       : theme.colors.onSurfaceVariant,
                   }}
                 >
-                  {(isCustomType ? CUSTOM_CONTAINER_LOCATION : location)
-                    ? (CONTAINER_OPTIONS.find(
-                        (o) =>
-                          o.value ===
-                          (isCustomType ? CUSTOM_CONTAINER_LOCATION : location),
-                      )?.label ??
-                      (isCustomType ? CUSTOM_CONTAINER_LOCATION : location))
-                    : "Select container"}
+                  {stackOrLocation
+                    ? locationOptions.find((o) => o.value === stackOrLocation)
+                        ?.label ?? stackOrLocation
+                    : placeholder}
                 </Text>
               </Pressable>
             }
           >
-            {CONTAINER_OPTIONS.map((o) => (
+            {locationOptions.map((o) => (
               <Menu.Item
                 key={o.value}
                 onPress={() => {
@@ -1372,7 +1405,6 @@ const styles = StyleSheet.create({
   readOnlyValue: {
     fontSize: 15,
     fontFamily: fontFamily.mono,
-    color: colors.brand.primary,
   },
   recycleBlock: {
     marginBottom: 12,

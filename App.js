@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, ActivityIndicator, Text, Button } from 'react-native-paper';
+import { Provider as PaperProvider, ActivityIndicator, Text } from "react-native-paper";
+import AppButton from "./components/ui/AppButton";
 import {
   normalizeItemIdQuery,
   resolveBestInventoryMatch,
 } from './utils/itemLookup';
 import showAlert from './utils/showAlert';
 import showToast from './utils/showToast';
+import confirmAction from './utils/confirmAction';
 import { injectWebMotionStyles } from './utils/injectWebMotionStyles';
 import { injectWebFonts } from './utils/injectWebFonts';
 import ScreenTransition from './components/ScreenTransition';
@@ -25,6 +27,7 @@ import { enqueueQuantityAction, syncPendingQuantity } from './utils/offlineQueue
 import OrderService from './services/orderService';
 import MaterialUsageService from './services/materialUsageService';
 import config from './config';
+import { formatCustomStackDisplay } from './utils/customStacks';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import QRScanScreen from './screens/QRScanScreen';
@@ -48,10 +51,8 @@ import { lightTheme, darkTheme } from './theme/createAppTheme';
 import { colors } from './theme/tokens';
 import {
   recordUserActivity,
-  getLastUserActivity,
-  isIdleExpired,
   clearUserActivity,
-  isAdminUser,
+  isAdminUser as isAdminAccount,
 } from './utils/idleSession';
 import useIdleLogout from './utils/useIdleLogout';
 import LoginLogService from './services/loginLogService';
@@ -77,7 +78,7 @@ export default function App() {
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [materialUsageOvertime, setMaterialUsageOvertime] = useState(false);
   const [userName, setUserName] = useState(null);
-  const isAdminUser = userName === 'admin123';
+  const isAdminUser = isAdminAccount(userName);
   /** Admin can preview the standard-user UI without signing out. */
   const [previewStandardView, setPreviewStandardView] = useState(false);
   const isAdmin = isAdminUser && !previewStandardView;
@@ -99,6 +100,9 @@ export default function App() {
   /** Cached audit logs (dashboard stats, inventory analytics, transaction history). */
   const [auditLogsCache, setAuditLogsCache] = useState(null);
   const [auditLogsLoading, setAuditLogsLoading] = useState(false);
+  const auditLogsRequestId = useRef(0);
+  /** Bumped when shell refresh finishes so kept-alive screens reset paging / local windows. */
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [materialUsageLogsCache, setMaterialUsageLogsCache] = useState([]);
   const recycleSyncInFlight = useRef(false);
   const jobHistorySyncInFlight = useRef(false);
@@ -215,7 +219,7 @@ export default function App() {
         settings: 'Settings',
         home: 'Dashboard',
       };
-      document.title = titles[currentScreen] || 'Paint Inventory';
+      document.title = titles[currentScreen] || 'CURE';
     }
   }, [currentScreen]);
 
@@ -332,21 +336,11 @@ export default function App() {
     try {
       const stored = await AsyncStorage.getItem('@inventory_user_name');
       if (stored) {
-        if (!isAdminUser(stored)) {
-          const last = await getLastUserActivity();
-          if (isIdleExpired(last)) {
-            await AsyncStorage.removeItem('@inventory_user_name');
-            await clearUserActivity();
-            setCurrentScreen('login');
-            return;
-          }
-          // Treat a page reload as activity so refresh does not feel like a logout
-          // as long as the idle window has not expired.
-          await recordUserActivity();
-        }
+        // Persist session across refresh; only Sign out clears login.
+        await recordUserActivity();
         idleLogoutTriggeredRef.current = false;
         setUserName(stored);
-        setCurrentScreen(stored === 'admin123' ? 'home' : 'list');
+        setCurrentScreen(isAdminAccount(stored) ? 'home' : 'list');
       } else {
         setCurrentScreen('login');
       }
@@ -365,7 +359,7 @@ export default function App() {
     idleLogoutTriggeredRef.current = false;
     setPreviewStandardView(false);
     setUserName(trimmed);
-    setCurrentScreen(trimmed === 'admin123' ? 'home' : 'list');
+    setCurrentScreen(isAdminAccount(trimmed) ? 'home' : 'list');
   };
 
   const handleSwitchUser = async () => {
@@ -439,12 +433,15 @@ export default function App() {
   const refreshAuditLogs = useCallback(async (force = false) => {
     if (auditLogsLoading && !force) return;
     if (!force && auditLogsCache !== null) return;
+    const requestId = ++auditLogsRequestId.current;
     setAuditLogsLoading(true);
     try {
       const [logs, usage] = await Promise.all([
         AuditService.list(AUDIT_LOGS_FETCH_LIMIT),
         MaterialUsageService.list(null, 2000).catch(() => []),
       ]);
+      // Ignore stale responses if a newer refresh already started.
+      if (requestId !== auditLogsRequestId.current) return;
       const next = Array.isArray(logs) ? logs : [];
       setAuditLogsCache(next);
       setMaterialUsageLogsCache(Array.isArray(usage) ? usage : []);
@@ -453,11 +450,13 @@ export default function App() {
       );
     } catch (e) {
       console.error('Error prefetching audit logs:', e);
-      if (force) {
+      if (force && requestId === auditLogsRequestId.current) {
         Alert.alert('Error', e?.message || 'Could not load activity history.');
       }
     } finally {
-      setAuditLogsLoading(false);
+      if (requestId === auditLogsRequestId.current) {
+        setAuditLogsLoading(false);
+      }
     }
   }, [auditLogsCache, auditLogsLoading]);
 
@@ -520,9 +519,16 @@ export default function App() {
       const items = await InventoryService.getAllItems();
       setInventory(items);
 
-      // Background prefetch — skipped on later visits unless refreshCaches / cache empty.
-      refreshReceiveOrders(refreshCaches);
-      refreshAuditLogs(refreshCaches);
+      // Force-refresh shared caches when the user hits Refresh; otherwise soft-prefetch.
+      if (refreshCaches) {
+        await Promise.all([
+          refreshReceiveOrders(true),
+          refreshAuditLogs(true),
+        ]);
+      } else {
+        refreshReceiveOrders(false);
+        refreshAuditLogs(false);
+      }
 
       const needsRecycleBackfill = items.some((i) => {
         const t = (i.type || '').toLowerCase();
@@ -585,9 +591,10 @@ export default function App() {
     }
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setFormRefreshKey((k) => k + 1);
-    loadInventory(true, { refreshCaches: true });
+    await loadInventory(true, { refreshCaches: true });
+    setDataRefreshKey((k) => k + 1);
   };
 
   const handleScanNFC = async () => {
@@ -673,17 +680,30 @@ export default function App() {
     }
   };
 
-  const handleCheckIn = async (quantity) => {
+  const handleCheckIn = async (quantity, options = {}) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-in...', async () => {
       try {
         // All users can check in via QR scan
-        const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'check_in');
+        const extras =
+          options?.location != null && String(options.location).trim() !== ''
+            ? { location: String(options.location).trim() }
+            : {};
+        const result = await InventoryService.updateQuantity(
+          scannedItem.id,
+          quantity,
+          actorName,
+          'check_in',
+          extras,
+        );
         if (result.success) {
           await loadInventory();
+          const stackNote = extras.location
+            ? ` · ${formatCustomStackDisplay(extras.location)}`
+            : '';
           showToast({
             title: 'Checked in',
-            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
           });
           await AuditService.log({
             type: 'check_in',
@@ -691,6 +711,7 @@ export default function App() {
             itemId: scannedItem.id,
             quantity: quantity,
             newQuantity: result.item.quantity,
+            ...(extras.location && { location: extras.location }),
           });
           await refreshAuditLogs(true);
         } else {
@@ -704,6 +725,7 @@ export default function App() {
           change: quantity,
           userName: actorName,
           actionType: 'check_in',
+          ...(options?.location && { location: options.location }),
         });
         showToast({
           type: 'info',
@@ -717,7 +739,7 @@ export default function App() {
     });
   };
 
-  const handleReceiveDelivery = async (orderId, quantity) => {
+  const handleReceiveDelivery = async (orderId, quantity, options = {}) => {
     if (!scannedItem) return;
     await runWithLoading('Recording delivery...', async () => {
       try {
@@ -729,7 +751,17 @@ export default function App() {
           );
           return;
         }
-        const result = await InventoryService.updateQuantity(scannedItem.id, quantity, actorName, 'receiving');
+        const extras =
+          options?.location != null && String(options.location).trim() !== ''
+            ? { location: String(options.location).trim() }
+            : {};
+        const result = await InventoryService.updateQuantity(
+          scannedItem.id,
+          quantity,
+          actorName,
+          'receiving',
+          extras,
+        );
         if (!result.success) {
           showAlert(
             'Cannot receive',
@@ -739,9 +771,12 @@ export default function App() {
         }
         await loadInventory();
         await refreshReceiveOrders(true);
+        const stackNote = extras.location
+          ? ` · ${formatCustomStackDisplay(extras.location)}`
+          : '';
         showToast({
           title: 'Received',
-          message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
+          message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
         });
         await AuditService.log({
           type: 'receiving',
@@ -750,6 +785,7 @@ export default function App() {
           quantity,
           newQuantity: result.item.quantity,
           orderId,
+          ...(extras.location && { location: extras.location }),
         });
         await refreshAuditLogs(true);
       } catch (err) {
@@ -760,6 +796,7 @@ export default function App() {
           userName: actorName,
           actionType: 'receiving',
           orderId,
+          ...(options?.location && { location: options.location }),
         });
         showToast({
           type: 'info',
@@ -1123,6 +1160,73 @@ export default function App() {
     }
   };
 
+  const handleZeroCustomQuantities = async () => {
+    if (!isAdmin) {
+      showAlert('Not Allowed', 'Only admin can reset custom quantities.');
+      return;
+    }
+    const ok = await confirmAction(
+      'Zero custom quantities?',
+      'This sets every custom paint and custom stain quantity to 0. Items are not deleted.',
+      { confirmLabel: 'Zero all', destructive: true },
+    );
+    if (!ok) return;
+    await runWithLoading('Zeroing custom quantities...', async () => {
+      try {
+        const result = await InventoryService.zeroCustomQuantities(actorName);
+        if (result?.success === false) {
+          showAlert('Error', result.error || 'Failed to zero custom quantities.');
+          return;
+        }
+        await loadInventory(true, { refreshCaches: true });
+        showToast({
+          title: 'Custom quantities cleared',
+          message: `${result?.updated ?? 0} item(s) set to 0 gal.`,
+        });
+      } catch (e) {
+        showAlert('Error', e?.message || 'Failed to zero custom quantities.');
+      }
+    });
+  };
+
+  const handleZeroStaleCustomQuantities = async () => {
+    if (!isAdmin) {
+      showAlert('Not Allowed', 'Only admin can reset custom quantities.');
+      return;
+    }
+    const ok = await confirmAction(
+      'Zero idle custom quantities?',
+      'Sets custom paint/stain quantities to 0 only for items with no check-in, check-out, receiving, or quantity change in the past 2 days. Items are not deleted.',
+      { confirmLabel: 'Zero idle', destructive: true },
+    );
+    if (!ok) return;
+    await runWithLoading('Zeroing idle custom quantities...', async () => {
+      try {
+        const result = await InventoryService.zeroStaleCustomQuantities(
+          actorName,
+          2,
+        );
+        if (result?.success === false) {
+          showAlert(
+            'Error',
+            result.error || 'Failed to zero idle custom quantities.',
+          );
+          return;
+        }
+        await loadInventory(true, { refreshCaches: true });
+        showToast({
+          title: 'Idle custom quantities cleared',
+          message: `${result?.updated ?? 0} item(s) set to 0 gal.`,
+        });
+      } catch (e) {
+        showAlert(
+          'Error',
+          e?.message || 'Failed to zero idle custom quantities.',
+        );
+      }
+    });
+  };
+
   const handleExportMaterialUsageExcel = (fromDate, toDate) => {
     if (!isAdmin) return;
     const from = (fromDate || '').trim();
@@ -1415,6 +1519,8 @@ export default function App() {
             onSetMaterialUsageOvertime={handleSetMaterialUsageOvertime}
             onExportExcel={handleExportExcel}
             onExportMaterialUsageExcel={handleExportMaterialUsageExcel}
+            onZeroCustomQuantities={handleZeroCustomQuantities}
+            onZeroStaleCustomQuantities={handleZeroStaleCustomQuantities}
           />
         );
       default:
@@ -1435,6 +1541,7 @@ export default function App() {
           auditLogsLoaded={auditLogsCache !== null}
           materialUsageLogs={materialUsageLogsCache}
           materialUsageOvertime={materialUsageOvertime}
+          dataRefreshKey={dataRefreshKey}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
           showTransactionTable={true}
@@ -1512,11 +1619,12 @@ export default function App() {
           // Inventory mobile/native list has its own pull-to-refresh.
           (currentScreen === 'list' && !isWebDesktop)
         }
+        lockMainScroll={currentScreen === 'settings' && isWebDesktop}
         topBarExtras={
           currentScreen === 'list' && isWebDesktop ? (
             <>
               {inventoryViewState.viewMode === 'colorBook' ? (
-                <Button
+                <AppButton
                   mode={
                     inventoryViewState.bookFilter === 'standard'
                       ? 'outlined'
@@ -1534,9 +1642,9 @@ export default function App() {
                   {inventoryViewState.bookFilter === 'standard'
                     ? 'Custom'
                     : 'Stock'}
-                </Button>
+                </AppButton>
               ) : null}
-              <Button
+              <AppButton
                 mode={
                   inventoryViewState.viewMode === 'colorBook'
                     ? 'contained'
@@ -1555,7 +1663,7 @@ export default function App() {
                 {inventoryViewState.viewMode === 'colorBook'
                   ? 'Inventory'
                   : 'Color Book'}
-              </Button>
+              </AppButton>
             </>
           ) : null
         }
@@ -1685,7 +1793,7 @@ export default function App() {
                 View transaction history or edit item details?
               </Text>
               <View style={styles.adminDialogButtons}>
-                <Button
+                <AppButton
                   mode="contained"
                   onPress={() => {
                     setShowAdminItemDialog(false);
@@ -1694,8 +1802,8 @@ export default function App() {
                   style={styles.adminDialogButton}
                 >
                   Transaction history
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode="contained"
                   onPress={() => {
                     setShowAdminItemDialog(false);
@@ -1704,14 +1812,14 @@ export default function App() {
                   style={styles.adminDialogButton}
                 >
                   Edit item details
-                </Button>
-                <Button
+                </AppButton>
+                <AppButton
                   mode="outlined"
                   onPress={() => setShowAdminItemDialog(false)}
                   style={styles.adminDialogButton}
                 >
                   Cancel
-                </Button>
+                </AppButton>
               </View>
             </FadeIn>
           </TouchableOpacity>

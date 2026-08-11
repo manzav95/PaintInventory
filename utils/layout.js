@@ -27,7 +27,7 @@ export const SCREEN_TITLES = {
 };
 
 export function getScreenTitle(screen) {
-  return SCREEN_TITLES[screen] || "Paint Inventory";
+  return SCREEN_TITLES[screen] || "CURE";
 }
 
 /** True on native, or web when the primary input is touch (iPad / phone). */

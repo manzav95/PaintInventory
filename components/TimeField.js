@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useRef } from "react";
 import { Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Button, Text, TextInput, useTheme } from "react-native-paper";
+import { Text, TextInput, useTheme } from "react-native-paper";
 
+import AppButton from "./ui/AppButton";
 /** Parse "3:00 PM" / "15:00" into hours+minutes. */
 function parseTimeParts(value) {
   const s = String(value ?? "").trim();
@@ -202,9 +203,9 @@ export default function TimeField({
                 >
                   {label}
                 </Text>
-                <Button mode="text" compact onPress={() => setShow(false)}>
+                <AppButton mode="text" compact onPress={() => setShow(false)}>
                   Cancel
-                </Button>
+                </AppButton>
               </View>
               <DateTimePicker
                 value={draft}
@@ -218,9 +219,9 @@ export default function TimeField({
                   if (selectedDate) setDraft(selectedDate);
                 }}
               />
-              <Button mode="contained" onPress={confirm} style={styles.doneBtn}>
+              <AppButton mode="contained" onPress={confirm} style={styles.doneBtn}>
                 Done
-              </Button>
+              </AppButton>
             </Pressable>
           </Pressable>
         </Modal>

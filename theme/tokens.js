@@ -7,37 +7,62 @@
 
 import { Platform } from "react-native";
 
-/** Brand / surface palette (matches App paper themes). */
+/** Brand / surface palette — CURE navy + white chrome; gold as accent (not body text). */
 export const colors = {
   brand: {
-    primary: "#6f95ab",
-    primaryContainerLight: "#d4e3eb",
-    onPrimaryContainerLight: "#1a3a4a",
-    primaryContainerDark: "#243447",
-    onPrimaryContainerDark: "#d0e4ed",
+    /**
+     * UI chrome defaults (icons, links, most buttons).
+     * Light theme uses navy; dark theme overrides to white in createAppTheme.
+     */
+    primary: "#0F1624",
+    primaryOnDark: "#FFFFFF",
+    onPrimary: "#FFFFFF",
+    onPrimaryDark: "#0F1624",
+    /** Soft fills — white / navy nested, no steel blue wash */
+    primaryContainerLight: "#FFFFFF",
+    onPrimaryContainerLight: "#0F1624",
+    primaryContainerDark: "#1C2638",
+    onPrimaryContainerDark: "#F2F1EE",
+    /** Logo gold — accents, highlights; use bold if applied to text */
+    accent: "#C9972E",
+    /** Brighter gold for dark-mode accent labels (still use bold) */
+    accentBright: "#E0B84A",
+    accentSoft: "rgba(201, 151, 46, 0.16)",
+    accentSoftStrong: "rgba(201, 151, 46, 0.28)",
+    /** Logo field */
+    navy: "#0F1624",
+    navyDeep: "#0B0E1A",
+    /**
+     * Contained / press fill — logo navy (matches mark field).
+     */
+    buttonFill: "#0F1624",
+    buttonFillStrong: "#0B0E1A",
+    onButton: "#F2F1EE",
+    /** Ripple / underlay for all Paper buttons */
+    buttonRipple: "rgba(15, 22, 36, 0.55)",
   },
   light: {
-    background: "#f0f0f0",
-    elevated: "#fafafa",
-    elevatedHigh: "#ffffff",
-    nested: "#f4f4f4",
-    border: "#d0d0d0",
-    textMuted: "#666666",
-    textDim: "#999999",
+    background: "#F2F1EE",
+    elevated: "#FAF9F7",
+    elevatedHigh: "#FFFFFF",
+    nested: "#EBEAE6",
+    border: "#D2CFC7",
+    textMuted: "#5E5A52",
+    textDim: "#8A857A",
   },
   dark: {
-    /** Main app canvas */
-    background: "#111828",
+    /** Main app canvas — logo navy */
+    background: "#0F1624",
     /** Cards / elevated surfaces */
-    elevated: "#1B2534",
+    elevated: "#161E2E",
     /** Nested rows inside elevated surfaces */
-    nested: "#202B3A",
+    nested: "#1C2638",
     /** Persistent / drawer sidebar */
-    sidebar: "#0F1624",
-    border: "#2A3548",
-    onSecondaryContainer: "#e8eef7",
-    textMuted: "#9aa6b8",
-    textDim: "#7a8699",
+    sidebar: "#0B0E1A",
+    border: "#2A3344",
+    onSecondaryContainer: "#E8EEF7",
+    textMuted: "#9AA3B2",
+    textDim: "#7A8494",
   },
   semantic: {
     lowStockText: "#ff6b6b",
@@ -54,22 +79,23 @@ export const colors = {
     badgeBorder: "rgba(0, 0, 0, 0.12)",
     filterIdle: "rgba(0, 0, 0, 0.04)",
     filterActive: "rgba(0, 0, 0, 0.12)",
-    activeTintLight: "rgba(0, 0, 0, 0.06)",
-    activeTintDark: "rgba(255, 255, 255, 0.08)",
+    /** Soft logo gold for selected / active chrome */
+    activeTintLight: "rgba(201, 151, 46, 0.12)",
+    activeTintDark: "rgba(201, 151, 46, 0.14)",
     scrim: "rgba(0, 0, 0, 0.5)",
     scrimLight: "rgba(0, 0, 0, 0.4)",
     notificationBadge: "#e10600",
     success: "#2e7d32",
     successSoft: "#b9f6ca",
     warning: "#f9a825",
-    info: "#1976d2",
-    infoSoft: "#b3d5ff",
-    open: "#1976d2",
+    info: "#0F1624",
+    infoSoft: "rgba(201, 151, 46, 0.18)",
+    open: "#0F1624",
     partial: "#f9a825",
   },
   /** Material-type label colors (matches Inventory / materialTypes). */
   materialType: {
-    paint: "#1976d2",
+    paint: "#0F1624",
     clear: "#ef6c00",
     stain: "#2e7d32",
     /** Near-white; pair with dark text / outline for contrast on light surfaces. */
@@ -77,11 +103,11 @@ export const colors = {
     primerLight: "#5d4037",
     primerDark: "#eceff1",
     dye: "#8e24aa",
-    catalyst: "#9a7b00",
+    catalyst: "#C9972E",
   },
   /** Material-usage booth accents. */
   booth: {
-    "Booth 1&3": "#5c6bc0",
+    "Booth 1&3": "#C9972E",
     "Booth 2": "#00897b",
     "Booth 4": "#f9a825",
     default: "#78909c",
@@ -90,7 +116,7 @@ export const colors = {
   action: {
     checkIn: "#81c784",
     checkOut: "#e57373",
-    adjust: "#64b5f6",
+    adjust: "#C9972E",
     receive: "#558b2f",
     delete: "#f44336",
     create: "#ba68c8",

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Platform } from "react-native";
-import { Portal, Dialog, Button, Text, useTheme } from "react-native-paper";
+import { Portal, Dialog, Text, useTheme } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import { subscribeConfirm } from "../utils/confirmAction";
 import { layout, radius } from "../theme/tokens";
 
@@ -62,15 +63,15 @@ export default function ConfirmHost() {
           </Dialog.Content>
         ) : null}
         <Dialog.Actions>
-          <Button onPress={() => finish(false)}>{opts.cancelLabel}</Button>
-          <Button
+          <AppButton onPress={() => finish(false)}>{opts.cancelLabel}</AppButton>
+          <AppButton
             onPress={() => finish(true)}
             textColor={
               opts.destructive ? theme.colors.error : theme.colors.primary
             }
           >
             {opts.confirmLabel}
-          </Button>
+          </AppButton>
         </Dialog.Actions>
       </Dialog>
     </Portal>

@@ -6,8 +6,11 @@ const API_URL = config.API_URL;
 async function _fetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
   const defaultOptions = {
+    cache: "no-store",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
     },
   };
 

@@ -8,11 +8,11 @@ import {
 } from "react-native";
 import {
   Text,
-  Button,
   useTheme,
   ActivityIndicator,
   IconButton,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import LoginLogService from "../services/loginLogService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import ScrollFrame from "./ScrollFrame";
@@ -110,9 +110,9 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
               <Text style={[styles.errorText, { color: theme.colors.error }]}>
                 {error}
               </Text>
-              <Button mode="outlined" onPress={load} style={styles.retryBtn}>
+              <AppButton mode="outlined" onPress={load} style={styles.retryBtn}>
                 Retry
-              </Button>
+              </AppButton>
             </View>
           ) : logs.length === 0 ? (
             <Text
@@ -151,9 +151,9 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
             </ScrollFrame>
           )}
 
-          <Button mode="outlined" onPress={onDismiss} style={styles.closeBtn}>
+          <AppButton mode="outlined" onPress={onDismiss} style={styles.closeBtn}>
             Close
-          </Button>
+          </AppButton>
         </Pressable>
       </Pressable>
     </Modal>

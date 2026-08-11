@@ -344,6 +344,22 @@ class Database {
         END IF;
       END $$
     `);
+    // Legacy "Custom Container" → default stack C-A for custom paint/stain.
+    const stackBackfill = await client.query(
+      `UPDATE items
+       SET location = 'C-A'
+       WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
+         AND (
+           location IS NULL
+           OR TRIM(location) = ''
+           OR lower(TRIM(location)) = 'custom container'
+         )`,
+    );
+    if (stackBackfill.rowCount > 0) {
+      console.log(
+        `Custom stack location backfill: ${stackBackfill.rowCount} item(s) → C-A`,
+      );
+    }
     console.log("Items table ready");
 
     // Backfill missing unit prices (blank / null → default)
@@ -2180,6 +2196,99 @@ class Database {
     const recycleDate = Database.recycleDueDateFromLotDate(lotDate);
     await this.updateItem(id, { lot_date: lotDate, recycle_date: recycleDate });
     return { success: true, lot_date: lotDate, recycle_date: recycleDate };
+  }
+
+  /** Set quantity to 0 for every custom paint/stain item. */
+  async zeroAllCustomQuantities(userName = "admin") {
+    return this.zeroCustomQuantities({ userName, staleDays: null });
+  }
+
+  /**
+   * Zero custom paint/stain quantities.
+   * If staleDays is set, only items with no quantity transaction
+   * (check-in/out, receiving, recycled, add, or qty update) in that window.
+   */
+  async zeroCustomQuantities({ userName = "admin", staleDays = null } = {}) {
+    const nowIso = new Date().toISOString();
+    const qtyActions = [
+      "check_in",
+      "check_out",
+      "receiving",
+      "recycled",
+      "add",
+    ];
+    let result;
+    if (staleDays != null && Number(staleDays) > 0) {
+      const days = Number(staleDays);
+      const cutoff = new Date(
+        Date.now() - days * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      result = await this.pool.query(
+        `UPDATE items
+         SET quantity = 0, "updatedAt" = $1
+         WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
+           AND COALESCE(quantity, 0) <> 0
+           AND NOT EXISTS (
+             SELECT 1 FROM audit_log a
+             WHERE a."itemId" = items.id
+               AND a.timestamp >= $2
+               AND (
+                 a.action = ANY($3::text[])
+                 OR (
+                   a.action = 'update'
+                   AND a.details IS NOT NULL
+                   AND trim(a.details) <> ''
+                   AND (
+                     (a.details::jsonb) ? 'quantityChange'
+                     OR (a.details::jsonb) ? 'newQuantity'
+                     OR (a.details::jsonb) ? 'oldQuantity'
+                     OR (a.details::jsonb) ? 'quantity'
+                   )
+                 )
+               )
+           )
+         RETURNING id, name, quantity`,
+        [nowIso, cutoff, qtyActions],
+      );
+    } else {
+      result = await this.pool.query(
+        `UPDATE items
+         SET quantity = 0, "updatedAt" = $1
+         WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
+           AND COALESCE(quantity, 0) <> 0
+         RETURNING id, name, quantity`,
+        [nowIso],
+      );
+    }
+    const updated = result.rows || [];
+    if (updated.length > 0) {
+      try {
+        await this.pool.query(
+          `INSERT INTO audit_log (action, "itemId", "userName", details, timestamp)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            staleDays != null
+              ? "zero_stale_custom_quantities"
+              : "zero_custom_quantities",
+            null,
+            userName || "admin",
+            JSON.stringify({
+              updatedCount: updated.length,
+              itemIds: updated.map((r) => r.id).slice(0, 200),
+              ...(staleDays != null ? { staleDays: Number(staleDays) } : {}),
+            }),
+            nowIso,
+          ],
+        );
+      } catch (e) {
+        console.warn("Audit log for zero custom quantities:", e?.message || e);
+      }
+    }
+    return {
+      success: true,
+      updated: updated.length,
+      ...(staleDays != null ? { staleDays: Number(staleDays) } : {}),
+    };
   }
 
   /** Recompute recycle_date: latest check-out/receiving + 9 months, else lot date + 9 months. */

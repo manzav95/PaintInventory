@@ -11,11 +11,11 @@ import {
 import {
   Text,
   TextInput,
-  Button,
   IconButton,
   useTheme,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import DateField from "./DateField";
 import TimeField from "./TimeField";
 import { BOOTH_OPTIONS } from "../services/materialUsageService";
@@ -261,7 +261,7 @@ export default function MaterialUsageEditPopover({
               </Text>
               <View style={styles.boothRow}>
                 {BOOTH_OPTIONS.map((opt) => (
-                  <Button
+                  <AppButton
                     key={opt.value}
                     mode={booth === opt.value ? "contained" : "outlined"}
                     onPress={() => setBooth(opt.value)}
@@ -270,7 +270,7 @@ export default function MaterialUsageEditPopover({
                     disabled={saving}
                   >
                     {opt.label}
-                  </Button>
+                  </AppButton>
                 ))}
               </View>
 
@@ -317,10 +317,10 @@ export default function MaterialUsageEditPopover({
             </ScrollView>
 
             <View style={styles.actions}>
-              <Button mode="outlined" onPress={close} disabled={saving} compact>
+              <AppButton mode="outlined" onPress={close} disabled={saving} compact>
                 Cancel
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="contained"
                 onPress={handleSave}
                 loading={saving}
@@ -329,7 +329,7 @@ export default function MaterialUsageEditPopover({
                 icon="content-save"
               >
                 Save
-              </Button>
+              </AppButton>
             </View>
             {saving ? (
               <View style={styles.savingOverlay} pointerEvents="none">

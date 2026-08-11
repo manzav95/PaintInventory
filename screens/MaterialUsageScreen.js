@@ -16,7 +16,6 @@ import {
   Card,
   Text,
   TextInput,
-  Button,
   useTheme,
   Dialog,
   Portal,
@@ -24,6 +23,7 @@ import {
   Checkbox,
   SegmentedButtons,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import DateField from "../components/DateField";
 import TimeField from "../components/TimeField";
 import PageHeader from "../components/PageHeader";
@@ -103,7 +103,7 @@ const USAGE_TYPE_ORDER = [
   {
     key: "paint",
     label: "Paint",
-    soft: "rgba(21, 101, 192, 0.12)",
+    soft: "rgba(15, 22, 36, 0.08)",
   },
   {
     key: "clear",
@@ -334,7 +334,7 @@ function getMaterialInputAccent(type, theme) {
   if (!t) return null;
   if (t === "primer") {
     // White / neutral — slightly muted on light surfaces so the outline stays visible.
-    return theme?.dark ? "#eceff1" : "#b0bec5";
+    return theme?.dark ? "#eceff1" : "#8A8478";
   }
   return getMaterialTypeColor(t, theme);
 }
@@ -1225,8 +1225,8 @@ export default function MaterialUsageScreen({
                     styles.entryBoothPill,
                     {
                       backgroundColor: theme.dark
-                        ? "rgba(111,149,171,0.22)"
-                        : "rgba(111,149,171,0.16)",
+                        ? "rgba(255, 255, 255, 0.12)"
+                        : "rgba(15, 22, 36, 0.08)",
                     },
                   ]}
                 >
@@ -1264,15 +1264,15 @@ export default function MaterialUsageScreen({
         </View>
         {isAdmin ? (
           <View style={styles.entryAdminActions}>
-            <Button
+            <AppButton
               mode="text"
               compact
               onPress={(e) => startEditEntry(row, e)}
               disabled={busy}
             >
               Edit
-            </Button>
-            <Button
+            </AppButton>
+            <AppButton
               mode="text"
               compact
               textColor={theme.colors.error}
@@ -1281,7 +1281,7 @@ export default function MaterialUsageScreen({
               disabled={busy}
             >
               Delete
-            </Button>
+            </AppButton>
           </View>
         ) : null}
       </View>
@@ -1327,7 +1327,7 @@ export default function MaterialUsageScreen({
           </Text>
           <View style={styles.buttonRow}>
             {BOOTH_OPTIONS.map((opt) => (
-              <Button
+              <AppButton
                 key={opt.value}
                 mode={booth === opt.value ? "contained" : "outlined"}
                 onPress={() => setBooth(opt.value)}
@@ -1335,7 +1335,7 @@ export default function MaterialUsageScreen({
                 compact
               >
                 {opt.label}
-              </Button>
+              </AppButton>
             ))}
           </View>
           <TextInput
@@ -1515,7 +1515,7 @@ export default function MaterialUsageScreen({
             </Text>
           </View>
           <View style={styles.actions}>
-            <Button
+            <AppButton
               mode="contained"
               onPress={handleSubmit}
               disabled={!canSubmit || submitting}
@@ -1524,7 +1524,7 @@ export default function MaterialUsageScreen({
               icon="send"
             >
               Submit
-            </Button>
+            </AppButton>
           </View>
         </Card.Content>
       </ShakeView>
@@ -1669,7 +1669,7 @@ export default function MaterialUsageScreen({
             {isAdmin ? (
               <View style={styles.shiftCornerRow}>
                 {["all", "day", "swing"].map((sf) => (
-                  <Button
+                  <AppButton
                     key={sf}
                     mode={shiftFilter === sf ? "contained" : "outlined"}
                     onPress={() => setShiftFilter(sf)}
@@ -1678,12 +1678,12 @@ export default function MaterialUsageScreen({
                     labelStyle={styles.shiftCornerLabel}
                   >
                     {sf === "all" ? "All" : sf === "day" ? "Day" : "Swing"}
-                  </Button>
+                  </AppButton>
                 ))}
               </View>
             ) : null}
             <View style={styles.shiftCornerRow}>
-              <Button
+              <AppButton
                 mode={boothFilter === "all" ? "contained" : "outlined"}
                 onPress={() => setBoothFilter("all")}
                 style={styles.shiftCornerBtn}
@@ -1691,9 +1691,9 @@ export default function MaterialUsageScreen({
                 labelStyle={styles.shiftCornerLabel}
               >
                 All
-              </Button>
+              </AppButton>
               {BOOTH_OPTIONS.map((opt) => (
-                <Button
+                <AppButton
                   key={opt.value}
                   mode={boothFilter === opt.value ? "contained" : "outlined"}
                   onPress={() => setBoothFilter(opt.value)}
@@ -1702,7 +1702,7 @@ export default function MaterialUsageScreen({
                   labelStyle={styles.shiftCornerLabel}
                 >
                   {opt.label}
-                </Button>
+                </AppButton>
               ))}
             </View>
           </View>
@@ -1761,7 +1761,7 @@ export default function MaterialUsageScreen({
                     >
                       {week.label}
                     </Text>
-                    <Button
+                    <AppButton
                       mode="outlined"
                       compact
                       icon={
@@ -1770,7 +1770,7 @@ export default function MaterialUsageScreen({
                       onPress={() => handleCopyWeek(week)}
                     >
                       {copiedWeek === week.monday ? "Copied" : "Copy week"}
-                    </Button>
+                    </AppButton>
                   </View>
                 ))
               : null}
@@ -1778,14 +1778,14 @@ export default function MaterialUsageScreen({
               ? logsByDay.map((day, i) => renderDayCard(day, i))
               : logsByWeekGrouped.map((week, i) => renderWeekGroup(week, i))}
             {isAdmin && canLoadOlderWeek ? (
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={handleShowPreviousWeekWithData}
                 style={styles.loadMoreBtn}
                 icon="history"
               >
                 Show previous week with usage
-              </Button>
+              </AppButton>
             ) : null}
             {isAdmin && !canLoadOlderWeek && weeksShown > 1 ? (
               <Text
@@ -1923,20 +1923,20 @@ export default function MaterialUsageScreen({
               </Text>
             </Dialog.Content>
             <Dialog.Actions>
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={() => handleCatalyzed(false)}
                 style={styles.dialogButton}
               >
                 No
-              </Button>
-              <Button
+              </AppButton>
+              <AppButton
                 mode="contained"
                 onPress={() => handleCatalyzed(true)}
                 style={styles.dialogButton}
               >
                 Yes
-              </Button>
+              </AppButton>
             </Dialog.Actions>
           </Dialog>
         </Portal>

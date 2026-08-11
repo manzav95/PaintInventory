@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Paint Inventory Tracker",
+    "name": "CURE",
     "slug": "nfc-inventory-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0F1624"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -28,16 +28,21 @@
         "android.permission.NFC",
         "android.permission.CAMERA"
       ],
-      "package": "com.manzav95.nfcinventorytracker"
+      "package": "com.manzav95.nfcinventorytracker",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0F1624"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png",
-      "name": "Paint Inventory Tracker",
-      "shortName": "Paint Tracker",
+      "name": "CURE",
+      "shortName": "CURE",
+      "description": "Colors · Usage · Receiving · Export",
       "lang": "en",
       "scope": "/",
-      "themeColor": "#6f95ab",
-      "backgroundColor": "#ffffff",
+      "themeColor": "#0F1624",
+      "backgroundColor": "#0F1624",
       "display": "standalone",
       "orientation": "portrait",
       "startUrl": "/",

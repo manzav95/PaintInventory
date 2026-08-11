@@ -5,7 +5,12 @@ const API_URL = config.API_URL;
 async function _fetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
   const defaultOptions = {
-    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
   };
   try {
     const response = await fetch(url, { ...defaultOptions, ...options });

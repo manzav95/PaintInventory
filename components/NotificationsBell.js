@@ -17,11 +17,11 @@ import {
 import {
   IconButton,
   Text,
-  Button,
   Divider,
   useTheme,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import OrderService from "../services/orderService";
 import NotificationService from "../services/notificationService";
 import WasteTrackingService from "../services/wasteTrackingService";
@@ -123,7 +123,7 @@ export default function NotificationsBell({
         id: "waste",
         title: "Waste Tracking",
         count: wasteUnreadCount,
-        color: "#6a1b9a",
+        color: theme.colors.primary,
         detail:
           wasteUnreadCount === 1
             ? "1 new waste entry submitted"
@@ -481,7 +481,7 @@ export default function NotificationsBell({
                           {n.detail}
                         </Text>
                         {n.showEmailAction ? (
-                          <Button
+                          <AppButton
                             mode="contained"
                             compact
                             icon="email-outline"
@@ -491,7 +491,7 @@ export default function NotificationsBell({
                             style={styles.emailBtn}
                           >
                             Email low stock list
-                          </Button>
+                          </AppButton>
                         ) : null}
                         {n.onPress ? (
                           <Text
@@ -512,13 +512,13 @@ export default function NotificationsBell({
 
             <View style={styles.modalActions}>
               {hasUnderlyingAlerts && activeNotifications.length > 0 && (
-                <Button mode="outlined" onPress={handleDismissToday} compact>
+                <AppButton mode="outlined" onPress={handleDismissToday} compact>
                   Clear for today
-                </Button>
+                </AppButton>
               )}
-              <Button mode="text" onPress={() => setVisible(false)} compact>
+              <AppButton mode="text" onPress={() => setVisible(false)} compact>
                 Close
-              </Button>
+              </AppButton>
             </View>
           </View>
           </View>

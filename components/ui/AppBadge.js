@@ -31,9 +31,9 @@ const TONES = {
     text: colors.semantic.recycleBannerText,
   },
   primary: {
-    bg: "rgba(111, 149, 171, 0.15)",
-    border: "rgba(111, 149, 171, 0.4)",
-    text: colors.brand.primary,
+    bg: "rgba(15, 22, 36, 0.08)",
+    border: "rgba(15, 22, 36, 0.28)",
+    text: colors.brand.navy,
   },
   success: {
     bg: "rgba(46, 125, 50, 0.12)",
@@ -41,31 +41,68 @@ const TONES = {
     text: colors.semantic.success,
   },
   info: {
-    bg: "rgba(25, 118, 210, 0.12)",
-    border: "rgba(25, 118, 210, 0.35)",
-    text: colors.semantic.info,
+    bg: "rgba(15, 22, 36, 0.08)",
+    border: "rgba(15, 22, 36, 0.28)",
+    text: colors.brand.navy,
+  },
+  /** Soft gold chip — gold label is bold for readability */
+  accent: {
+    bg: colors.brand.accentSoft,
+    border: "rgba(201, 151, 46, 0.4)",
+    text: colors.brand.accentBright,
+    bold: true,
   },
 };
 
 /**
  * Compact status chip from Inventory badge patterns.
- * @param {'default'|'late'|'backOrder'|'danger'|'warning'|'primary'|'success'|'info'} tone
+ * @param {'default'|'late'|'backOrder'|'danger'|'warning'|'primary'|'success'|'info'|'accent'} tone
  */
 export default function AppBadge({ children, tone = "default", style, textStyle }) {
   const theme = useTheme();
   const t = TONES[tone] || TONES.default;
   const textColor =
     t.text || (theme.dark ? colors.dark.onSecondaryContainer : theme.colors.onSurface);
+  const toneText =
+    tone === "accent"
+      ? theme.dark
+        ? colors.brand.accentBright
+        : colors.brand.accent
+      : tone === "primary" || tone === "info"
+        ? theme.dark
+          ? colors.brand.primaryOnDark
+          : colors.brand.navy
+        : textColor;
+  const toneBg =
+    tone === "primary" || tone === "info"
+      ? theme.dark
+        ? "rgba(255, 255, 255, 0.12)"
+        : t.bg
+      : t.bg;
+  const toneBorder =
+    tone === "primary" || tone === "info"
+      ? theme.dark
+        ? "rgba(255, 255, 255, 0.28)"
+        : t.border
+      : t.border;
 
   return (
     <View
       style={[
         styles.badge,
-        { backgroundColor: t.bg, borderColor: t.border },
+        { backgroundColor: toneBg, borderColor: toneBorder },
         style,
       ]}
     >
-      <AppText variant="badge" tone="inherit" style={[{ color: textColor }, textStyle]}>
+      <AppText
+        variant="badge"
+        tone="inherit"
+        style={[
+          { color: toneText },
+          t.bold ? { fontWeight: "700" } : null,
+          textStyle,
+        ]}
+      >
         {children}
       </AppText>
     </View>

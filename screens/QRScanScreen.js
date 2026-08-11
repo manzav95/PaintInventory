@@ -11,12 +11,12 @@ import {
 import { CameraView, Camera } from "expo-camera";
 import {
   Text,
-  Button,
   Card,
   TextInput,
   useTheme,
   SegmentedButtons,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import {
@@ -222,17 +222,17 @@ export default function QRScanScreen({
       />
 
       <View style={styles.buttonRow}>
-        <Button mode="outlined" onPress={onCancel} style={styles.button}>
+        <AppButton mode="outlined" onPress={onCancel} style={styles.button}>
           Cancel
-        </Button>
-        <Button
+        </AppButton>
+        <AppButton
           mode="contained"
           onPress={handleManualSubmit}
           style={styles.button}
           disabled={!manualInput.trim()}
         >
           Continue
-        </Button>
+        </AppButton>
       </View>
     </>
   );
@@ -452,20 +452,20 @@ export default function QRScanScreen({
                       {permissionError}
                     </Text>
                   ) : null}
-                  <Button
+                  <AppButton
                     mode="contained"
                     onPress={requestCameraPermission}
                     style={styles.button}
                   >
                     Grant Permission
-                  </Button>
-                  <Button
+                  </AppButton>
+                  <AppButton
                     mode="outlined"
                     onPress={() => setInputMode("manual")}
                     style={styles.button}
                   >
                     Use Manual Entry
-                  </Button>
+                  </AppButton>
                 </Card.Content>
               </Card>
             </ScrollView>
@@ -507,9 +507,9 @@ export default function QRScanScreen({
               <View style={styles.cameraOverlay}>
                 <Text style={styles.cameraHint}>Align QR code in frame</Text>
                 {scanned ? (
-                  <Button mode="contained" onPress={() => setScanned(false)}>
+                  <AppButton mode="contained" onPress={() => setScanned(false)}>
                     Scan again
-                  </Button>
+                  </AppButton>
                 ) : null}
               </View>
             </View>

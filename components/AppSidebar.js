@@ -1,7 +1,9 @@
 import React, { useRef } from "react";
 import { View, StyleSheet, ScrollView, Animated, Platform } from "react-native";
-import { Button, Text, Title, useTheme } from "react-native-paper";
+import { Text, useTheme } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import FadeIn from "./FadeIn";
+import BrandLogo from "./BrandLogo";
 import version from "../version";
 import { space, radius, colors } from "../theme/tokens";
 
@@ -34,7 +36,7 @@ function NavButton({ label, icon, onPress, active }) {
 
   return (
     <Animated.View style={{ transform: [{ scale: press }] }}>
-      <Button
+      <AppButton
         mode="text"
         onPress={onPress}
         onPressIn={onPressIn}
@@ -48,7 +50,7 @@ function NavButton({ label, icon, onPress, active }) {
         labelStyle={styles.navButtonLabel}
       >
         {label}
-      </Button>
+      </AppButton>
     </Animated.View>
   );
 }
@@ -76,9 +78,7 @@ export default function AppSidebar({
     >
       {!inDrawer ? (
         <View style={styles.headerRow}>
-          <Title style={[styles.title, { color: theme.colors.onBackground }]}>
-            Paint Inventory
-          </Title>
+          <BrandLogo variant="sidebar" />
         </View>
       ) : null}
 

@@ -11,11 +11,11 @@ import {
 import {
   Text,
   TextInput,
-  Button,
   Card,
   useTheme,
   SegmentedButtons,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import * as Clipboard from "expo-clipboard";
 import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
@@ -526,16 +526,16 @@ export default function WasteTrackingScreen({
 
           <View style={styles.actions}>
             {editingId ? (
-              <Button
+              <AppButton
                 mode="outlined"
                 onPress={cancelEdit}
                 disabled={submitting}
                 compact
               >
                 Cancel
-              </Button>
+              </AppButton>
             ) : null}
-            <Button
+            <AppButton
               mode="contained"
               onPress={handleSubmit}
               loading={submitting}
@@ -544,7 +544,7 @@ export default function WasteTrackingScreen({
               {...(editingId ? { icon: "content-save" } : null)}
             >
               {editingId ? "Save changes" : "Save"}
-            </Button>
+            </AppButton>
           </View>
         </Card.Content>
       </ShakeView>
@@ -764,7 +764,7 @@ export default function WasteTrackingScreen({
                         {formatGallonsTenths(week.totals.total)} gal
                       </Text>
                       {isAdmin ? (
-                        <Button
+                        <AppButton
                           mode="outlined"
                           compact
                           icon={
@@ -776,7 +776,7 @@ export default function WasteTrackingScreen({
                           style={styles.weekCopyBtn}
                         >
                           {copiedWeek === week.monday ? "Copied" : "Copy week"}
-                        </Button>
+                        </AppButton>
                       ) : null}
                     </View>
                   </View>
@@ -870,7 +870,7 @@ export default function WasteTrackingScreen({
                                 </Text>
                                 {isAdmin ? (
                                   <View style={styles.recordActions}>
-                                    <Button
+                                    <AppButton
                                       mode="outlined"
                                       compact
                                       icon={
@@ -881,8 +881,8 @@ export default function WasteTrackingScreen({
                                       onPress={() => handleCopyRecord(r)}
                                     >
                                       {copiedId === r.id ? "Copied" : "Copy"}
-                                    </Button>
-                                    <Button
+                                    </AppButton>
+                                    <AppButton
                                       mode="outlined"
                                       compact
                                       onPress={() => startEdit(r)}
@@ -891,8 +891,8 @@ export default function WasteTrackingScreen({
                                       }
                                     >
                                       Edit
-                                    </Button>
-                                    <Button
+                                    </AppButton>
+                                    <AppButton
                                       mode="outlined"
                                       compact
                                       textColor={theme.colors.error}
@@ -903,7 +903,7 @@ export default function WasteTrackingScreen({
                                       }
                                     >
                                       Delete
-                                    </Button>
+                                    </AppButton>
                                   </View>
                                 ) : null}
                               </View>

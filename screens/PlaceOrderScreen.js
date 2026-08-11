@@ -13,11 +13,11 @@ import {
 import {
   Card,
   Text,
-  Button,
   useTheme,
   IconButton,
   TextInput,
 } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import OrderService from "../services/orderService";
 import { openEmailWithOrderSpreadsheet } from "../utils/orderSpreadsheet";
@@ -767,15 +767,15 @@ export default function PlaceOrderScreen({
               const selBg =
                 key === "all"
                   ? theme.dark
-                    ? "rgba(187, 134, 252, 0.22)"
-                    : (theme.colors.primaryContainer ?? "rgba(103, 80, 164, 0.16)")
+                    ? colors.brand.accentSoftStrong
+                    : colors.brand.accentSoft
                   : key === "ap"
                     ? theme.dark
                       ? "rgba(255, 152, 0, 0.22)"
                       : "rgba(230, 81, 0, 0.14)"
                     : theme.dark
-                      ? "rgba(100, 181, 246, 0.22)"
-                      : "rgba(21, 101, 192, 0.12)";
+                      ? "rgba(255, 255, 255, 0.14)"
+                      : "rgba(15, 22, 36, 0.08)";
               return (
                 <Pressable
                   key={key}
@@ -992,7 +992,7 @@ export default function PlaceOrderScreen({
           ]}
         >
           <View style={styles.submitBtnWrap}>
-            <Button
+            <AppButton
               mode="contained"
               onPress={handleSubmit}
               loading={submitting}
@@ -1004,7 +1004,7 @@ export default function PlaceOrderScreen({
               {orderLines.length > 0
                 ? ` (${orderLines.length} line${orderLines.length === 1 ? "" : "s"})`
                 : ""}
-            </Button>
+            </AppButton>
           </View>
         </View>
 
@@ -1094,12 +1094,12 @@ export default function PlaceOrderScreen({
                     />
                   ) : null}
                   <View style={styles.addModalActions}>
-                    <Button mode="outlined" onPress={closeAddModal}>
+                    <AppButton mode="outlined" onPress={closeAddModal}>
                       Cancel
-                    </Button>
-                    <Button mode="contained" onPress={confirmAddModal}>
+                    </AppButton>
+                    <AppButton mode="contained" onPress={confirmAddModal}>
                       Add to order
-                    </Button>
+                    </AppButton>
                   </View>
                 </>
               ) : null}

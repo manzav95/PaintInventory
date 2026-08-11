@@ -25,7 +25,7 @@ const VARIANTS = {
 /**
  * Typed text from the Inventory kit type scale.
  * @param {'pageTitle'|'pageTitleLg'|'sectionTitle'|'itemName'|'body'|'bodyStrong'|'bodyEmphasis'|'quantity'|'metricValue'|'analyticsValue'|'label'|'badge'|'mono'|'caption'|'empty'|'emptySub'} variant
- * @param {'default'|'muted'|'dim'|'primary'|'danger'|'inherit'} tone
+ * @param {'default'|'muted'|'dim'|'primary'|'accent'|'danger'|'inherit'} tone
  */
 export default function AppText({
   variant = "body",
@@ -39,12 +39,17 @@ export default function AppText({
   const isMono = variant === "mono";
 
   let color = theme.colors.onSurface;
+  let weightBoost = null;
   if (tone === "muted") {
     color = theme.dark ? colors.dark.textMuted : colors.light.textMuted;
   } else if (tone === "dim") {
     color = theme.dark ? colors.dark.textDim : colors.light.textDim;
   } else if (tone === "primary") {
     color = theme.colors.primary;
+  } else if (tone === "accent") {
+    // Logo gold — always bold so it stays readable
+    color = theme.dark ? colors.brand.accentBright : colors.brand.accent;
+    weightBoost = "700";
   } else if (tone === "danger") {
     color = colors.semantic.lowStockText;
   } else if (tone === "inherit") {
@@ -62,6 +67,7 @@ export default function AppText({
         {
           fontFamily: isMono ? fontFamily.mono : fontFamily.sans,
           ...(color ? { color } : null),
+          ...(weightBoost ? { fontWeight: weightBoost } : null),
         },
         style,
       ]}

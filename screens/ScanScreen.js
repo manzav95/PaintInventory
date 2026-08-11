@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View, StyleSheet, ActivityIndicator } from "react-native";
-import { Text, Button, Card, useTheme } from "react-native-paper";
+import { Text, Card, useTheme } from "react-native-paper";
+import AppButton from "../components/ui/AppButton";
 import NFCService from "../services/nfcService";
 import { colors, space } from "../theme/tokens";
 
@@ -48,7 +49,7 @@ export default function ScanScreen({ onScanResult, onCancel }) {
         <Card.Content style={styles.content}>
           <View style={styles.iconContainer}>
             {scanning ? (
-              <ActivityIndicator size="large" color={colors.brand.primary} />
+              <ActivityIndicator size="large" color={theme.colors.primary} />
             ) : (
               <Text style={styles.icon}>📱</Text>
             )}
@@ -59,18 +60,18 @@ export default function ScanScreen({ onScanResult, onCancel }) {
           </Text>
 
           {!scanning && (
-            <Button
+            <AppButton
               mode="contained"
               onPress={startScanning}
               style={styles.button}
             >
               Try Again
-            </Button>
+            </AppButton>
           )}
 
-          <Button mode="outlined" onPress={onCancel} style={styles.button}>
+          <AppButton mode="outlined" onPress={onCancel} style={styles.button}>
             Cancel
-          </Button>
+          </AppButton>
         </Card.Content>
       </Card>
     </View>

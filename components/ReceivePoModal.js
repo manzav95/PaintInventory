@@ -10,11 +10,11 @@ import {
 import {
   Text,
   TextInput,
-  Button,
   useTheme,
   IconButton,
   ActivityIndicator,
 } from "react-native-paper";
+import AppButton from "./ui/AppButton";
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
@@ -76,8 +76,8 @@ const STATUS_COLORS = {
     badgeTone: "warning",
   },
   pending: {
-    accent: colors.brand.primary,
-    soft: "rgba(111,149,171,0.14)",
+    accent: colors.brand.navy,
+    soft: "rgba(15, 22, 36, 0.08)",
     label: "Not received",
     badgeTone: "primary",
   },
@@ -354,13 +354,13 @@ export default function ReceivePoModal({
                       style={styles.emptyOrders}
                     />
                     <View style={styles.actions}>
-                      <Button
+                      <AppButton
                         mode="outlined"
                         onPress={() => onRefreshReceiveOrders?.(true)}
                         disabled={receiveOrdersLoading}
                       >
                         Reload
-                      </Button>
+                      </AppButton>
                     </View>
                   </>
                 ) : (
@@ -588,21 +588,21 @@ export default function ReceivePoModal({
                 </ScrollFrame>
 
                 <View style={styles.actions}>
-                  <Button
+                  <AppButton
                     mode="outlined"
                     onPress={onBackToList}
                     disabled={receiveSubmitting}
                   >
                     Back
-                  </Button>
-                  <Button
+                  </AppButton>
+                  <AppButton
                     mode="contained"
                     onPress={onSubmit}
                     loading={receiveSubmitting}
                     disabled={receiveSubmitting}
                   >
                     Receive
-                  </Button>
+                  </AppButton>
                 </View>
               </>
             )}
