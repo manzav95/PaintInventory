@@ -22,6 +22,7 @@ import UserService from "../services/userService";
 import { colors, space, radius } from "../theme/tokens";
 import { AppText } from "../components/ui";
 import BrandLogo from "../components/BrandLogo";
+import { elevationShadow } from "../utils/rnWebStyles";
 
 const HIDDEN_ADMIN_NAME = "admin123";
 const TRACKER_DOUBLE_TAP_MS = 550;
@@ -289,7 +290,7 @@ export default function LoginScreen({ onLogin }) {
               isDesktop && styles.webCard,
               menuOpen && styles.cardMenuOpen,
             ]}
-            mode="elevated"
+            mode="outlined"
           >
             <Card.Content
               style={menuOpen ? styles.cardContentMenuOpen : undefined}
@@ -550,7 +551,7 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   card: {
-    elevation: 4,
+    ...elevationShadow({ offsetY: 2, blur: 8, opacity: 0.12, elevation: 4 }),
     overflow: "visible",
   },
   cardMenuOpen: {
@@ -623,17 +624,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: radius.md,
     overflow: "hidden",
-    ...(Platform.OS === "web"
-      ? {
-          boxShadow: "0 8px 20px rgba(0,0,0,0.22)",
-        }
-      : {
-          elevation: 8,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.22,
-          shadowRadius: 10,
-        }),
+    ...elevationShadow({ offsetY: 8, blur: 20, opacity: 0.22, elevation: 8 }),
   },
   nameListScroll: {
     maxWidth: "100%",

@@ -100,7 +100,7 @@ export default function DateField({
 
   return (
     <View style={[styles.wrap, style]}>
-      <View pointerEvents={isWeb ? "none" : "auto"}>
+      <View style={{ pointerEvents: isWeb ? "none" : "auto" }}>
         {isWeb ? (
           <TextInput
             label={label}
@@ -122,7 +122,7 @@ export default function DateField({
             accessibilityRole="button"
             accessibilityLabel={label || "Choose date"}
           >
-            <View pointerEvents="none">
+            <View style={{ pointerEvents: "none" }}>
               <TextInput
                 label={label}
                 value={display}

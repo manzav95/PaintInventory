@@ -851,8 +851,7 @@ export default function SettingsScreen({
                 value={selectedMonthLabel}
                 mode="outlined"
                 editable={false}
-                pointerEvents="none"
-                style={styles.adminInput}
+                style={[styles.adminInput, { pointerEvents: "none" }]}
                 right={<TextInput.Icon icon="menu-down" />}
               />
             </Pressable>
@@ -885,8 +884,7 @@ export default function SettingsScreen({
                 value={selectedYearLabel}
                 mode="outlined"
                 editable={false}
-                pointerEvents="none"
-                style={styles.adminInput}
+                style={[styles.adminInput, { pointerEvents: "none" }]}
                 right={<TextInput.Icon icon="menu-down" />}
               />
             </Pressable>

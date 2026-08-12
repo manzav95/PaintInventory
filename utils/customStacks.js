@@ -42,16 +42,24 @@ export function formatItemLocationDisplay(itemOrLocation, type) {
   if (itemOrLocation != null && typeof itemOrLocation === "object") {
     const loc = itemOrLocation.location;
     const t = itemOrLocation.type;
-    if (isCustomType(t) || isCustomStackLocation(loc)) {
-      return formatCustomStackDisplay(loc);
+    const locStr = loc != null ? String(loc).trim() : "";
+    if (isCustomType(t)) {
+      return locStr ? formatCustomStackDisplay(locStr) : "";
     }
-    return loc != null && String(loc).trim() !== "" ? String(loc) : "";
+    if (isCustomStackLocation(locStr)) {
+      return formatCustomStackDisplay(locStr);
+    }
+    return locStr;
   }
   const loc = itemOrLocation;
-  if (isCustomType(type) || isCustomStackLocation(loc)) {
-    return formatCustomStackDisplay(loc);
+  const locStr = loc != null ? String(loc).trim() : "";
+  if (isCustomType(type)) {
+    return locStr ? formatCustomStackDisplay(locStr) : "";
   }
-  return loc != null && String(loc).trim() !== "" ? String(loc) : "";
+  if (isCustomStackLocation(locStr)) {
+    return formatCustomStackDisplay(locStr);
+  }
+  return locStr;
 }
 
 /** Normalize legacy "Custom Container" (and blanks) to C-A; pass through valid C-X. */

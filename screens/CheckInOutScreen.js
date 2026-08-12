@@ -28,6 +28,7 @@ import {
   DEFAULT_CUSTOM_STACK,
   resolveCustomStackLocation,
   stackLetterFromLocation,
+  formatCustomStackDisplay,
 } from "../utils/customStacks";
 
 const CUSTOM_COLOR_TYPES = new Set(["custom_paint", "custom_stain"]);
@@ -124,6 +125,8 @@ export default function CheckInOutScreen({
     "clear",
     "primer",
     "catalyst",
+    "custom_paint",
+    "custom_stain",
   ]);
   const itemType = String(item?.type || "")
     .toLowerCase()
@@ -134,14 +137,57 @@ export default function CheckInOutScreen({
     (item?.unit_label && String(item.unit_label).trim()) || "gal";
   const currentStock = Number(item?.quantity) || 0;
   const isCustomColor = CUSTOM_COLOR_TYPES.has(itemType);
+  const colorLabel = String(item?.color_label || "").trim();
+  const itemName = String(item?.name || "").trim();
+  const itemIdStr = item?.id != null ? String(item.id).trim() : "";
+  const externalCodeStr = String(item?.external_code || "").trim();
+  /** Custom: #1234 on top. Standard: color name (e.g. Acier) on top. */
+  const heroTitle = isCustomColor
+    ? (() => {
+        if (/^\d{1,5}$/.test(itemIdStr)) {
+          return `#${itemIdStr.padStart(4, "0")}`;
+        }
+        const fromName = itemName.match(/^#?(\d{1,5})\b/);
+        if (fromName) return `#${fromName[1].padStart(4, "0")}`;
+        if (/^\d{1,5}$/.test(externalCodeStr)) {
+          return `#${externalCodeStr.padStart(4, "0")}`;
+        }
+        if (itemIdStr)
+          return itemIdStr.startsWith("#") ? itemIdStr : `#${itemIdStr}`;
+        return "—";
+      })()
+    : itemName || colorLabel || "—";
+  /** Custom: barcode/id under qty. Standard: H66 (or full item id) under qty. */
+  const footerId = isCustomColor
+    ? (() => {
+        const codeDigits = String(heroTitle).replace(/^#/, "");
+        if (
+          /^\d{1,5}$/.test(itemIdStr) &&
+          itemIdStr.padStart(4, "0") === codeDigits.padStart(4, "0")
+        ) {
+          return externalCodeStr || itemIdStr;
+        }
+        return itemIdStr || externalCodeStr;
+      })()
+    : itemIdStr || externalCodeStr;
+  /** Small confirm line: custom color_label; standard only if label differs from hero name. */
+  const confirmName = isCustomColor
+    ? colorLabel || (itemName && itemName !== heroTitle ? itemName : "")
+    : colorLabel && colorLabel !== heroTitle
+      ? colorLabel
+      : "";
+  const hasLocation =
+    item?.location != null && String(item.location).trim() !== "";
+  const showStoredLocation = isCustomColor && currentStock > 0 && hasLocation;
   const showRecycleButton = isAdmin && onRecyclePaint && isCustomColor;
   const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
   const halfGallonItem = allowsHalfGallon(itemType);
-  const quickQtyOptions = halfGallonItem
-    ? [0.5, 1, 5, 10]
-    : [5, 10, 15, 20];
+  const quickQtyOptions = isCustomColor
+    ? [1, 2, 3, 4, 5]
+    : halfGallonItem
+      ? [0.5, 1, 5, 10]
+      : [5, 10, 15, 20];
 
-  const itemIdStr = item?.id != null ? String(item.id) : "";
   const hasUpcomingOrder =
     !!itemIdStr &&
     (onOrderSummary[item.id]?.quantity > 0 ||
@@ -320,6 +366,22 @@ export default function CheckInOutScreen({
   const hexColor = getValidHex(item.hex_color);
   const sectionBg = hexColor || theme.colors.surfaceVariant;
   const textOnHex = hexColor ? getContrastingTextColors(hexColor) : null;
+  const lightPaint = Boolean(textOnHex && textOnHex.primary === "#1a1a1a");
+  const metaFill = textOnHex
+    ? lightPaint
+      ? "rgba(0,0,0,0.08)"
+      : "rgba(255,255,255,0.14)"
+    : nestedSurfaceColor(theme);
+  const metaLine = textOnHex
+    ? lightPaint
+      ? "rgba(0,0,0,0.14)"
+      : "rgba(255,255,255,0.22)"
+    : theme.colors.outlineVariant;
+  const metaRule = textOnHex
+    ? lightPaint
+      ? "rgba(0,0,0,0.16)"
+      : "rgba(255,255,255,0.28)"
+    : theme.colors.outlineVariant;
 
   const cardBg = theme.colors.surfaceContainerHighest;
 
@@ -344,37 +406,124 @@ export default function CheckInOutScreen({
         >
           <Text
             style={[
-              styles.title,
-              { color: textOnHex ? textOnHex.primary : theme.colors.onSurface },
-            ]}
-          >
-            {item.name || "Paint Item"}
-          </Text>
-          <Text
-            style={[
-              styles.subtitle,
+              isCustomColor ? styles.heroId : styles.heroName,
               {
-                color: textOnHex
-                  ? textOnHex.secondary
-                  : theme.colors.onSurfaceVariant,
+                color: textOnHex ? textOnHex.primary : theme.colors.onSurface,
+              },
+            ]}
+            numberOfLines={2}
+          >
+            {heroTitle}
+          </Text>
+          <View
+            style={[
+              styles.heroMetaPanel,
+              {
+                backgroundColor: metaFill,
+                borderColor: metaLine,
               },
             ]}
           >
-            ID: {item.id}
-          </Text>
-          <Text
-            style={[
-              styles.currentQty,
-              {
-                color: textOnHex
-                  ? textOnHex.secondary
-                  : theme.colors.onSurfaceVariant,
-              },
-            ]}
-          >
-            Current Quantity: {formatGallonQuantity(item.quantity || 0)}{" "}
-            {unitWord}
-          </Text>
+            <View style={styles.heroMetaRow}>
+              <View style={styles.heroMetaBlock}>
+                <Text
+                  style={[
+                    styles.heroMetaLabel,
+                    {
+                      color: textOnHex
+                        ? textOnHex.secondary
+                        : theme.colors.onSurfaceVariant,
+                    },
+                  ]}
+                >
+                  Qty
+                </Text>
+                <Text
+                  style={[
+                    styles.heroMetaValue,
+                    {
+                      color: textOnHex
+                        ? textOnHex.primary
+                        : theme.colors.onSurface,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {formatGallonQuantity(item.quantity || 0)} {unitAffix}
+                </Text>
+              </View>
+              <View
+                style={[styles.heroMetaDivider, { backgroundColor: metaRule }]}
+              />
+              <View style={styles.heroMetaBlock}>
+                <Text
+                  style={[
+                    styles.heroMetaLabel,
+                    {
+                      color: textOnHex
+                        ? textOnHex.secondary
+                        : theme.colors.onSurfaceVariant,
+                    },
+                  ]}
+                >
+                  Location
+                </Text>
+                <Text
+                  style={[
+                    styles.heroMetaValue,
+                    {
+                      color: textOnHex
+                        ? textOnHex.primary
+                        : theme.colors.onSurface,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {isCustomColor
+                    ? showStoredLocation
+                      ? formatCustomStackDisplay(item.location)
+                      : "—"
+                    : item.location && String(item.location).trim()
+                      ? String(item.location).trim()
+                      : "—"}
+                </Text>
+              </View>
+            </View>
+            {footerId ? (
+              <View
+                style={[styles.heroIdFooter, { borderTopColor: metaLine }]}
+              >
+                <Text
+                  style={[
+                    styles.itemIdLine,
+                    {
+                      color: textOnHex
+                        ? textOnHex.secondary
+                        : theme.colors.onSurfaceVariant,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {footerId}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          {confirmName ? (
+            <Text
+              style={[
+                styles.colorConfirm,
+                {
+                  color: textOnHex
+                    ? textOnHex.secondary
+                    : theme.colors.onSurfaceVariant,
+                },
+              ]}
+              numberOfLines={2}
+            >
+              {confirmName}
+            </Text>
+          ) : null}
         </View>
 
         <View style={isDesktop && styles.webWrapper}>
@@ -843,7 +992,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   hexSection: {
-    paddingVertical: 24,
+    paddingVertical: 20,
     paddingHorizontal: 16,
     marginBottom: 16,
     borderRadius: 12,
@@ -853,10 +1002,84 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     alignSelf: "center",
   },
+  heroId: {
+    fontSize: 40,
+    fontWeight: "800",
+    letterSpacing: 1,
+    textAlign: "center",
+    marginBottom: 16,
+    fontFamily: fontFamily.mono,
+  },
+  heroName: {
+    fontSize: 32,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  heroMetaPanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  heroMetaRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
+  heroMetaDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: "stretch",
+    marginVertical: 10,
+  },
+  heroMetaBlock: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  heroMetaLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  heroMetaValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  heroIdFooter: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  itemIdLine: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    fontFamily: fontFamily.mono,
+    letterSpacing: 0.4,
+  },
+  colorConfirm: {
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
+    opacity: 0.85,
+    marginTop: 10,
+  },
   title: {
     fontSize: 24,
     fontWeight: "bold",
     marginBottom: 8,
+    textAlign: "center",
+  },
+  colorLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginBottom: 4,
     textAlign: "center",
   },
   subtitle: {

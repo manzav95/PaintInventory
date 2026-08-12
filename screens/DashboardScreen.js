@@ -1411,12 +1411,12 @@ export default function DashboardScreen({
             accessibilityLabel="Dismiss"
           />
           <View
-            pointerEvents="box-none"
             style={[
               styles.attentionPopupAnchor,
               {
                 left: attentionPanelPos.left,
                 width: ATTENTION_PANEL_WIDTH,
+                pointerEvents: "box-none",
                 ...(attentionPanelPos.placement === "above"
                   ? { bottom: attentionPanelPos.bottom }
                   : { top: attentionPanelPos.top }),

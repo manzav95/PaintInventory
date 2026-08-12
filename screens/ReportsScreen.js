@@ -675,8 +675,10 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
         ) : null}
 
         <View
-          style={styles.reportBody}
-          pointerEvents={loading ? "none" : "auto"}
+          style={[
+            styles.reportBody,
+            { pointerEvents: loading ? "none" : "auto" },
+          ]}
         >
           <Text
             style={[

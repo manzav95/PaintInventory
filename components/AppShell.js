@@ -115,12 +115,12 @@ export default function AppShell({
         Animated.timing(slide, {
           toValue: 1,
           duration: DRAWER_MS,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
         Animated.timing(scrim, {
           toValue: 1,
           duration: DRAWER_MS,
-          useNativeDriver: true,
+          useNativeDriver,
         }),
       ]).start();
       return undefined;
@@ -145,12 +145,12 @@ export default function AppShell({
       Animated.timing(slide, {
         toValue: 0,
         duration: DRAWER_MS,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
       Animated.timing(scrim, {
         toValue: 0,
         duration: DRAWER_MS,
-        useNativeDriver: true,
+        useNativeDriver,
       }),
     ]).start(({ finished }) => {
       if (finished) setDrawerMounted(false);
@@ -313,8 +313,10 @@ export default function AppShell({
 
       {mobile && drawerMounted ? (
         <View
-          style={styles.drawerRoot}
-          pointerEvents={drawerOpen || panelIn ? "auto" : "none"}
+          style={[
+            styles.drawerRoot,
+            { pointerEvents: drawerOpen || panelIn ? "auto" : "none" },
+          ]}
         >
           {isWeb ? (
             <>

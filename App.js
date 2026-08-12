@@ -499,36 +499,27 @@ export default function App() {
         setIsRefreshing(true);
       }
 
-      // Test API connection
-      const isConnected = await InventoryService.testConnection();
-      if (!isConnected) {
-        Alert.alert(
-          'Connection Error',
-          `Cannot connect to server at ${config.API_URL}. Please ensure the server is running.`,
-          [{ text: 'OK' }]
-        );
-        if (showLoading) {
-          setIsRefreshing(false);
-        }
-        return;
-      }
-
-      // Ensure any legacy IDs get converted first
-      await InventoryService.migrateOldIds();
-
-      const items = await InventoryService.getAllItems();
+      // Critical path: inventory + lightweight summaries only.
+      // Heavy audit / receive-order caches refresh in the background so the
+      // spinner clears as soon as the list is usable.
+      const [items, ot, summary] = await Promise.all([
+        InventoryService.getAllItems(),
+        MaterialUsageService.getOvertime().catch((e) => {
+          console.error('Error loading overtime setting:', e);
+          return null;
+        }),
+        OrderService.getOnOrderSummary().catch((e) => {
+          console.error('Error loading on-order summary:', e);
+          return {};
+        }),
+      ]);
       setInventory(items);
+      if (ot != null) setMaterialUsageOvertime(ot);
+      setOnOrderSummary(summary || {});
 
-      // Force-refresh shared caches when the user hits Refresh; otherwise soft-prefetch.
-      if (refreshCaches) {
-        await Promise.all([
-          refreshReceiveOrders(true),
-          refreshAuditLogs(true),
-        ]);
-      } else {
-        refreshReceiveOrders(false);
-        refreshAuditLogs(false);
-      }
+      // Soft or force-refresh shared caches — never block the UI spinner.
+      refreshReceiveOrders(refreshCaches);
+      refreshAuditLogs(refreshCaches);
 
       const needsRecycleBackfill = items.some((i) => {
         const t = (i.type || '').toLowerCase();
@@ -557,8 +548,8 @@ export default function App() {
         InventoryService.syncJobHistoryFromOrders()
           .then(async (r) => {
             if (r?.success && (r.updated || 0) > 0) {
-              const summary = await OrderService.getOnOrderSummary();
-              setOnOrderSummary(summary || {});
+              const nextSummary = await OrderService.getOnOrderSummary();
+              setOnOrderSummary(nextSummary || {});
             }
           })
           .catch((e) => console.error('Job history sync:', e))
@@ -566,23 +557,19 @@ export default function App() {
             jobHistorySyncInFlight.current = false;
           });
       }
-
-      try {
-        const ot = await MaterialUsageService.getOvertime();
-        setMaterialUsageOvertime(ot);
-      } catch (e) {
-        console.error('Error loading overtime setting:', e);
-      }
-      try {
-        const summary = await OrderService.getOnOrderSummary();
-        setOnOrderSummary(summary || {});
-      } catch (e) {
-        console.error('Error loading on-order summary:', e);
-        setOnOrderSummary({});
-      }
     } catch (error) {
       console.error('Error loading inventory:', error);
-      Alert.alert('Error', `Failed to load inventory: ${error.message}`);
+      const msg = String(error?.message || '');
+      const looksOffline =
+        /failed to fetch|network request failed|networkerror|load failed/i.test(
+          msg,
+        );
+      Alert.alert(
+        looksOffline ? 'Connection Error' : 'Error',
+        looksOffline
+          ? `Cannot connect to server at ${config.API_URL}. Please ensure the server is running.`
+          : `Failed to load inventory: ${error.message}`,
+      );
     } finally {
       setInventoryLoaded(true);
       if (showLoading) {
@@ -593,8 +580,8 @@ export default function App() {
 
   const handleRefresh = async () => {
     setFormRefreshKey((k) => k + 1);
-    await loadInventory(true, { refreshCaches: true });
     setDataRefreshKey((k) => k + 1);
+    await loadInventory(true, { refreshCaches: true });
   };
 
   const handleScanNFC = async () => {
@@ -630,9 +617,18 @@ export default function App() {
       return;
     }
 
+    const rawQuery = itemId.toString().trim();
+    if (rawQuery.length < 3) {
+      Alert.alert(
+        'Scan Too Short',
+        'Enter or scan at least 3 characters so the wrong item is not matched.',
+      );
+      setCurrentScreen('qrscan');
+      return;
+    }
+
     setScanLookupLoading(true);
     try {
-      const rawQuery = itemId.toString().trim();
       const normalizedId = normalizeItemIdQuery(rawQuery);
 
       let item = null;
@@ -697,7 +693,6 @@ export default function App() {
           extras,
         );
         if (result.success) {
-          await loadInventory();
           const stackNote = extras.location
             ? ` · ${formatCustomStackDisplay(extras.location)}`
             : '';
@@ -705,7 +700,7 @@ export default function App() {
             title: 'Checked in',
             message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
           });
-          await AuditService.log({
+          AuditService.log({
             type: 'check_in',
             user: actorName,
             itemId: scannedItem.id,
@@ -713,7 +708,7 @@ export default function App() {
             newQuantity: result.item.quantity,
             ...(extras.location && { location: extras.location }),
           });
-          await refreshAuditLogs(true);
+          await loadInventory(false, { refreshCaches: true });
         } else {
           showAlert('Cannot check in', result.error || 'Failed to check in quantity.');
           return;
@@ -751,10 +746,13 @@ export default function App() {
           );
           return;
         }
-        const extras =
-          options?.location != null && String(options.location).trim() !== ''
-            ? { location: String(options.location).trim() }
-            : {};
+        const extras = {
+          currentItem: scannedItem,
+          ...(options?.location != null &&
+            String(options.location).trim() !== '' && {
+              location: String(options.location).trim(),
+            }),
+        };
         const result = await InventoryService.updateQuantity(
           scannedItem.id,
           quantity,
@@ -769,8 +767,6 @@ export default function App() {
           );
           return;
         }
-        await loadInventory();
-        await refreshReceiveOrders(true);
         const stackNote = extras.location
           ? ` · ${formatCustomStackDisplay(extras.location)}`
           : '';
@@ -778,7 +774,7 @@ export default function App() {
           title: 'Received',
           message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
         });
-        await AuditService.log({
+        AuditService.log({
           type: 'receiving',
           user: actorName,
           itemId: scannedItem.id,
@@ -787,7 +783,8 @@ export default function App() {
           orderId,
           ...(extras.location && { location: extras.location }),
         });
-        await refreshAuditLogs(true);
+        // Inventory + background cache warm; don't await heavy audit fetch.
+        await loadInventory(false, { refreshCaches: true });
       } catch (err) {
         // Likely offline – enqueue for later sync instead of failing the user flow
         await enqueueQuantityAction({
@@ -817,19 +814,18 @@ export default function App() {
         // All users can check out via QR scan
         const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
         if (result.success) {
-          await loadInventory();
           showToast({
             title: 'Checked out',
             message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
           });
-          await AuditService.log({
+          AuditService.log({
             type: 'check_out',
             user: actorName,
             itemId: scannedItem.id,
             quantity: quantity,
             newQuantity: result.item.quantity,
           });
-          await refreshAuditLogs(true);
+          await loadInventory(false, { refreshCaches: true });
         } else {
           const msg = result.error || 'Failed to check out quantity.';
           showAlert('Cannot check out', msg);
@@ -874,19 +870,18 @@ export default function App() {
           'recycled',
         );
         if (result.success) {
-          await loadInventory();
           showToast({
             title: 'Recycled',
             message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
           });
-          await AuditService.log({
+          AuditService.log({
             type: 'recycled',
             user: actorName,
             itemId: scannedItem.id,
             quantity,
             newQuantity: result.item.quantity,
           });
-          await refreshAuditLogs(true);
+          await loadInventory(false, { refreshCaches: true });
         } else {
           showAlert(
             'Cannot recycle',
@@ -928,18 +923,17 @@ export default function App() {
           userName: actorName,
         });
         if (result.success) {
-          await loadInventory();
           setCurrentScreen('home');
           setPreviousScreen('home');
           showToast({ title: 'Saved', message: 'Item added successfully.' });
-          await AuditService.log({
+          AuditService.log({
             type: 'add_item',
             user: actorName,
             itemId: result.item?.id,
             name: result.item?.name,
             quantity: result.item?.quantity,
           });
-          await refreshAuditLogs(true);
+          await loadInventory(false, { refreshCaches: true });
         } else {
           showAlert('Cannot add item', result.error || 'Failed to add item.');
         }
@@ -1400,9 +1394,9 @@ export default function App() {
             receiveOrdersLoading={receiveOrdersLoading}
             onRefreshReceiveOrders={refreshReceiveOrders}
             onReceivePoCompleted={() => {
+              // Inventory already refreshed by onRefresh; only warm caches.
               refreshReceiveOrders(true);
               refreshAuditLogs(true);
-              loadInventory();
             }}
             recycleDueFilter={recycleDueFilter}
             onClearRecycleDueFilter={() => setRecycleDueFilter(false)}
@@ -1578,6 +1572,7 @@ export default function App() {
           userName={actorName}
           isAdmin={isAdmin}
           materialUsageOvertime={materialUsageOvertime}
+          auditLogs={auditLogsCache ?? []}
           embeddedInShell
           formRefreshKey={formRefreshKey}
           onBack={() => navigateTo('home')}

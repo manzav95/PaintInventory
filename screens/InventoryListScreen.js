@@ -170,7 +170,7 @@ function normalizeScanLookupKey(itemId) {
 
 function inventoryMatchesScanQuery(inventory, query) {
   const trimmed = query.trim();
-  if (!trimmed) return false;
+  if (trimmed.length < 3) return false;
   const key = normalizeScanLookupKey(trimmed);
   const inv = Array.isArray(inventory) ? inventory : [];
   for (const item of inv) {
@@ -186,7 +186,7 @@ function inventoryMatchesScanQuery(inventory, query) {
 /** Enter in search: scan/check-in-out only when this looks like a material ID/barcode, not a name search. */
 function shouldSubmitSearchAsScan(query, inventory) {
   const t = query.trim();
-  if (!t) return false;
+  if (t.length < 3) return false;
   if (inventoryMatchesScanQuery(inventory, t)) return true;
   if (/^[a-zA-Z]+$/.test(t)) return false;
   return true;
@@ -484,8 +484,7 @@ export default function InventoryListScreen({
     if (!selectedReceiveOrder || !actorName) return;
     setReceiveSubmitting(true);
     try {
-      let totalGal = 0;
-      let lineCount = 0;
+      const pending = [];
       for (const line of selectedReceiveOrder.lines || []) {
         const itemId = String(line.itemId ?? line.item_id ?? "").trim();
         if (!itemId) continue;
@@ -514,42 +513,61 @@ export default function InventoryListScreen({
           );
           return;
         }
-        const receiveResult = await OrderService.receiveOrderLine(
-          selectedReceiveOrder.id,
-          itemId,
-          qty,
+        const currentItem = inventory.find(
+          (i) => String(i.id) === String(itemId),
         );
-        if (!receiveResult.success) {
-          throw new Error(receiveResult.error || "Failed to record PO receive");
-        }
-        const result = await InventoryService.updateQuantity(
-          itemId,
-          qty,
-          actorName,
-          "receiving",
-        );
-        if (!result.success) {
-          throw new Error(result.error || "Failed to update inventory");
-        }
-        await AuditService.log({
-          type: "receiving",
-          user: actorName,
-          itemId,
-          quantity: qty,
-          newQuantity: result.item.quantity,
-          orderId: selectedReceiveOrder.id,
-        });
-        totalGal += qty;
-        lineCount += 1;
+        pending.push({ itemId, qty, currentItem });
       }
-      if (lineCount === 0) {
+      if (pending.length === 0) {
         closeReceivePoModal();
         return;
       }
-      await onRefresh?.();
-      onReceivePoCompleted?.();
+
+      const results = await Promise.all(
+        pending.map(async ({ itemId, qty, currentItem }) => {
+          const receiveResult = await OrderService.receiveOrderLine(
+            selectedReceiveOrder.id,
+            itemId,
+            qty,
+          );
+          if (!receiveResult.success) {
+            throw new Error(
+              receiveResult.error ||
+                `Failed to record PO receive for ${getItemNameForOrder(itemId)}`,
+            );
+          }
+          const result = await InventoryService.updateQuantity(
+            itemId,
+            qty,
+            actorName,
+            "receiving",
+            currentItem ? { currentItem } : {},
+          );
+          if (!result.success) {
+            throw new Error(
+              result.error ||
+                `Failed to update inventory for ${getItemNameForOrder(itemId)}`,
+            );
+          }
+          AuditService.log({
+            type: "receiving",
+            user: actorName,
+            itemId,
+            quantity: qty,
+            newQuantity: result.item?.quantity,
+            orderId: selectedReceiveOrder.id,
+          });
+          return qty;
+        }),
+      );
+
+      const totalGal = results.reduce((sum, q) => sum + q, 0);
+      const lineCount = results.length;
       const po = selectedReceiveOrder.po_number || selectedReceiveOrder.id;
       closeReceivePoModal();
+      // Refresh inventory + warm caches; don't block the success alert.
+      Promise.resolve(onRefresh?.()).catch(() => {});
+      onReceivePoCompleted?.();
       Alert.alert(
         "Receiving recorded",
         `Received ${totalGal} gal on ${lineCount} line(s) for PO ${po}.`,
@@ -875,7 +893,8 @@ export default function InventoryListScreen({
       <Pressable
         onPress={(e) => handleCopyItemId(idStr || display, e, itemName)}
         onPressIn={(e) => e?.stopPropagation?.()}
-        hitSlop={8}
+        hitSlop={4}
+        style={styles.copyableIdHit}
         accessibilityRole="button"
         accessibilityLabel={
           display !== "N/A" && display !== "—"
@@ -1547,7 +1566,8 @@ export default function InventoryListScreen({
                         }
                         handleItemActivate(item, e);
                       }}
-                      hitSlop={6}
+                      hitSlop={4}
+                      style={styles.itemNameHit}
                     >
                       <Text
                         style={[
@@ -1557,17 +1577,6 @@ export default function InventoryListScreen({
                       >
                         {titleText}
                       </Text>
-                      {colorLabel && !showLabel ? (
-                        <Text
-                          style={[
-                            styles.itemColorLabelHint,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          Tap for color name
-                        </Text>
-                      ) : null}
                     </Pressable>
                   );
                 })()}
@@ -3950,15 +3959,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  itemNameHit: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+  },
   itemName: {
     fontSize: 18,
     fontWeight: "bold",
     marginRight: 0,
-  },
-  itemColorLabelHint: {
-    fontSize: 11,
-    marginTop: 2,
-    fontWeight: "500",
   },
   itemQuantity: {
     fontSize: 16,
@@ -3975,6 +3983,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: fontFamily.mono,
     marginBottom: 4,
+  },
+  copyableIdHit: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
   },
   copiedHint: {
     fontSize: 11,

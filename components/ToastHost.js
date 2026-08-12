@@ -129,7 +129,7 @@ export default function ToastHost() {
   if (!toasts.length) return null;
 
   return (
-    <View pointerEvents="box-none" style={styles.host}>
+    <View style={[styles.host, { pointerEvents: "box-none" }]}>
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} onDone={remove} />
       ))}

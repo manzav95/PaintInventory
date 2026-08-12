@@ -135,7 +135,7 @@ export default function TimeField({
   if (isWeb) {
     return (
       <View style={[styles.wrap, style]}>
-        <View pointerEvents="none">{field}</View>
+        <View style={{ pointerEvents: "none" }}>{field}</View>
         <input
           ref={webInputRef}
           type="time"
@@ -160,7 +160,7 @@ export default function TimeField({
         accessibilityRole="button"
         accessibilityLabel={label || "Choose time"}
       >
-        <View pointerEvents="none">{field}</View>
+        <View style={{ pointerEvents: "none" }}>{field}</View>
       </Pressable>
       {Platform.OS === "android" && show ? (
         <DateTimePicker

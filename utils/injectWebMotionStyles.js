@@ -28,7 +28,8 @@ export function injectWebMotionStyles() {
 
     button:active,
     [role="button"]:active {
-      transform: scale(0.985);
+      transform: scale(0.97);
+      filter: brightness(1.15) saturate(1.1);
     }
 
     input,

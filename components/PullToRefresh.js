@@ -93,7 +93,7 @@ export default function PullToRefresh({
       armedRef.current = true;
       Animated.spring(pull, {
         toValue: HANG,
-        useNativeDriver: true,
+        useNativeDriver: !isWeb,
         bounciness: 0,
         speed: 20,
       }).start();
@@ -103,7 +103,7 @@ export default function PullToRefresh({
       armedRef.current = false;
       Animated.spring(pull, {
         toValue: 0,
-        useNativeDriver: true,
+        useNativeDriver: !isWeb,
         bounciness: 6,
         speed: 16,
       }).start();
@@ -115,7 +115,7 @@ export default function PullToRefresh({
       armedRef.current = true;
       Animated.spring(pull, {
         toValue: HANG,
-        useNativeDriver: true,
+        useNativeDriver: !isWeb,
         bounciness: 0,
         speed: 20,
       }).start();
@@ -124,7 +124,7 @@ export default function PullToRefresh({
     }
     Animated.spring(pull, {
       toValue: 0,
-      useNativeDriver: true,
+      useNativeDriver: !isWeb,
       bounciness: 8,
       speed: 18,
     }).start();
@@ -261,7 +261,7 @@ export default function PullToRefresh({
       onPanResponderTerminate: () => {
         Animated.spring(pull, {
           toValue: refreshingRef.current ? HANG : 0,
-          useNativeDriver: true,
+          useNativeDriver: !isWeb,
         }).start();
       },
     }),
@@ -315,8 +315,8 @@ export default function PullToRefresh({
         style={[
           styles.indicatorSlot,
           refreshing && !disabled && styles.indicatorSlotRefreshing,
+          { pointerEvents: "none" },
         ]}
-        pointerEvents="none"
       >
         {disabled ? null : refreshing ? (
           <ActivityIndicator size="small" color={theme.colors.primary} />

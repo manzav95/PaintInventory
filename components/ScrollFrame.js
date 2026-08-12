@@ -9,10 +9,10 @@ export function EdgeFade({ color, side }) {
   const steps = 10;
   return (
     <View
-      pointerEvents="none"
       style={[
         styles.edgeFade,
         side === "top" ? { top: 0 } : { bottom: 0 },
+        { pointerEvents: "none" },
         Platform.OS === "web"
           ? {
               height: FADE_HEIGHT,

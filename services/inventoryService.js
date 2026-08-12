@@ -336,7 +336,18 @@ class InventoryService {
 
   async updateQuantity(itemId, change, userName, actionType = null, extras = {}) {
     try {
-      const item = await this.getItem(itemId);
+      // Prefer caller-provided snapshot to skip an extra GET round-trip.
+      let item =
+        extras?.currentItem &&
+        String(extras.currentItem.id) === String(itemId)
+          ? extras.currentItem
+          : null;
+      if (!item && extras?.currentQuantity != null) {
+        item = { id: itemId, quantity: extras.currentQuantity };
+      }
+      if (!item) {
+        item = await this.getItem(itemId);
+      }
       if (!item) {
         return { success: false, error: 'Item not found' };
       }
@@ -370,6 +381,15 @@ class InventoryService {
         String(extras.location).trim() !== ''
       ) {
         updateData.location = String(extras.location).trim();
+      }
+
+      // Custom colors: no stack when empty.
+      const itemType = String(item.type || '').toLowerCase();
+      if (
+        (itemType === 'custom_paint' || itemType === 'custom_stain') &&
+        clampedQuantity <= 0
+      ) {
+        updateData.location = '';
       }
       
       // Add action type flag for check_in/check_out

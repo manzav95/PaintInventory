@@ -78,10 +78,25 @@ export default function ItemActionPopover({
     const margin = 8;
     const x = Number(anchor?.pageX) || windowWidth / 2;
     const y = Number(anchor?.pageY) || 80;
-    const top = Math.max(
-      margin + caretSize,
-      Math.min(y + gap, windowHeight - 160),
+
+    let estimate = 56 + 16; // header + padding
+    if (showRelatedJobs) estimate += 68;
+    estimate += 68; // transactions
+    if (showEditDetails) estimate += 68;
+    const preferredHeight = Math.min(360, estimate);
+
+    const spaceBelow = windowHeight - y - margin;
+    const spaceAbove = y - margin;
+    const placement =
+      spaceBelow < preferredHeight && spaceAbove > spaceBelow
+        ? "above"
+        : "below";
+    const available = placement === "above" ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(
+      140,
+      Math.min(360, available - gap - caretSize),
     );
+
     const preferredLeft = x - panelWidth / 2;
     const left = Math.max(
       margin,
@@ -91,8 +106,34 @@ export default function ItemActionPopover({
       12,
       Math.min(x - left - caretSize, panelWidth - 24),
     );
-    return { top, left, caretLeft };
-  }, [anchor?.pageX, anchor?.pageY, panelWidth, windowWidth, windowHeight]);
+
+    if (placement === "above") {
+      return {
+        placement,
+        top: undefined,
+        bottom: Math.max(margin, windowHeight - y + gap),
+        left,
+        caretLeft,
+        maxHeight,
+      };
+    }
+    return {
+      placement,
+      top: Math.max(margin + caretSize, y + gap),
+      bottom: undefined,
+      left,
+      caretLeft,
+      maxHeight,
+    };
+  }, [
+    anchor?.pageX,
+    anchor?.pageY,
+    panelWidth,
+    windowWidth,
+    windowHeight,
+    showRelatedJobs,
+    showEditDetails,
+  ]);
 
   const close = () => {
     setView("menu");
@@ -156,6 +197,8 @@ export default function ItemActionPopover({
     );
   }
 
+  const above = panelPos.placement === "above";
+
   return (
     <Modal
       visible={visible}
@@ -170,41 +213,47 @@ export default function ItemActionPopover({
           accessibilityLabel="Dismiss"
         />
         <View
-          pointerEvents="box-none"
           style={[
             styles.panelAnchor,
             {
-              top: panelPos.top,
               left: panelPos.left,
               width: panelWidth,
+              pointerEvents: "box-none",
+              ...(above
+                ? { bottom: panelPos.bottom }
+                : { top: panelPos.top }),
             },
           ]}
         >
-          <View
-            style={[
-              styles.caret,
-              {
-                left: panelPos.caretLeft,
-                borderBottomColor: theme.colors.outlineVariant,
-              },
-            ]}
-          />
-          <View
-            style={[
-              styles.caretInner,
-              {
-                left: panelPos.caretLeft + 1,
-                borderBottomColor: theme.colors.surfaceContainerHighest,
-              },
-            ]}
-          />
+          {!above ? (
+            <>
+              <View
+                style={[
+                  styles.caret,
+                  {
+                    left: panelPos.caretLeft,
+                    borderBottomColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.caretInner,
+                  {
+                    left: panelPos.caretLeft + 1,
+                    borderBottomColor: theme.colors.surfaceContainerHighest,
+                  },
+                ]}
+              />
+            </>
+          ) : null}
           <View
             style={[
               styles.panel,
               {
                 backgroundColor: theme.colors.surfaceContainerHighest,
                 borderColor: theme.colors.outlineVariant,
-                maxHeight: Math.min(360, windowHeight - panelPos.top - 12),
+                maxHeight: panelPos.maxHeight,
               },
             ]}
           >
@@ -279,6 +328,28 @@ export default function ItemActionPopover({
               </ScrollView>
             )}
           </View>
+          {above ? (
+            <>
+              <View
+                style={[
+                  styles.caretDownInner,
+                  {
+                    left: panelPos.caretLeft + 1,
+                    borderTopColor: theme.colors.surfaceContainerHighest,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.caretDown,
+                  {
+                    left: panelPos.caretLeft,
+                    borderTopColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              />
+            </>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -316,6 +387,30 @@ const styles = StyleSheet.create({
     borderLeftWidth: 8,
     borderRightWidth: 8,
     borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  caretDown: {
+    position: "absolute",
+    bottom: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderTopWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 2,
+  },
+  caretDownInner: {
+    position: "absolute",
+    bottom: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 8,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
     zIndex: 3,

@@ -173,6 +173,17 @@ app.put('/api/items/:id', async (req, res) => {
     delete updates._actionType;
     delete updates._quantityChange;
 
+    // Custom paint/stain: clear stack location when quantity hits 0.
+    if (newQuantity !== undefined) {
+      const t = String(currentItem?.type || updates.type || '').toLowerCase();
+      if (
+        (t === 'custom_paint' || t === 'custom_stain') &&
+        Number(newQuantity) <= 0
+      ) {
+        updates.location = '';
+      }
+    }
+
     // Backward-compatible: mirror is_mixing into legacy PO fields (if they exist in DB).
     // This makes "AP" persist even on deployments still reading po_label_*.
     if (Object.prototype.hasOwnProperty.call(updates, 'is_mixing')) {

@@ -344,11 +344,13 @@ class Database {
         END IF;
       END $$
     `);
-    // Legacy "Custom Container" → default stack C-A for custom paint/stain.
+    // Legacy "Custom Container" → default stack C-A for custom paint/stain with stock.
+    // Leave empty location when quantity is 0 (no stack when empty).
     const stackBackfill = await client.query(
       `UPDATE items
        SET location = 'C-A'
        WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
+         AND COALESCE(quantity, 0) > 0
          AND (
            location IS NULL
            OR TRIM(location) = ''
@@ -358,6 +360,19 @@ class Database {
     if (stackBackfill.rowCount > 0) {
       console.log(
         `Custom stack location backfill: ${stackBackfill.rowCount} item(s) → C-A`,
+      );
+    }
+    const clearEmptyCustomStacks = await client.query(
+      `UPDATE items
+       SET location = ''
+       WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
+         AND COALESCE(quantity, 0) <= 0
+         AND location IS NOT NULL
+         AND TRIM(location) <> ''`,
+    );
+    if (clearEmptyCustomStacks.rowCount > 0) {
+      console.log(
+        `Cleared stack location on ${clearEmptyCustomStacks.rowCount} empty custom item(s)`,
       );
     }
     console.log("Items table ready");

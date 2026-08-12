@@ -68,10 +68,11 @@ function tokenOverlap(a, b) {
 /**
  * Score how well an inventory item matches a typed query.
  * Higher is better. Returns 0 when it should not be suggested.
+ * Queries shorter than 3 characters never match (avoids "20" → 42007).
  */
 export function scoreItemLookup(item, query) {
   const raw = String(query || "").trim();
-  if (!raw) return 0;
+  if (raw.length < 3) return 0;
   const qNorm = normalizeText(raw);
   const qCompact = compactText(raw);
   const qId = normalizeItemIdQuery(raw).toLowerCase();
@@ -89,14 +90,14 @@ export function scoreItemLookup(item, query) {
   // Exact name
   if (nameNorm && nameNorm === qNorm) return 960;
 
-  // Prefix / includes
+  // Prefix / includes — requires 3+ char query (already gated above)
   let score = 0;
   if (id && (id.startsWith(qId) || id.startsWith(qCompact))) score = Math.max(score, 820);
   if (ext && (ext.startsWith(qId) || ext.startsWith(qCompact))) score = Math.max(score, 800);
   if (nameNorm && nameNorm.startsWith(qNorm)) score = Math.max(score, 780);
-  if (id && id.includes(qCompact) && qCompact.length >= 2) score = Math.max(score, 720);
-  if (ext && ext.includes(qCompact) && qCompact.length >= 2) score = Math.max(score, 700);
-  if (nameNorm && nameNorm.includes(qNorm) && qNorm.length >= 2) score = Math.max(score, 680);
+  if (id && id.includes(qCompact)) score = Math.max(score, 720);
+  if (ext && ext.includes(qCompact)) score = Math.max(score, 700);
+  if (nameNorm && nameNorm.includes(qNorm)) score = Math.max(score, 680);
 
   // Fuzzy name / id (typos)
   if (qCompact.length >= 3) {
@@ -127,7 +128,7 @@ export function scoreItemLookup(item, query) {
  */
 export function findInventoryLookupMatches(inventory, query, { limit = 8 } = {}) {
   const q = String(query || "").trim();
-  if (!q) return [];
+  if (q.length < 3) return [];
   const scored = [];
   for (const item of inventory || []) {
     if (!item) continue;

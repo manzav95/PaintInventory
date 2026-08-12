@@ -341,13 +341,13 @@ export default function NotificationsBell({
             accessibilityLabel="Dismiss notifications"
           />
           <View
-            pointerEvents="box-none"
             style={[
               styles.panelAnchor,
               {
                 top: panelPos.top,
                 left: panelPos.left,
                 width: panelWidth,
+                pointerEvents: "box-none",
               },
             ]}
           >

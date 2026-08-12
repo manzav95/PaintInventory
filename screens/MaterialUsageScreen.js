@@ -31,6 +31,11 @@ import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
+import { assessMaterialUsageQty } from "../utils/materialUsageAnomaly";
+import {
+  assessMissingCheckout,
+  buildLastCheckoutMap,
+} from "../utils/materialUsageCheckoutGuard";
 import {
   bundleUsageByWeek,
   formatBoothWeekUsageForExcel,
@@ -103,7 +108,7 @@ const USAGE_TYPE_ORDER = [
   {
     key: "paint",
     label: "Paint",
-    soft: "rgba(15, 22, 36, 0.08)",
+    soft: "rgba(25, 118, 210, 0.12)",
   },
   {
     key: "clear",
@@ -113,8 +118,8 @@ const USAGE_TYPE_ORDER = [
   {
     key: "primer",
     label: "Primer",
-    softLight: "rgba(93, 64, 55, 0.12)",
-    softDark: "rgba(245, 245, 220, 0.2)",
+    softLight: "rgba(236, 239, 241, 0.9)",
+    softDark: "rgba(236, 239, 241, 0.2)",
   },
   {
     key: "stain",
@@ -426,6 +431,7 @@ export default function MaterialUsageScreen({
   embeddedInShell = false,
   formRefreshKey = 0,
   onUsageDataChanged,
+  auditLogs = [],
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -577,6 +583,28 @@ export default function MaterialUsageScreen({
     return computeCatalystOz(n, catalystPercent, cupGun);
   }, [qty, needsCatalyst, cupGun, catalystPercent]);
 
+  const lastActivityByItemId = useMemo(() => {
+    const map = buildLastCheckoutMap(auditLogs);
+    const bump = (id, ts) => {
+      const key = String(id || "").trim();
+      if (!key) return;
+      const t = new Date(ts).getTime();
+      if (!Number.isFinite(t) || t <= 0) return;
+      if (!map[key] || t > map[key]) map[key] = t;
+    };
+    for (const row of logs || []) {
+      const id = row?.item_id;
+      if (!id) continue;
+      const date = String(row.entry_date || "").trim();
+      const time = String(row.entry_time || "12:00").trim() || "12:00";
+      if (date) bump(id, `${date}T${time}`);
+    }
+    for (const item of inventory || []) {
+      if (item?.lastScanned) bump(item.id, item.lastScanned);
+    }
+    return map;
+  }, [auditLogs, logs, inventory]);
+
   const materialSuggestions = useMemo(() => {
     if (selectedItem) return [];
     const eligible = inventory.filter(isMaterialUsageEligibleItem);
@@ -585,7 +613,10 @@ export default function MaterialUsageScreen({
       ? eligible.filter(
           (i) =>
             (i.name || "").toLowerCase().includes(q) ||
-            (i.id || "").toLowerCase().includes(q),
+            (i.id || "").toLowerCase().includes(q) ||
+            String(i.color_label || "")
+              .toLowerCase()
+              .includes(q),
         )
       : eligible;
     return filtered.sort((a, b) => {
@@ -596,9 +627,12 @@ export default function MaterialUsageScreen({
         const bStarts = bName.startsWith(q) ? 0 : 1;
         if (aStarts !== bStarts) return aStarts - bStarts;
       }
+      const ta = lastActivityByItemId[String(a.id)] || 0;
+      const tb = lastActivityByItemId[String(b.id)] || 0;
+      if (tb !== ta) return tb - ta;
       return aName.localeCompare(bName);
     });
-  }, [inventory, colorQuery, selectedItem]);
+  }, [inventory, colorQuery, selectedItem, lastActivityByItemId]);
 
   const showMaterialSuggestions = materialFocused && !selectedItem;
   const filteredLogs = useMemo(() => {
@@ -994,6 +1028,21 @@ export default function MaterialUsageScreen({
 
   const handleSaveEdit = async (payload) => {
     if (!editRow?.id) return;
+    const anomaly = assessMaterialUsageQty({
+      qtyGallons: payload?.qty_gallons,
+      materialType: payload?.material_type || editRow.material_type,
+      booth: payload?.booth || editRow.booth,
+      colorName: payload?.color_name || editRow.color_name,
+      logs,
+    });
+    if (anomaly) {
+      const ok = await confirmAction(anomaly.title, anomaly.message, {
+        confirmLabel: "Save anyway",
+        cancelLabel: "Go back",
+        destructive: anomaly.destructive,
+      });
+      if (!ok) return;
+    }
     setEditSaving(true);
     try {
       await MaterialUsageService.update(editRow.id, payload);
@@ -1065,7 +1114,7 @@ export default function MaterialUsageScreen({
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const job = titleCaseWords(jobName || "");
     if (!job && !jobOptional) {
       setShakeTick((n) => n + 1);
@@ -1149,6 +1198,39 @@ export default function MaterialUsageScreen({
       catalyzed_confirmed: true,
       cup_gun: cupGun,
     };
+
+    const anomaly = assessMaterialUsageQty({
+      qtyGallons,
+      materialType,
+      booth,
+      colorName,
+      cupGun,
+      rawInput: qty,
+      logs,
+    });
+    if (anomaly) {
+      const ok = await confirmAction(anomaly.title, anomaly.message, {
+        confirmLabel: "Log anyway",
+        cancelLabel: "Go back",
+        destructive: anomaly.destructive,
+      });
+      if (!ok) return;
+    }
+
+    const checkoutWarn = assessMissingCheckout({
+      item: selectedItem,
+      materialType,
+      auditLogs,
+    });
+    if (checkoutWarn) {
+      const ok = await confirmAction(checkoutWarn.title, checkoutWarn.message, {
+        confirmLabel: "Mix anyway",
+        cancelLabel: "Go back",
+        destructive: checkoutWarn.destructive,
+      });
+      if (!ok) return;
+    }
+
     if (!needsCatalyst) {
       submitEntry(entry);
       return;
@@ -1303,20 +1385,6 @@ export default function MaterialUsageScreen({
             </Text>
             <FormHelp content={MATERIAL_USAGE_FORM_HELP} />
           </View>
-          <View style={styles.row}>
-            <DateField
-              label="Date"
-              value={entryDate}
-              onChange={setEntryDate}
-              style={styles.halfInput}
-            />
-            <TimeField
-              label="Time"
-              value={entryTime}
-              onChange={setEntryTime}
-              style={styles.halfInput}
-            />
-          </View>
           <Text
             style={[
               styles.fieldLabel,
@@ -1337,6 +1405,20 @@ export default function MaterialUsageScreen({
                 {opt.label}
               </AppButton>
             ))}
+          </View>
+          <View style={styles.row}>
+            <DateField
+              label="Date"
+              value={entryDate}
+              onChange={setEntryDate}
+              style={styles.halfInput}
+            />
+            <TimeField
+              label="Time"
+              value={entryTime}
+              onChange={setEntryTime}
+              style={styles.halfInput}
+            />
           </View>
           <TextInput
             label={

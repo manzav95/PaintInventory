@@ -39,8 +39,11 @@ export default function FadeOverlay({
 
   return (
     <Animated.View
-      style={[styles.root, style, { opacity }]}
-      pointerEvents={visible ? pointerEvents : "none"}
+      style={[
+        styles.root,
+        style,
+        { opacity, pointerEvents: visible ? pointerEvents : "none" },
+      ]}
     >
       {children}
     </Animated.View>

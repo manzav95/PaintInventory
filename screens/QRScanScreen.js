@@ -165,6 +165,13 @@ export default function QRScanScreen({
       Alert.alert("Invalid Input", "Please enter a material name or ID.");
       return;
     }
+    if (trimmed.length < 3) {
+      Alert.alert(
+        "Too Short",
+        "Enter at least 3 characters so the wrong item is not matched.",
+      );
+      return;
+    }
 
     const { item, matches } = resolveBestInventoryMatch(inventory, trimmed);
     if (item?.id) {
@@ -229,7 +236,7 @@ export default function QRScanScreen({
           mode="contained"
           onPress={handleManualSubmit}
           style={styles.button}
-          disabled={!manualInput.trim()}
+          disabled={manualInput.trim().length < 3}
         >
           Continue
         </AppButton>

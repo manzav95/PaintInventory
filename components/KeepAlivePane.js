@@ -31,8 +31,8 @@ export default function KeepAlivePane({ active, children, style }) {
         styles.root,
         style,
         active ? { opacity } : styles.hidden,
+        { pointerEvents: active ? "auto" : "none" },
       ]}
-      pointerEvents={active ? "auto" : "none"}
       collapsable={false}
     >
       {children}

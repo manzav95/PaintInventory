@@ -33,13 +33,18 @@ export const colors = {
     navy: "#0F1624",
     navyDeep: "#0B0E1A",
     /**
-     * Contained / press fill — logo navy (matches mark field).
+     * Contained / engaged fill — subtle logo gold (readable, not full accent).
+     * Press uses brighter gold.
      */
-    buttonFill: "#0F1624",
-    buttonFillStrong: "#0B0E1A",
+    buttonFill: "#5C4A22",
+    buttonFillStrong: "#3A3118",
+    /** Pressed contained fill — full logo gold */
+    buttonPressFill: "#C9972E",
     onButton: "#F2F1EE",
-    /** Ripple / underlay for all Paper buttons */
-    buttonRipple: "rgba(15, 22, 36, 0.55)",
+    onButtonPress: "#0F1624",
+    /** Strong gold ripple / underlay */
+    buttonRipple: "rgba(201, 151, 46, 0.55)",
+    buttonPressSoft: "rgba(201, 151, 46, 0.32)",
   },
   light: {
     background: "#F2F1EE",
@@ -95,7 +100,7 @@ export const colors = {
   },
   /** Material-type label colors (matches Inventory / materialTypes). */
   materialType: {
-    paint: "#0F1624",
+    paint: "#1976d2",
     clear: "#ef6c00",
     stain: "#2e7d32",
     /** Near-white; pair with dark text / outline for contrast on light surfaces. */

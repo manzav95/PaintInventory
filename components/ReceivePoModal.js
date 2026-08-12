@@ -271,13 +271,13 @@ export default function ReceivePoModal({
           accessibilityLabel="Close"
         />
         <View
-          pointerEvents="box-none"
           style={[
             styles.panelAnchor,
             {
               top: panelPos.top,
               right: panelPos.right,
               width: panelWidth,
+              pointerEvents: "box-none",
             },
           ]}
         >
@@ -465,7 +465,7 @@ export default function ReceivePoModal({
                     disabled={receiveSubmitting}
                     style={styles.backBtn}
                   />
-                  <View style={styles.detailHeaderCenter} pointerEvents="none">
+                  <View style={[styles.detailHeaderCenter, { pointerEvents: "none" }]}>
                     <Text
                       style={[
                         styles.detailPo,

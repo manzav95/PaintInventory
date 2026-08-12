@@ -169,13 +169,13 @@ export default function MaterialUsageEditPopover({
           accessibilityLabel="Dismiss"
         />
         <View
-          pointerEvents="box-none"
           style={[
             styles.panelAnchor,
             {
               top: panelPos.top,
               left: panelPos.left,
               width: panelWidth,
+              pointerEvents: "box-none",
             },
           ]}
         >
@@ -332,7 +332,7 @@ export default function MaterialUsageEditPopover({
               </AppButton>
             </View>
             {saving ? (
-              <View style={styles.savingOverlay} pointerEvents="none">
+              <View style={[styles.savingOverlay, { pointerEvents: "none" }]}>
                 <ActivityIndicator />
               </View>
             ) : null}
