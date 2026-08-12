@@ -1112,7 +1112,10 @@ export default function UpcomingOrdersScreen({
           id: "existing",
           label: "Open POs",
           value: orderCounts.existing,
-          color: FILTER_COLORS.existing,
+          // semantic.open is navy — readable on light, invisible on dark chrome
+          color: theme?.dark
+            ? colors.brand.primaryOnDark
+            : FILTER_COLORS.existing,
           active: orderFilter === "existing",
           onPress: pickFilter("existing"),
         },
@@ -1142,7 +1145,7 @@ export default function UpcomingOrdersScreen({
         },
       ];
     },
-    [orderCounts, orderFilter, theme?.colors?.primary, dateViewLocksFilters],
+    [orderCounts, orderFilter, theme?.colors?.primary, theme?.dark, dateViewLocksFilters],
   );
 
   return (

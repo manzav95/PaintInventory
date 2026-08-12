@@ -444,6 +444,22 @@ class InventoryService {
     }
   }
 
+  async addJobToItem(itemId, jobName) {
+    try {
+      const id = itemId != null ? String(itemId).trim() : '';
+      const job = jobName != null ? String(jobName).trim() : '';
+      if (!id) return { success: false, error: 'Item ID is required.' };
+      if (!job) return { success: false, error: 'Job number is required.' };
+      return await _fetch(`/api/items/${encodeURIComponent(id)}/jobs`, {
+        method: 'POST',
+        body: JSON.stringify({ jobName: job }),
+      });
+    } catch (error) {
+      console.error('Error adding job to item:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async testConnection() {
     try {
       const response = await fetch(`${API_URL}/api/health`);

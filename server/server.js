@@ -96,6 +96,32 @@ app.post('/api/items/sync-job-history', async (req, res) => {
   }
 });
 
+// Link a job number to an item (custom color history) without requiring a PO.
+app.post('/api/items/:id/jobs', async (req, res) => {
+  try {
+    const itemId = decodeURIComponent(req.params.id || '').trim();
+    const jobName =
+      req.body && req.body.jobName != null
+        ? String(req.body.jobName).trim()
+        : '';
+    if (!itemId) {
+      return res.status(400).json({ success: false, error: 'Item ID is required.' });
+    }
+    if (!jobName) {
+      return res.status(400).json({ success: false, error: 'Job number is required.' });
+    }
+    const item = await db.getItem(itemId);
+    if (!item) {
+      return res.status(404).json({ success: false, error: 'Item not found.' });
+    }
+    const result = await db.upsertItemJobHistory(itemId, jobName);
+    res.json(result);
+  } catch (error) {
+    console.error('Error adding job to item:', error);
+    res.status(500).json({ success: false, error: 'Failed to add job number.' });
+  }
+});
+
 // Get single item
 app.get('/api/items/:id', async (req, res) => {
   try {

@@ -1389,6 +1389,14 @@ export default function App() {
             minQuantity={30}
             isAdmin={isAdmin}
             onOrderSummary={onOrderSummary}
+            onRefreshOnOrderSummary={async () => {
+              try {
+                const summary = await OrderService.getOnOrderSummary();
+                setOnOrderSummary(summary || {});
+              } catch (e) {
+                console.error("Error refreshing on-order summary:", e);
+              }
+            }}
             receiveOrdersList={receiveOrdersCache ?? []}
             receiveOrdersLoaded={receiveOrdersCache !== null}
             receiveOrdersLoading={receiveOrdersLoading}

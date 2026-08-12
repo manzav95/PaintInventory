@@ -221,6 +221,7 @@ export default function InventoryListScreen({
   isRefreshing = false,
   isAdmin = false,
   onOrderSummary = {},
+  onRefreshOnOrderSummary,
   recycleDueFilter = false,
   onClearRecycleDueFilter,
   initialStockFilter = null,
@@ -881,6 +882,7 @@ export default function InventoryListScreen({
     prefix = false,
     textStyle,
     numberOfLines,
+    hitStyle,
   }) => {
     const idStr = id != null && id !== "" ? String(id) : "";
     const display = idStr || "N/A";
@@ -894,7 +896,7 @@ export default function InventoryListScreen({
         onPress={(e) => handleCopyItemId(idStr || display, e, itemName)}
         onPressIn={(e) => e?.stopPropagation?.()}
         hitSlop={4}
-        style={styles.copyableIdHit}
+        style={[styles.copyableIdHit, hitStyle]}
         accessibilityRole="button"
         accessibilityLabel={
           display !== "N/A" && display !== "—"
@@ -1496,6 +1498,9 @@ export default function InventoryListScreen({
       }
       showRelatedJobs={!!itemActionMenu?.showRelatedJobs}
       showEditDetails={isAdmin}
+      allowAddJobs={
+        !!(isAdmin && itemActionMenu?.showRelatedJobs && itemActionMenu?.item)
+      }
       onClose={() => setItemActionMenu(null)}
       onViewTransactions={() => {
         const item = itemActionMenu?.item;
@@ -1510,6 +1515,37 @@ export default function InventoryListScreen({
         if (!item) return;
         if (onEditItem) onEditItem(item);
         else onItemSelect?.(item);
+      }}
+      onAddJob={async (jobName) => {
+        const item = itemActionMenu?.item;
+        if (!item?.id) {
+          return { success: false, error: "Item not found." };
+        }
+        const result = await InventoryService.addJobToItem(item.id, jobName);
+        if (!result?.success) {
+          return {
+            success: false,
+            error: result?.error || "Could not add job.",
+          };
+        }
+        try {
+          if (typeof onRefreshOnOrderSummary === "function") {
+            await onRefreshOnOrderSummary();
+          } else {
+            // Fallback if parent did not wire refresh — still try local fetch
+            // so the open popover can re-render from updated prop on next open.
+            await OrderService.getOnOrderSummary();
+          }
+        } catch (e) {
+          console.error("Error refreshing jobs after add:", e);
+        }
+        showToast({
+          title: "Job linked",
+          message: `${String(jobName).trim()} linked to ${
+            item.name || item.id
+          }.`,
+        });
+        return { success: true };
       }}
     />
   );
@@ -2517,6 +2553,20 @@ export default function InventoryListScreen({
                                           >
                                             {item.name || "Unnamed"}
                                           </Text>
+                                          {isCustomInventoryView &&
+                                          String(item.color_label || "").trim() ? (
+                                            <Text
+                                              style={[
+                                                styles.tableColorLabel,
+                                                {
+                                                  color: theme.colors.onSurfaceVariant,
+                                                },
+                                              ]}
+                                              numberOfLines={1}
+                                            >
+                                              {String(item.color_label).trim()}
+                                            </Text>
+                                          ) : null}
                                           {isCustomInventoryView ? (
                                             <RecycleDateUnderName
                                               item={item}
@@ -2555,6 +2605,7 @@ export default function InventoryListScreen({
                                           id: item.id,
                                           name: item.name || "Unnamed",
                                           prefix: false,
+                                          hitStyle: styles.copyableIdHitCentered,
                                           textStyle: [
                                             styles.idText,
                                             {
@@ -3988,6 +4039,9 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     maxWidth: "100%",
   },
+  copyableIdHitCentered: {
+    alignSelf: "center",
+  },
   copiedHint: {
     fontSize: 11,
     fontStyle: "italic",
@@ -4128,6 +4182,7 @@ const styles = StyleSheet.create({
   idColCell: {
     flex: 1,
     minWidth: 130,
+    alignItems: "center",
   },
   typeColCell: {
     flex: 1,
@@ -4512,6 +4567,11 @@ const styles = StyleSheet.create({
   itemNameText: {
     fontSize: 14,
     fontWeight: "500",
+  },
+  tableColorLabel: {
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 1,
   },
   quantityText: {
     fontSize: 14,

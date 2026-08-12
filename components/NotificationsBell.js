@@ -123,7 +123,7 @@ export default function NotificationsBell({
         id: "waste",
         title: "Waste Tracking",
         count: wasteUnreadCount,
-        color: theme.colors.primary,
+        color: colors.brand.accent,
         detail:
           wasteUnreadCount === 1
             ? "1 new waste entry submitted"
@@ -181,7 +181,7 @@ export default function NotificationsBell({
         id: "low_stock",
         title: "Low Stock",
         count: lowStockItems.length,
-        color: theme.colors.primary,
+        color: colors.semantic.lowStockValue,
         detail: isAdmin
           ? `Below ${minQuantity} gal (or item minimum)`
           : `Paint below ${minQuantity} gal — notify purchasing`,
@@ -209,7 +209,6 @@ export default function NotificationsBell({
     onOpenBackOrders,
     onOpenLateOrders,
     onOpenLowStock,
-    theme.colors.primary,
   ]);
 
   const activeNotifications = useMemo(

@@ -8,7 +8,9 @@ import {
   useWindowDimensions,
   ScrollView,
 } from "react-native";
-import { Text, IconButton, Divider, useTheme } from "react-native-paper";
+import { Text, IconButton, Divider, useTheme, TextInput } from "react-native-paper";
+import AppButton from "./ui/AppButton";
+import { colors } from "../theme/tokens";
 
 const PANEL_WIDTH = 280;
 
@@ -57,16 +59,26 @@ export default function ItemActionPopover({
   jobs = [],
   showRelatedJobs = true,
   showEditDetails = false,
+  allowAddJobs = false,
   onClose,
   onViewTransactions,
   onEditDetails,
+  onAddJob,
 }) {
   const theme = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [view, setView] = useState("menu"); // 'menu' | 'jobs'
+  const [jobDraft, setJobDraft] = useState("");
+  const [addingJob, setAddingJob] = useState(false);
+  const [addJobError, setAddJobError] = useState("");
 
   useEffect(() => {
-    if (visible) setView("menu");
+    if (visible) {
+      setView("menu");
+      setJobDraft("");
+      setAddJobError("");
+      setAddingJob(false);
+    }
   }, [visible]);
 
   const panelWidth = Math.min(PANEL_WIDTH, Math.max(240, windowWidth - 16));
@@ -83,6 +95,7 @@ export default function ItemActionPopover({
     if (showRelatedJobs) estimate += 68;
     estimate += 68; // transactions
     if (showEditDetails) estimate += 68;
+    if (allowAddJobs) estimate += 72;
     const preferredHeight = Math.min(360, estimate);
 
     const spaceBelow = windowHeight - y - margin;
@@ -133,11 +146,37 @@ export default function ItemActionPopover({
     windowHeight,
     showRelatedJobs,
     showEditDetails,
+    allowAddJobs,
   ]);
 
   const close = () => {
     setView("menu");
+    setJobDraft("");
+    setAddJobError("");
     onClose?.();
+  };
+
+  const submitJob = async () => {
+    const job = String(jobDraft || "").trim();
+    if (!job) {
+      setAddJobError("Enter a job number.");
+      return;
+    }
+    if (typeof onAddJob !== "function") return;
+    setAddingJob(true);
+    setAddJobError("");
+    try {
+      const result = await onAddJob(job);
+      if (result && result.success === false) {
+        setAddJobError(result.error || "Could not add job.");
+        return;
+      }
+      setJobDraft("");
+    } catch (e) {
+      setAddJobError(e?.message || "Could not add job.");
+    } finally {
+      setAddingJob(false);
+    }
   };
 
   if (!visible) return null;
@@ -161,10 +200,17 @@ export default function ItemActionPopover({
           <View
             style={[
               styles.countPill,
-              { backgroundColor: theme.colors.primary },
+              { backgroundColor: colors.brand.accent },
             ]}
           >
-            <Text style={styles.countPillText}>{jobCount}</Text>
+            <Text
+              style={[
+                styles.countPillText,
+                { color: colors.brand.onPrimaryDark },
+              ]}
+            >
+              {jobCount}
+            </Text>
           </View>
         }
       />,
@@ -294,38 +340,85 @@ export default function ItemActionPopover({
                 ))}
               </View>
             ) : (
-              <ScrollView
-                style={styles.jobsScroll}
-                contentContainerStyle={styles.jobsContent}
-                keyboardShouldPersistTaps="handled"
-              >
-                {jobCount === 0 ? (
-                  <Text
+              <View style={styles.jobsPane}>
+                <ScrollView
+                  style={styles.jobsScroll}
+                  contentContainerStyle={styles.jobsContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  {jobCount === 0 ? (
+                    <Text
+                      style={[
+                        styles.emptyJobs,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      No related job numbers for this item.
+                    </Text>
+                  ) : (
+                    jobs.map((job, idx) => (
+                      <View key={`${job}-${idx}`}>
+                        {idx > 0 ? <Divider /> : null}
+                        <View style={styles.jobRow}>
+                          <Text
+                            style={[
+                              styles.jobText,
+                              { color: theme.colors.onSurface },
+                            ]}
+                          >
+                            {job}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </ScrollView>
+                {allowAddJobs ? (
+                  <View
                     style={[
-                      styles.emptyJobs,
-                      { color: theme.colors.onSurfaceVariant },
+                      styles.addJobBlock,
+                      { borderTopColor: theme.colors.outlineVariant },
                     ]}
                   >
-                    No related job numbers for this item.
-                  </Text>
-                ) : (
-                  jobs.map((job, idx) => (
-                    <View key={`${job}-${idx}`}>
-                      {idx > 0 ? <Divider /> : null}
-                      <View style={styles.jobRow}>
-                        <Text
-                          style={[
-                            styles.jobText,
-                            { color: theme.colors.onSurface },
-                          ]}
-                        >
-                          {job}
-                        </Text>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </ScrollView>
+                    <TextInput
+                      mode="outlined"
+                      dense
+                      label="Job number"
+                      value={jobDraft}
+                      onChangeText={(v) => {
+                        setJobDraft(v);
+                        if (addJobError) setAddJobError("");
+                      }}
+                      placeholder="e.g. 12345"
+                      disabled={addingJob}
+                      style={styles.addJobInput}
+                      onSubmitEditing={submitJob}
+                      returnKeyType="done"
+                    />
+                    {addJobError ? (
+                      <Text
+                        style={[
+                          styles.addJobError,
+                          { color: theme.colors.error },
+                        ]}
+                      >
+                        {addJobError}
+                      </Text>
+                    ) : null}
+                    <AppButton
+                      mode="contained"
+                      compact
+                      icon="plus"
+                      loading={addingJob}
+                      disabled={addingJob || !String(jobDraft || "").trim()}
+                      onPress={submitJob}
+                      style={styles.addJobBtn}
+                    >
+                      Add job
+                    </AppButton>
+                  </View>
+                ) : null}
+              </View>
             )}
           </View>
           {above ? (
@@ -487,16 +580,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   countPillText: {
-    color: "#fff",
     fontSize: 13,
     fontWeight: "700",
   },
   jobsScroll: {
-    maxHeight: 260,
+    maxHeight: 180,
   },
   jobsContent: {
     paddingHorizontal: 8,
     paddingBottom: 8,
+  },
+  jobsPane: {
+    minHeight: 0,
   },
   emptyJobs: {
     fontSize: 13,
@@ -507,6 +602,22 @@ const styles = StyleSheet.create({
   jobRow: {
     paddingVertical: 12,
     paddingHorizontal: 6,
+  },
+  addJobBlock: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  addJobInput: {
+    backgroundColor: "transparent",
+  },
+  addJobError: {
+    fontSize: 12,
+    marginTop: -2,
+  },
+  addJobBtn: {
+    alignSelf: "stretch",
   },
   jobText: {
     fontSize: 15,
