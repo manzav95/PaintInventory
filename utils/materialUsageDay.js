@@ -95,6 +95,27 @@ export function getHistoryActivityMs(log, isOvertime = false) {
   return log?.timestamp ? new Date(log.timestamp).getTime() : 0;
 }
 
+/**
+ * Clock time for mixed history lists (checks + usage interleaved).
+ * Usage uses the entered date + time; checks use audit timestamp.
+ */
+export function getHistorySortMs(log, isOvertime = false) {
+  if (log?.action === "material_usage" || log?.details?._source === "material_usage") {
+    const dateStr = String(log?.details?.entry_date || "").trim();
+    const minutes = parseMaterialUsageTimeToMinutes(log?.details?.entry_time);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr) && Number.isFinite(minutes)) {
+      const d = new Date(`${dateStr}T00:00:00`);
+      const t = d.getTime();
+      if (!Number.isNaN(t)) return t + minutes * 60 * 1000;
+    }
+  }
+  if (log?.timestamp) {
+    const t = new Date(log.timestamp).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  return getHistoryActivityMs(log, isOvertime);
+}
+
 /** Calendar day key for history lists (MU uses business date). */
 export function getHistoryDayKey(log, isOvertime = false) {
   if (log?.action === "material_usage" || log?.details?._source === "material_usage") {

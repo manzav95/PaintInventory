@@ -668,7 +668,7 @@ export default function CheckInOutScreen({
                           { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        Stack location
+                        Stack location (A–Z)
                       </Text>
                       <Menu
                         visible={stackMenuOpen}
@@ -923,7 +923,7 @@ export default function CheckInOutScreen({
                         { color: theme.colors.onSurfaceVariant },
                       ]}
                     >
-                      Stack location
+                      Stack location (A–Z)
                     </Text>
                     <Menu
                       visible={receiveStackMenuOpen}

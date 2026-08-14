@@ -18,7 +18,12 @@ import ToolbarCard from "../components/ToolbarCard";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import PullToRefresh from "../components/PullToRefresh";
 import ItemActionPopover from "../components/ItemActionPopover";
-import { formatItemLocationDisplay } from "../utils/customStacks";
+import {
+  formatItemLocationDisplay,
+  customStackGroupLetter,
+  resolveCustomStackLocation,
+  isCustomType as isCustomTypeName,
+} from "../utils/customStacks";
 import {
   Card,
   Text,
@@ -289,6 +294,7 @@ export default function InventoryListScreen({
   const [selectedReceiveOrder, setSelectedReceiveOrder] = useState(null);
   // Keep receive quantities out of React state so typing doesn't re-render the whole screen (prevents focus glitches).
   const lineReceiveQtysRef = useRef({});
+  const lineReceiveLocationsRef = useRef({});
   const [receiveDetailKey, setReceiveDetailKey] = useState(0);
   const [receiveSubmitting, setReceiveSubmitting] = useState(false);
   const [scrollOffset, setScrollOffset] = useState(initialScrollOffset || 0);
@@ -450,6 +456,7 @@ export default function InventoryListScreen({
     setReceivePoStep("list");
     setSelectedReceiveOrder(null);
     lineReceiveQtysRef.current = {};
+    lineReceiveLocationsRef.current = {};
     setReceiveDetailKey((k) => k + 1);
     onRefreshReceiveOrders?.(false);
   };
@@ -463,18 +470,26 @@ export default function InventoryListScreen({
     setReceivePoStep("list");
     setSelectedReceiveOrder(null);
     lineReceiveQtysRef.current = {};
+    lineReceiveLocationsRef.current = {};
     setReceiveDetailKey((k) => k + 1);
   };
 
   const selectOrderForReceive = (order) => {
     const init = {};
+    const locInit = {};
     for (const line of order.lines || []) {
       const itemId = String(line.itemId ?? line.item_id ?? "").trim();
       if (!itemId) continue;
       const remaining = lineRemainingQty(line);
       if (remaining > 0) init[itemId] = String(remaining);
+      const currentItem = inventory.find((i) => String(i.id) === String(itemId));
+      if (isCustomTypeName(getItemTypeForOrder(itemId))) {
+        const loc = String(currentItem?.location || "").trim();
+        locInit[itemId] = loc ? resolveCustomStackLocation(loc) : "";
+      }
     }
     lineReceiveQtysRef.current = init;
+    lineReceiveLocationsRef.current = locInit;
     // Force uncontrolled inputs to re-mount with new defaults.
     setReceiveDetailKey((k) => k + 1);
     setSelectedReceiveOrder(order);
@@ -517,7 +532,14 @@ export default function InventoryListScreen({
         const currentItem = inventory.find(
           (i) => String(i.id) === String(itemId),
         );
-        pending.push({ itemId, qty, currentItem });
+        let location;
+        if (isCustomTypeName(getItemTypeForOrder(itemId))) {
+          const locRaw = String(
+            lineReceiveLocationsRef.current[itemId] || "",
+          ).trim();
+          location = locRaw ? resolveCustomStackLocation(locRaw) : "";
+        }
+        pending.push({ itemId, qty, currentItem, location });
       }
       if (pending.length === 0) {
         closeReceivePoModal();
@@ -525,7 +547,7 @@ export default function InventoryListScreen({
       }
 
       const results = await Promise.all(
-        pending.map(async ({ itemId, qty, currentItem }) => {
+        pending.map(async ({ itemId, qty, currentItem, location }) => {
           const receiveResult = await OrderService.receiveOrderLine(
             selectedReceiveOrder.id,
             itemId,
@@ -537,12 +559,16 @@ export default function InventoryListScreen({
                 `Failed to record PO receive for ${getItemNameForOrder(itemId)}`,
             );
           }
+          const extras = {
+            ...(currentItem ? { currentItem } : {}),
+            ...(location !== undefined ? { location } : {}),
+          };
           const result = await InventoryService.updateQuantity(
             itemId,
             qty,
             actorName,
             "receiving",
-            currentItem ? { currentItem } : {},
+            extras,
           );
           if (!result.success) {
             throw new Error(
@@ -557,6 +583,7 @@ export default function InventoryListScreen({
             quantity: qty,
             newQuantity: result.item?.quantity,
             orderId: selectedReceiveOrder.id,
+            ...(location ? { location } : {}),
           });
           return qty;
         }),
@@ -1006,7 +1033,18 @@ export default function InventoryListScreen({
     });
 
     // Sort
-    if (listOrderMode === "trueOrder") {
+    if (bookFilter === "custom") {
+      filtered.sort((a, b) => {
+        const aLetter = customStackGroupLetter(a);
+        const bLetter = customStackGroupLetter(b);
+        const aKey = aLetter === "—" ? "ZZ" : aLetter;
+        const bKey = bLetter === "—" ? "ZZ" : bLetter;
+        if (aKey !== bKey) return aKey.localeCompare(bKey);
+        const aName = (a.name || "").toLowerCase();
+        const bName = (b.name || "").toLowerCase();
+        return aName.localeCompare(bName);
+      });
+    } else if (listOrderMode === "trueOrder") {
       filtered.sort((a, b) => {
         const aIsPaint = (a.type || "").toLowerCase() === "paint";
         const bIsPaint = (b.type || "").toLowerCase() === "paint";
@@ -1458,6 +1496,7 @@ export default function InventoryListScreen({
     setReceivePoStep("list");
     setSelectedReceiveOrder(null);
     lineReceiveQtysRef.current = {};
+    lineReceiveLocationsRef.current = {};
     setReceiveDetailKey((k) => k + 1);
   };
 
@@ -1477,6 +1516,7 @@ export default function InventoryListScreen({
       onRefreshReceiveOrders={onRefreshReceiveOrders}
       selectedReceiveOrder={selectedReceiveOrder}
       lineReceiveQtysRef={lineReceiveQtysRef}
+      lineReceiveLocationsRef={lineReceiveLocationsRef}
       detailResetKey={receiveDetailKey}
       getItemNameForOrder={getItemNameForOrder}
       getItemCodeForOrder={getItemCodeForOrder}
@@ -1550,7 +1590,7 @@ export default function InventoryListScreen({
     />
   );
 
-  const renderItem = ({ item }) => {
+  const renderItem = ({ item, index }) => {
     const isLowStock =
       (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
     const itemId = item.id?.toString() || "N/A";
@@ -1558,6 +1598,13 @@ export default function InventoryListScreen({
     const hasOpen = !!(orderInfo && orderInfo.quantity > 0);
     const isLate = !!(orderInfo && orderInfo.late);
     const isBackOrdered = !!(orderInfo && orderInfo.backOrdered);
+    const stackLetter = isCustomInventoryView
+      ? customStackGroupLetter(item)
+      : null;
+    const prevItem = filteredAndSortedInventory[index - 1];
+    const showStackHeader =
+      isCustomInventoryView &&
+      (!prevItem || customStackGroupLetter(prevItem) !== stackLetter);
 
     // Theme-aware low stock card style
     const lowStockCardStyle = isLowStock
@@ -1571,6 +1618,17 @@ export default function InventoryListScreen({
       : null;
 
     return (
+      <View>
+        {showStackHeader ? (
+          <Text
+            style={[
+              styles.stackSectionHeader,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            {stackLetter === "—" ? "No stack" : `Stack ${stackLetter}`}
+          </Text>
+        ) : null}
       <Card style={[styles.card, lowStockCardStyle]}>
         <Card.Content style={styles.itemCardContent}>
           <Pressable
@@ -1764,6 +1822,7 @@ export default function InventoryListScreen({
           </Pressable>
         </Card.Content>
       </Card>
+      </View>
     );
   };
 
@@ -2316,7 +2375,7 @@ export default function InventoryListScreen({
                           <View style={styles.tableHeaderTopRight}>
                             <Text style={styles.filterSummaryText}>
                               {bookFilter === "custom"
-                                ? "Custom"
+                                ? "Custom · Stacks A–Z"
                                 : listOrderMode === "trueOrder"
                                   ? "Stock - True order"
                                   : "Stock - Alphabetical"}
@@ -2513,15 +2572,51 @@ export default function InventoryListScreen({
                                 }}
                               >
                                 <DataTable style={styles.dataTable}>
-                                  {filteredAndSortedInventory.map((item) => {
+                                  {filteredAndSortedInventory.map((item, index) => {
                                   const isLowStock =
                                     (item.quantity || 0) <
                                     (item.minQuantity ?? minQuantity ?? 30);
                                   const isOutOfStock =
                                     (item.quantity || 0) === 0;
+                                  const stackLetter = isCustomInventoryView
+                                    ? customStackGroupLetter(item)
+                                    : null;
+                                  const prevItem =
+                                    filteredAndSortedInventory[index - 1];
+                                  const showStackHeader =
+                                    isCustomInventoryView &&
+                                    (!prevItem ||
+                                      customStackGroupLetter(prevItem) !==
+                                        stackLetter);
                                   return (
+                                    <React.Fragment key={item.id}>
+                                    {showStackHeader ? (
+                                      <DataTable.Row
+                                        style={styles.stackHeaderTableRow}
+                                      >
+                                        <DataTable.Cell
+                                          style={[
+                                            styles.tableCell,
+                                            { flex: 1 },
+                                          ]}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.stackSectionHeaderTable,
+                                              {
+                                                color:
+                                                  theme.colors.onSurfaceVariant,
+                                              },
+                                            ]}
+                                          >
+                                            {stackLetter === "—"
+                                              ? "No stack"
+                                              : `Stack ${stackLetter}`}
+                                          </Text>
+                                        </DataTable.Cell>
+                                      </DataTable.Row>
+                                    ) : null}
                                     <DataTable.Row
-                                      key={item.id}
                                       onPress={(e) => handleItemActivate(item, e)}
                                       style={
                                         isLowStock
@@ -2841,6 +2936,7 @@ export default function InventoryListScreen({
                                         })()}
                                       </DataTable.Cell>
                                     </DataTable.Row>
+                                    </React.Fragment>
                                   );
                                 })}
                               </DataTable>
@@ -3027,7 +3123,7 @@ export default function InventoryListScreen({
                   ? "Stock"
                   : "Custom"
                 : bookFilter === "custom"
-                  ? "Custom"
+                  ? "Custom · Stacks A–Z"
                   : listOrderMode === "trueOrder"
                     ? "Stock - True order"
                     : "Stock - Alphabetical"}
@@ -3514,7 +3610,7 @@ export default function InventoryListScreen({
                 ? "Stock"
                 : "Custom"
               : bookFilter === "custom"
-                ? "Custom"
+                ? "Custom · Stacks A–Z"
                 : listOrderMode === "trueOrder"
                   ? "Stock - True order"
                   : "Stock - Alphabetical"}
@@ -3923,6 +4019,23 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 12,
     elevation: 2,
+  },
+  stackSectionHeader: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  stackHeaderTableRow: {
+    minHeight: 36,
+  },
+  stackSectionHeaderTable: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
   },
   itemCardContent: {
     flexDirection: "column",

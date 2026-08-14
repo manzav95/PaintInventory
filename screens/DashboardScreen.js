@@ -30,6 +30,7 @@ import { getDayKey, formatDayHeader } from "../utils/transactionDayUtils";
 import {
   getHistoryActivityMs,
   getHistoryDayKey,
+  getHistorySortMs,
 } from "../utils/materialUsageDay";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
 import { useAppLayout } from "../utils/layout";
@@ -96,7 +97,7 @@ function logBelongsToUser(log, userName) {
 function sortLogsNewestFirst(logs, isOvertime = false) {
   return [...(Array.isArray(logs) ? logs : [])].sort(
     (a, b) =>
-      getHistoryActivityMs(b, isOvertime) - getHistoryActivityMs(a, isOvertime),
+      getHistorySortMs(b, isOvertime) - getHistorySortMs(a, isOvertime),
   );
 }
 

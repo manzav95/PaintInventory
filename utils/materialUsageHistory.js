@@ -1,3 +1,5 @@
+import { getHistorySortMs } from "./materialUsageDay";
+
 /**
  * Map a material_usage DB row into an audit-log-shaped event for the dashboard.
  */
@@ -36,9 +38,7 @@ export function mergeAuditAndMaterialUsage(auditLogs, materialUsageRows) {
   const usage = (Array.isArray(materialUsageRows) ? materialUsageRows : []).map(
     materialUsageToHistoryEvent,
   );
-  return [...audit, ...usage].sort((a, b) => {
-    const ta = a?.timestamp ? new Date(a.timestamp).getTime() : 0;
-    const tb = b?.timestamp ? new Date(b.timestamp).getTime() : 0;
-    return tb - ta;
-  });
+  return [...audit, ...usage].sort(
+    (a, b) => getHistorySortMs(b) - getHistorySortMs(a),
+  );
 }

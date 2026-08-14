@@ -20,6 +20,11 @@ import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import { AppBadge, AppEmptyState } from "./ui";
+import {
+  CUSTOM_STACK_OPTIONS,
+  isCustomType,
+  stackLetterFromLocation,
+} from "../utils/customStacks";
 
 const PANEL_WIDTH = 460;
 const PANEL_MAX_HEIGHT = 520;
@@ -139,6 +144,109 @@ const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   );
 });
 
+const ReceiveLineStackPicker = memo(function ReceiveLineStackPicker({
+  itemId,
+  initialValue,
+  onChange,
+}) {
+  const theme = useTheme();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(initialValue || "");
+
+  useEffect(() => {
+    setValue(initialValue || "");
+  }, [itemId, initialValue]);
+
+  const letter = value ? stackLetterFromLocation(value) : "";
+
+  return (
+    <View style={styles.stackField}>
+      <Text
+        style={[styles.stackLabel, { color: theme.colors.onSurfaceVariant }]}
+      >
+        Place in stack (A–Z)
+      </Text>
+      <AppButton
+        mode="outlined"
+        compact
+        onPress={() => setOpen((v) => !v)}
+        icon={open ? "chevron-up" : "chevron-down"}
+        contentStyle={styles.stackButtonContent}
+      >
+        {letter || "None"}
+      </AppButton>
+      {open ? (
+        <View
+          style={[
+            styles.stackGrid,
+            {
+              borderColor: theme.colors.outlineVariant,
+              backgroundColor: nestedSurfaceColor(theme),
+            },
+          ]}
+        >
+          <Pressable
+            onPress={() => {
+              setValue("");
+              onChange(itemId, "");
+              setOpen(false);
+            }}
+            style={[
+              styles.stackNoneCell,
+              !value && { backgroundColor: theme.colors.primary },
+            ]}
+          >
+            <Text
+              style={[
+                styles.stackCellText,
+                {
+                  color: !value
+                    ? theme.colors.onPrimary
+                    : theme.colors.onSurface,
+                },
+              ]}
+            >
+              None
+            </Text>
+          </Pressable>
+          {CUSTOM_STACK_OPTIONS.map((o) => {
+            const selected = value === o.value;
+            return (
+              <Pressable
+                key={o.value}
+                onPress={() => {
+                  setValue(o.value);
+                  onChange(itemId, o.value);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.stackCell,
+                  selected && {
+                    backgroundColor: theme.colors.primary,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.stackCellText,
+                    {
+                      color: selected
+                        ? theme.colors.onPrimary
+                        : theme.colors.onSurface,
+                    },
+                  ]}
+                >
+                  {o.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+});
+
 export default function ReceivePoModal({
   visible,
   actorName,
@@ -154,6 +262,7 @@ export default function ReceivePoModal({
   onRefreshReceiveOrders,
   selectedReceiveOrder,
   lineReceiveQtysRef,
+  lineReceiveLocationsRef,
   detailResetKey,
   getItemNameForOrder,
   getItemCodeForOrder,
@@ -245,6 +354,12 @@ export default function ReceivePoModal({
 
   const handleQtyChange = (itemId, cleaned) => {
     lineReceiveQtysRef.current[itemId] = cleaned;
+  };
+
+  const handleLocationChange = (itemId, loc) => {
+    if (lineReceiveLocationsRef?.current) {
+      lineReceiveLocationsRef.current[itemId] = loc;
+    }
   };
 
   const panelMaxHeight = Math.min(
@@ -581,6 +696,17 @@ export default function ReceivePoModal({
                               onQtyChange={handleQtyChange}
                             />
                           ) : null}
+                          {remaining > 0 &&
+                          isCustomType(getItemTypeForOrder?.(itemId)) ? (
+                            <ReceiveLineStackPicker
+                              itemId={itemId}
+                              initialValue={
+                                lineReceiveLocationsRef?.current?.[itemId] ||
+                                ""
+                              }
+                              onChange={handleLocationChange}
+                            />
+                          ) : null}
                         </View>
                       );
                     },
@@ -786,7 +912,45 @@ const styles = StyleSheet.create({
     marginTop: space[1],
   },
   receiveQtyInput: {
-    marginTop: space[1],
-    backgroundColor: "transparent",
+    marginTop: space[2],
+  },
+  stackField: {
+    marginTop: space[2],
+    gap: space[1],
+  },
+  stackLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  stackButtonContent: {
+    flexDirection: "row-reverse",
+    justifyContent: "space-between",
+  },
+  stackGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    padding: 6,
+    gap: 4,
+  },
+  stackCell: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stackCellText: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  stackNoneCell: {
+    height: 32,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

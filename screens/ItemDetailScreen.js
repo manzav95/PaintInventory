@@ -41,7 +41,6 @@ import { resolveUnitPrice } from "../utils/pricing";
 import { colors, fontFamily } from "../theme/tokens";
 import {
   CUSTOM_TYPES,
-  DEFAULT_CUSTOM_STACK,
   CUSTOM_STACK_OPTIONS,
   resolveCustomStackLocation,
 } from "../utils/customStacks";
@@ -150,7 +149,7 @@ export default function ItemDetailScreen({
   const [location, setLocation] = useState(() => {
     const loc = item?.location || "";
     if (CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase())) {
-      return resolveCustomStackLocation(loc);
+      return String(loc).trim() ? resolveCustomStackLocation(loc) : "";
     }
     return loc;
   });
@@ -222,7 +221,7 @@ export default function ItemDetailScreen({
   useEffect(() => {
     const loc = item?.location || "";
     if (CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase())) {
-      setLocation(resolveCustomStackLocation(loc));
+      setLocation(String(loc).trim() ? resolveCustomStackLocation(loc) : "");
     } else {
       setLocation(loc);
     }
@@ -274,7 +273,10 @@ export default function ItemDetailScreen({
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type)) {
-      setLocation((prev) => resolveCustomStackLocation(prev));
+      setLocation((prev) => {
+        const raw = String(prev || "").trim();
+        return raw ? resolveCustomStackLocation(raw) : "";
+      });
     }
   }, [type]);
 
@@ -419,7 +421,9 @@ export default function ItemDetailScreen({
     }
 
     const locationVal = CUSTOM_TYPES.includes(typeVal)
-      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      ? String(location || "").trim()
+        ? resolveCustomStackLocation(location)
+        : ""
       : location;
 
     const updatedItem = {
@@ -493,10 +497,12 @@ export default function ItemDetailScreen({
     type ? (TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type) : "—";
 
   const locationOptions = isCustomType
-    ? CUSTOM_STACK_OPTIONS
+    ? [{ label: "None", value: "" }, ...CUSTOM_STACK_OPTIONS]
     : CONTAINER_OPTIONS;
   const stackOrLocation = isCustomType
-    ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+    ? String(location || "").trim()
+      ? resolveCustomStackLocation(location)
+      : ""
     : location;
   const containerDisplay = stackOrLocation
     ? locationOptions.find((o) => o.value === stackOrLocation)?.label ??

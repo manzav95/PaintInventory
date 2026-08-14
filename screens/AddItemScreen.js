@@ -39,7 +39,6 @@ import {
 } from "../utils/pricing";
 import {
   CUSTOM_TYPES,
-  DEFAULT_CUSTOM_STACK,
   CUSTOM_STACK_OPTIONS,
   resolveCustomStackLocation,
 } from "../utils/customStacks";
@@ -157,12 +156,15 @@ export default function AddItemScreen({
   const inputStyle = isWideDesktop ? styles.inputDesktop : styles.input;
   const showFlorenzaCatalyst = textMentionsFlorenza(name, colorLabel);
   const locationOptions = isCustomType
-    ? CUSTOM_STACK_OPTIONS
+    ? [{ label: "None", value: "" }, ...CUSTOM_STACK_OPTIONS]
     : CONTAINER_OPTIONS;
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type)) {
-      setLocation((prev) => resolveCustomStackLocation(prev));
+      setLocation((prev) => {
+        const raw = String(prev || "").trim();
+        return raw ? resolveCustomStackLocation(raw) : "";
+      });
     }
   }, [type]);
 
@@ -183,7 +185,10 @@ export default function AddItemScreen({
     setFieldErrors((e) => ({ ...e, name: false }));
     if (nameImpliesCustomPaint(text)) {
       setType("custom_paint");
-      setLocation((prev) => resolveCustomStackLocation(prev || DEFAULT_CUSTOM_STACK));
+      setLocation((prev) => {
+        const raw = String(prev || "").trim();
+        return raw ? resolveCustomStackLocation(raw) : "";
+      });
     }
   };
 
@@ -259,7 +264,9 @@ export default function AddItemScreen({
       typeVal = "custom_paint";
     }
     const locationVal = CUSTOM_TYPES.includes(typeVal)
-      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      ? String(location || "").trim()
+        ? resolveCustomStackLocation(location)
+        : ""
       : location.trim();
     const hexVal = normalizeHex(hexColor);
     const rexRaw = rex.trim();
@@ -432,10 +439,12 @@ export default function AddItemScreen({
   };
 
   const renderContainerField = () => {
-    const fieldLabel = isCustomType ? "Stack (Custom)" : "Container";
-    const placeholder = isCustomType ? "Select stack" : "Select container";
+    const fieldLabel = isCustomType ? "Stack (optional)" : "Container";
+    const placeholder = isCustomType ? "None" : "Select container";
     const displayValue = isCustomType
-      ? resolveCustomStackLocation(location || DEFAULT_CUSTOM_STACK)
+      ? String(location || "").trim()
+        ? resolveCustomStackLocation(location)
+        : ""
       : location;
     if (isWeb && isWideDesktop) {
       return (

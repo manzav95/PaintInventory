@@ -377,10 +377,9 @@ class InventoryService {
 
       if (
         extras &&
-        extras.location != null &&
-        String(extras.location).trim() !== ''
+        Object.prototype.hasOwnProperty.call(extras, 'location')
       ) {
-        updateData.location = String(extras.location).trim();
+        updateData.location = String(extras.location ?? '').trim();
       }
 
       // Custom colors: no stack when empty.

@@ -32,6 +32,17 @@ export function stackLetterFromLocation(location) {
   return m ? m[1] : "A";
 }
 
+/** A–Z group key for inventory lists. Empty stack sorts last as "—". */
+export function customStackGroupLetter(itemOrLocation) {
+  const loc =
+    itemOrLocation != null && typeof itemOrLocation === "object"
+      ? itemOrLocation.location
+      : itemOrLocation;
+  const locStr = loc != null ? String(loc).trim() : "";
+  if (!locStr) return "—";
+  return stackLetterFromLocation(locStr);
+}
+
 /** Inventory card / list display: Custom-A */
 export function formatCustomStackDisplay(location) {
   return `Custom-${stackLetterFromLocation(location)}`;
