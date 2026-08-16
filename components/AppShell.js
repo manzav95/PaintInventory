@@ -188,7 +188,9 @@ export default function AppShell({
           </Animated.View>
         </View>
       ) : null}
-      <View style={styles.topActionSlot}>{notifications}</View>
+      {notifications ? (
+        <View style={styles.topActionSlot}>{notifications}</View>
+      ) : null}
       <View style={styles.topActionSlot}>
         <UserMenuAvatar
           userName={userName}

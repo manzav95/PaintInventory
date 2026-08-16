@@ -85,8 +85,8 @@ export default function LoginScreen({ onLogin }) {
     };
   }, []);
 
-  const finishLogin = (userName) => {
-    onLogin(userName);
+  const finishLogin = (userName, role) => {
+    onLogin(userName, role);
   };
 
   const changingPassword = !!pendingUser;
@@ -195,7 +195,7 @@ export default function LoginScreen({ onLogin }) {
         setAdminGate(false);
         return;
       }
-      finishLogin(result.user.user_name);
+      finishLogin(result.user.user_name, result.user.role);
     } catch (e) {
       setShakeTick((n) => n + 1);
       showToast({
@@ -250,7 +250,7 @@ export default function LoginScreen({ onLogin }) {
         title: "Password updated",
         message: "You can use your new password next time.",
       });
-      finishLogin(name);
+      finishLogin(name, pendingUser?.role);
     } catch (e) {
       setShakeTick((n) => n + 1);
       showToast({

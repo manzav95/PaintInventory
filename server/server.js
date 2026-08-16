@@ -630,6 +630,19 @@ app.post('/api/users/change-password', async (req, res) => {
   }
 });
 
+app.post('/api/users/:userName/role', async (req, res) => {
+  try {
+    const result = await db.updateAppUserRole(req.params.userName, req.body?.role);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to update role' });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
 app.post('/api/users/:userName/reset-password', async (req, res) => {
   try {
     const result = await db.resetAppUserPassword(req.params.userName);
@@ -1050,9 +1063,30 @@ app.get('/', (req, res) => {
   });
 });
 
+function readClientAppBuild() {
+  try {
+    const filePath = path.join(__dirname, '..', 'version.js');
+    const txt = fs.readFileSync(filePath, 'utf8');
+    const m = txt.match(/build:\s*(\d+)/);
+    const n = m ? parseInt(m[1], 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    build: readClientAppBuild(),
+  });
+});
+
+app.get('/api/app-version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ build: readClientAppBuild() });
 });
 
 // Helper function to generate Excel file

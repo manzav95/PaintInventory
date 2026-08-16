@@ -690,7 +690,17 @@ export default function ItemDetailScreen({
 
   const onOrderLine =
     orderInfo && orderInfo.quantity > 0 ? (
-      <Text style={[styles.onOrderText, { color: theme.colors.primary }]}>
+      <Text
+        style={[
+          styles.onOrderText,
+          {
+            color: theme.dark
+              ? colors.brand.accentBright
+              : colors.brand.accent,
+            fontWeight: "700",
+          },
+        ]}
+      >
         On order: {orderInfo.quantity} gal
         {orderInfo.expectedDate
           ? ` · Expected ~${new Date(orderInfo.expectedDate).toLocaleDateString("en-US", {

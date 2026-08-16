@@ -199,6 +199,9 @@ export default function SettingsScreen({
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [newUserName, setNewUserName] = useState("");
+  const [newUserRole, setNewUserRole] = useState("user");
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+  const [editRoleUser, setEditRoleUser] = useState(null);
   const [creatingUser, setCreatingUser] = useState(false);
 
   // Desktop uses a persistent sidebar; land on a content panel (not a hub).
@@ -391,11 +394,13 @@ export default function SettingsScreen({
     try {
       const result = await UserService.create({
         userName: name,
+        role: newUserRole === "sales" ? "sales" : "user",
       });
       if (!result?.success) {
         throw new Error(result?.error || "Could not create user");
       }
       setNewUserName("");
+      setNewUserRole("user");
       showToast({
         title: "User created",
         message: `${name} signs in with password "password", then must set a new one.`,
@@ -409,6 +414,34 @@ export default function SettingsScreen({
       });
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const accountTypeLabel = (role) => {
+    const r = String(role || "").toLowerCase();
+    if (r === "sales") return "Sales";
+    if (r === "admin") return "Admin";
+    return "Standard";
+  };
+
+  const handleChangeUserRole = async (name, role) => {
+    setEditRoleUser(null);
+    try {
+      const result = await UserService.updateRole(name, role);
+      if (!result?.success) {
+        throw new Error(result?.error || "Could not update account type");
+      }
+      await loadUsers();
+      showToast({
+        title: "Account type updated",
+        message: `${name} is now ${accountTypeLabel(role)}. They will see the new access after they sign in again.`,
+      });
+    } catch (e) {
+      showToast({
+        type: "error",
+        title: "Could not update account type",
+        message: e?.message || "Try again.",
+      });
     }
   };
 
@@ -713,9 +746,12 @@ export default function SettingsScreen({
           tone="muted"
           style={styles.settingDescription}
         >
-          Create named accounts. Default password is "password"; on first login
-          they must choose a new one. Reset sets it back to "password" and
-          requires a change on next login.
+          Create named accounts. New accounts start with password "password"
+          and must choose a new one on first login. Passwords are stored as
+          bcrypt hashes only — they cannot be viewed. Reset sets the password
+          back to "password" and requires a change on next login. Standard
+          accounts match today's warehouse users. Sales accounts can only view
+          inventory and the color book.
         </AppText>
         <TextInput
           label="New user name"
@@ -726,6 +762,37 @@ export default function SettingsScreen({
           autoCorrect={false}
           style={styles.userInput}
         />
+        <Menu
+          visible={roleMenuOpen}
+          onDismiss={() => setRoleMenuOpen(false)}
+          anchor={
+            <Pressable onPress={() => setRoleMenuOpen(true)}>
+              <TextInput
+                label="Account type"
+                value={newUserRole === "sales" ? "Sales" : "Standard"}
+                mode="outlined"
+                editable={false}
+                style={[styles.userInput, { pointerEvents: "none" }]}
+                right={<TextInput.Icon icon="menu-down" />}
+              />
+            </Pressable>
+          }
+        >
+          <Menu.Item
+            title="Standard"
+            onPress={() => {
+              setNewUserRole("user");
+              setRoleMenuOpen(false);
+            }}
+          />
+          <Menu.Item
+            title="Sales"
+            onPress={() => {
+              setNewUserRole("sales");
+              setRoleMenuOpen(false);
+            }}
+          />
+        </Menu>
         <AppButton
           mode="contained"
           onPress={handleCreateUser}
@@ -744,20 +811,49 @@ export default function SettingsScreen({
           </AppText>
         ) : (
           <View style={styles.userList}>
-            {users.map((u) => (
+            {users.map((u) => {
+              const roleKey = String(u.role || "").toLowerCase();
+              const isLockedRole = roleKey === "admin";
+              return (
               <View key={u.id || u.user_name} style={styles.userRow}>
                 <View style={styles.userRowInfo}>
                   <AppText variant="bodyStrong">{u.user_name}</AppText>
+                  {isLockedRole ? (
+                    <AppText variant="caption" tone="muted">
+                      Admin
+                    </AppText>
+                  ) : (
+                    <Menu
+                      visible={editRoleUser === u.user_name}
+                      onDismiss={() => setEditRoleUser(null)}
+                      anchor={
+                        <Pressable onPress={() => setEditRoleUser(u.user_name)}>
+                          <AppText variant="caption" tone="muted">
+                            {accountTypeLabel(u.role)} · change
+                          </AppText>
+                        </Pressable>
+                      }
+                    >
+                      <Menu.Item
+                        title="Standard"
+                        onPress={() => handleChangeUserRole(u.user_name, "user")}
+                      />
+                      <Menu.Item
+                        title="Sales"
+                        onPress={() =>
+                          handleChangeUserRole(u.user_name, "sales")
+                        }
+                      />
+                    </Menu>
+                  )}
                   <AppText
                     variant="caption"
                     tone="muted"
                     style={styles.userPasswordLine}
                   >
-                    Password:{" "}
-                    {u.password_plain
-                      ? String(u.password_plain)
-                      : "— (unknown until next change)"}
-                    {u.must_change_password ? " · must change" : ""}
+                    {u.must_change_password
+                      ? "Must change password on next login"
+                      : "Password set"}
                   </AppText>
                 </View>
                 <View style={styles.userRowActions}>
@@ -778,7 +874,8 @@ export default function SettingsScreen({
                   </AppButton>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </View>
         )}
       </AppSurface>

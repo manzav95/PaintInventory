@@ -1,4 +1,8 @@
 const { Pool } = require("pg");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+
+const BCRYPT_ROUNDS = 12;
 
 // Use DATABASE_URL from env (Supabase connection string). Never commit the real URL.
 const connectionString = process.env.DATABASE_URL;
@@ -435,7 +439,6 @@ class Database {
         id SERIAL PRIMARY KEY,
         user_name TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
-        password_plain TEXT,
         role TEXT NOT NULL DEFAULT 'user',
         must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT NOW()
@@ -445,18 +448,13 @@ class Database {
       DO $$ BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns
-          WHERE table_name = 'app_users' AND column_name = 'password_plain'
-        ) THEN
-          ALTER TABLE app_users ADD COLUMN password_plain TEXT;
-        END IF;
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns
           WHERE table_name = 'app_users' AND column_name = 'must_change_password'
         ) THEN
           ALTER TABLE app_users ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
         END IF;
       END $$
     `);
+    await this._migrateAppUserPasswordHashes(client);
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_app_users_user_name ON app_users (user_name)
     `);
@@ -1089,12 +1087,69 @@ class Database {
     return result.rows;
   }
 
-  _hashPassword(password) {
-    const crypto = require("crypto");
+  _isBcryptHash(stored) {
+    return typeof stored === "string" && /^\$2[aby]\$/.test(stored);
+  }
+
+  _legacySha256(password) {
     return crypto
       .createHash("sha256")
       .update(String(password ?? ""))
       .digest("hex");
+  }
+
+  async _hashPassword(password) {
+    return bcrypt.hash(String(password ?? ""), BCRYPT_ROUNDS);
+  }
+
+  async _verifyPassword(password, storedHash) {
+    const pin = String(password ?? "");
+    const stored = String(storedHash ?? "");
+    if (this._isBcryptHash(stored)) {
+      return bcrypt.compare(pin, stored);
+    }
+    return stored.length > 0 && stored === this._legacySha256(pin);
+  }
+
+  _publicAppUser(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      user_name: row.user_name,
+      role: row.role,
+      must_change_password: !!row.must_change_password,
+      created_at: row.created_at,
+    };
+  }
+
+  /**
+   * Re-hash any leftover plaintext, then drop password_plain so it cannot be
+   * read from the database or the API.
+   */
+  async _migrateAppUserPasswordHashes(client) {
+    const col = await client.query(
+      `SELECT 1 FROM information_schema.columns
+       WHERE table_name = 'app_users' AND column_name = 'password_plain'`,
+    );
+    if (col.rowCount) {
+      const rows = await client.query(
+        `SELECT id, password_plain, password_hash FROM app_users`,
+      );
+      for (const row of rows.rows) {
+        const plain =
+          row.password_plain != null ? String(row.password_plain).trim() : "";
+        if (!plain) continue;
+        const nextHash = await this._hashPassword(plain);
+        await client.query(
+          `UPDATE app_users SET password_hash = $2 WHERE id = $1`,
+          [row.id, nextHash],
+        );
+      }
+      await client.query(
+        `ALTER TABLE app_users DROP COLUMN IF EXISTS password_plain`,
+      );
+      console.log("Removed plaintext app user passwords");
+    }
   }
 
   /** Default password for newly created accounts (forced change on first login). */
@@ -1102,11 +1157,11 @@ class Database {
 
   async listAppUsers() {
     const result = await this.pool.query(
-      `SELECT id, user_name, role, password_plain, must_change_password, created_at
+      `SELECT id, user_name, role, must_change_password, created_at
        FROM app_users
        ORDER BY LOWER(user_name) ASC`,
     );
-    return result.rows;
+    return result.rows.map((row) => this._publicAppUser(row));
   }
 
   async createAppUser(userName, password, role = "user") {
@@ -1117,15 +1172,16 @@ class Database {
     if (pin.length < 3) {
       return { success: false, error: "Password must be at least 3 characters" };
     }
-    const safeRole = role === "admin" ? "admin" : "user";
+    const safeRole = role === "sales" ? "sales" : "user";
     try {
+      const passwordHash = await this._hashPassword(pin);
       const result = await this.pool.query(
-        `INSERT INTO app_users (user_name, password_hash, password_plain, role, must_change_password)
-         VALUES ($1, $2, $3, $4, TRUE)
-         RETURNING id, user_name, role, password_plain, must_change_password, created_at`,
-        [name, this._hashPassword(pin), pin, safeRole],
+        `INSERT INTO app_users (user_name, password_hash, role, must_change_password)
+         VALUES ($1, $2, $3, TRUE)
+         RETURNING id, user_name, role, must_change_password, created_at`,
+        [name, passwordHash, safeRole],
       );
-      return { success: true, user: result.rows[0] };
+      return { success: true, user: this._publicAppUser(result.rows[0]) };
     } catch (e) {
       if (e && e.code === "23505") {
         return { success: false, error: "User already exists" };
@@ -1160,8 +1216,16 @@ class Database {
     );
     const row = result.rows[0];
     if (!row) return { success: false, error: "Invalid name or password" };
-    if (row.password_hash !== this._hashPassword(pin)) {
+    const ok = await this._verifyPassword(pin, row.password_hash);
+    if (!ok) {
       return { success: false, error: "Invalid name or password" };
+    }
+    if (!this._isBcryptHash(row.password_hash)) {
+      const upgraded = await this._hashPassword(pin);
+      await this.pool.query(
+        `UPDATE app_users SET password_hash = $2 WHERE id = $1`,
+        [row.id, upgraded],
+      );
     }
     return {
       success: true,
@@ -1190,19 +1254,19 @@ class Database {
     if (name.toLowerCase() === "admin123") {
       return { success: false, error: "Cannot change the legacy admin password here" };
     }
+    const passwordHash = await this._hashPassword(pin);
     const result = await this.pool.query(
       `UPDATE app_users
        SET password_hash = $2,
-           password_plain = $3,
            must_change_password = FALSE
        WHERE LOWER(user_name) = LOWER($1)
-       RETURNING id, user_name, role, password_plain, must_change_password`,
-      [name, this._hashPassword(pin), pin],
+       RETURNING id, user_name, role, must_change_password, created_at`,
+      [name, passwordHash],
     );
     if (!result.rows[0]) {
       return { success: false, error: "User not found" };
     }
-    return { success: true, user: result.rows[0] };
+    return { success: true, user: this._publicAppUser(result.rows[0]) };
   }
 
   /** Admin reset: back to default "password" and force change on next login. */
@@ -1213,19 +1277,39 @@ class Database {
       return { success: false, error: "Cannot reset the legacy admin password here" };
     }
     const pin = Database.DEFAULT_APP_USER_PASSWORD;
+    const passwordHash = await this._hashPassword(pin);
     const result = await this.pool.query(
       `UPDATE app_users
        SET password_hash = $2,
-           password_plain = $3,
            must_change_password = TRUE
        WHERE LOWER(user_name) = LOWER($1)
-       RETURNING id, user_name, role, password_plain, must_change_password`,
-      [name, this._hashPassword(pin), pin],
+       RETURNING id, user_name, role, must_change_password, created_at`,
+      [name, passwordHash],
     );
     if (!result.rows[0]) {
       return { success: false, error: "User not found" };
     }
-    return { success: true, user: result.rows[0] };
+    return { success: true, user: this._publicAppUser(result.rows[0]) };
+  }
+
+  async updateAppUserRole(userName, role) {
+    const name = String(userName ?? "").trim();
+    if (!name) return { success: false, error: "userName required" };
+    if (name.toLowerCase() === "admin123") {
+      return { success: false, error: "Cannot change the admin account type" };
+    }
+    const safeRole = role === "sales" ? "sales" : "user";
+    const result = await this.pool.query(
+      `UPDATE app_users
+       SET role = $2
+       WHERE LOWER(user_name) = LOWER($1)
+       RETURNING id, user_name, role, must_change_password, created_at`,
+      [name, safeRole],
+    );
+    if (!result.rows[0]) {
+      return { success: false, error: "User not found" };
+    }
+    return { success: true, user: this._publicAppUser(result.rows[0]) };
   }
 
   async deleteAppUser(userName) {

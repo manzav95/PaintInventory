@@ -48,6 +48,16 @@ class UserService {
     });
   }
 
+  async updateRole(userName, role) {
+    return _fetch(
+      `/api/users/${encodeURIComponent(userName)}/role`,
+      {
+        method: "POST",
+        body: JSON.stringify({ role }),
+      },
+    );
+  }
+
   async resetPassword(userName) {
     return _fetch(
       `/api/users/${encodeURIComponent(userName)}/reset-password`,

@@ -53,7 +53,13 @@ import {
   recordUserActivity,
   clearUserActivity,
   isAdminUser as isAdminAccount,
+  isSalesRole,
 } from './utils/idleSession';
+import UpdateRequiredModal from './components/UpdateRequiredModal';
+import {
+  getLocalAppBuild,
+  fetchRemoteAppBuild,
+} from './utils/appVersion';
 import useIdleLogout from './utils/useIdleLogout';
 import LoginLogService from './services/loginLogService';
 
@@ -78,7 +84,10 @@ export default function App() {
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const [materialUsageOvertime, setMaterialUsageOvertime] = useState(false);
   const [userName, setUserName] = useState(null);
+  const [userRole, setUserRole] = useState('user');
+  const [updateRequired, setUpdateRequired] = useState(false);
   const isAdminUser = isAdminAccount(userName);
+  const isSales = isSalesRole(userRole) && !isAdminUser;
   /** Admin can preview the standard-user UI without signing out. */
   const [previewStandardView, setPreviewStandardView] = useState(false);
   const isAdmin = isAdminUser && !previewStandardView;
@@ -131,6 +140,9 @@ export default function App() {
 
   const navigateTo = (screen, options = {}) => {
     setNavDrawerOpen(false);
+    if (isSales && screen !== 'list' && screen !== 'settings' && screen !== 'login') {
+      return;
+    }
     if (screen === 'reports' && !isAdmin) {
       return;
     }
@@ -206,6 +218,13 @@ export default function App() {
       setCurrentScreen('home');
     }
   }, [currentScreen, userName, isAdmin]);
+
+  useEffect(() => {
+    if (!isSales || !userName) return;
+    if (currentScreen !== 'list' && currentScreen !== 'settings') {
+      setCurrentScreen('list');
+    }
+  }, [isSales, userName, currentScreen]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && typeof document !== 'undefined') {
@@ -332,14 +351,44 @@ export default function App() {
     }
   };
 
+  const persistRole = async (name, role) => {
+    const storedRole = isAdminAccount(name)
+      ? 'admin'
+      : isSalesRole(role)
+        ? 'sales'
+        : 'user';
+    setUserRole(storedRole);
+    await AsyncStorage.setItem('@inventory_user_role', storedRole);
+  };
+
+  const checkAppVersion = useCallback(async () => {
+    try {
+      const remote = await fetchRemoteAppBuild();
+      const local = getLocalAppBuild();
+      if (remote > 0 && local > 0 && remote > local) {
+        setUpdateRequired(true);
+      }
+    } catch {
+      // Offline / API down: do not block the session.
+    }
+  }, []);
+
   const loadUser = async () => {
     try {
       const stored = await AsyncStorage.getItem('@inventory_user_name');
+      const storedRole = await AsyncStorage.getItem('@inventory_user_role');
       if (stored) {
         // Persist session across refresh; only Sign out clears login.
         await recordUserActivity();
         idleLogoutTriggeredRef.current = false;
         setUserName(stored);
+        setUserRole(
+          isAdminAccount(stored)
+            ? 'admin'
+            : isSalesRole(storedRole)
+              ? 'sales'
+              : 'user',
+        );
         setCurrentScreen(isAdminAccount(stored) ? 'home' : 'list');
       } else {
         setCurrentScreen('login');
@@ -350,10 +399,11 @@ export default function App() {
     }
   };
 
-  const handleLogin = async (name) => {
+  const handleLogin = async (name, role) => {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     await AsyncStorage.setItem('@inventory_user_name', trimmed);
+    await persistRole(trimmed, role);
     await recordUserActivity();
     LoginLogService.recordLogin(trimmed).catch(() => {});
     idleLogoutTriggeredRef.current = false;
@@ -364,9 +414,11 @@ export default function App() {
 
   const handleSwitchUser = async () => {
     await AsyncStorage.removeItem('@inventory_user_name');
+    await AsyncStorage.removeItem('@inventory_user_role');
     await clearUserActivity();
     setPreviewStandardView(false);
     setUserName(null);
+    setUserRole('user');
     setSelectedItem(null);
     setPreviousScreen('home');
     setMaterialUsageVisited(false);
@@ -377,8 +429,10 @@ export default function App() {
     if (idleLogoutTriggeredRef.current) return;
     idleLogoutTriggeredRef.current = true;
     await AsyncStorage.removeItem('@inventory_user_name');
+    await AsyncStorage.removeItem('@inventory_user_role');
     await clearUserActivity();
     setUserName(null);
+    setUserRole('user');
     setSelectedItem(null);
     setPreviousScreen('home');
     setMaterialUsageVisited(false);
@@ -493,8 +547,28 @@ export default function App() {
     refreshAuditLogs(false);
   }, [userName, refreshReceiveOrders, refreshAuditLogs]);
 
+  useEffect(() => {
+    checkAppVersion();
+    const id = setInterval(checkAppVersion, 45000);
+    const onFocus = () => {
+      checkAppVersion();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onFocus);
+      document.addEventListener?.('visibilitychange', onFocus);
+    }
+    return () => {
+      clearInterval(id);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener?.('visibilitychange', onFocus);
+      }
+    };
+  }, [checkAppVersion]);
+
   const loadInventory = async (showLoading = false, { refreshCaches = false } = {}) => {
     try {
+      checkAppVersion();
       if (showLoading) {
         setIsRefreshing(true);
       }
@@ -1388,6 +1462,7 @@ export default function App() {
             inventory={inventory}
             minQuantity={30}
             isAdmin={isAdmin}
+            isSales={isSales}
             onOrderSummary={onOrderSummary}
             onRefreshOnOrderSummary={async () => {
               try {
@@ -1417,6 +1492,7 @@ export default function App() {
             initialScrollOffset={inventoryViewState.scrollOffset}
             onViewStateChange={(state) => setInventoryViewState(state)}
             onItemSelect={(item) => {
+              if (isSales) return;
               setPreviousScreen('list');
               setSelectedItem(item);
               if (isAdmin) {
@@ -1426,6 +1502,7 @@ export default function App() {
               }
             }}
             onViewItemHistory={(item) => {
+              if (isSales) return;
               setPreviousScreen('list');
               setSelectedItem(item);
               setCurrentScreen('itemHistory');
@@ -1435,11 +1512,14 @@ export default function App() {
               setSelectedItem(item);
               setCurrentScreen('detail');
             }}
-            onScanCode={(code) => {
-              // Remember that scan came from the list, so cancel / completion returns here
-              setPreviousScreen('list');
-              handleScanResult(code);
-            }}
+            onScanCode={
+              isSales
+                ? undefined
+                : (code) => {
+                    setPreviousScreen('list');
+                    handleScanResult(code);
+                  }
+            }
             actorName={actorName}
             onBack={() => navigateTo(embeddedInShell ? 'home' : 'home')}
           />
@@ -1511,7 +1591,11 @@ export default function App() {
         return (
           <SettingsScreen
             embeddedInShell={embeddedInShell}
-            onBack={() => navigateTo(embeddedInShell ? 'home' : previousScreen || 'home')}
+            onBack={() =>
+              navigateTo(
+                isSales ? 'list' : embeddedInShell ? 'home' : previousScreen || 'home',
+              )
+            }
             userName={actorName}
             isDarkMode={isDarkMode}
             onToggleDarkMode={toggleDarkMode}
@@ -1533,7 +1617,7 @@ export default function App() {
   const isHomeScreen = currentScreen === 'home';
   const isMaterialUsageScreen = currentScreen === 'materialUsage';
   const dashboardKeepAlive =
-    userName && embeddedInShell ? (
+    userName && embeddedInShell && !isSales ? (
       <KeepAlivePane active={isHomeScreen}>
         <DashboardScreen
           inventory={inventory}
@@ -1687,6 +1771,7 @@ export default function App() {
           });
         }}
         notifications={
+          isSales ? null : (
           <NotificationsBell
             inventory={inventory}
             inventoryLoaded={inventoryLoaded}
@@ -1719,12 +1804,14 @@ export default function App() {
             }}
             onOpenWasteTracking={() => navigateTo('wasteTracking')}
           />
+          )
         }
         sidebar={
           <AppSidebar
             currentScreen={currentScreen}
             ordersInitialFilter={ordersInitialFilter}
             isAdmin={isAdmin}
+            isSales={isSales}
             inDrawer={!showPersistentSidebar}
             onNavigate={navigateTo}
             onAddManual={
@@ -1735,7 +1822,7 @@ export default function App() {
                   }
                 : undefined
             }
-            showCheckInOutNav={showCheckInOutNav}
+            showCheckInOutNav={showCheckInOutNav && !isSales}
           />
         }
       >
@@ -1769,6 +1856,7 @@ export default function App() {
         </FadeOverlay>
         <ToastHost />
         <ConfirmHost />
+        <UpdateRequiredModal visible={updateRequired} />
         <Modal
           visible={showAdminItemDialog}
           transparent

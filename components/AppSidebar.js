@@ -63,6 +63,7 @@ export default function AppSidebar({
   currentScreen,
   ordersInitialFilter,
   isAdmin,
+  isSales = false,
   onNavigate,
   onAddManual,
   showCheckInOutNav = true,
@@ -87,13 +88,15 @@ export default function AppSidebar({
       >
         Operations
       </Text>
-      <NavButton
-        label="Dashboard"
-        icon="view-dashboard"
-        active={currentScreen === "home"}
-        onPress={() => onNavigate("home")}
-      />
-      {showCheckInOutNav && (
+      {!isSales ? (
+        <NavButton
+          label="Dashboard"
+          icon="view-dashboard"
+          active={currentScreen === "home"}
+          onPress={() => onNavigate("home")}
+        />
+      ) : null}
+      {showCheckInOutNav && !isSales && (
         <NavButton
           label="Check In / Check Out"
           icon="keyboard"
@@ -141,31 +144,35 @@ export default function AppSidebar({
         </>
       )}
 
-      <Text
-        style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}
-      >
-        Tracking
-      </Text>
-      <NavButton
-        label="Material Usage"
-        icon="chart-box"
-        active={currentScreen === "materialUsage"}
-        onPress={() => onNavigate("materialUsage")}
-      />
-      <NavButton
-        label="Waste Tracking"
-        icon="delete-variant"
-        active={currentScreen === "wasteTracking"}
-        onPress={() => onNavigate("wasteTracking")}
-      />
-      {isAdmin && (
-        <NavButton
-          label="Reports"
-          icon="chart-line"
-          active={currentScreen === "reports"}
-          onPress={() => onNavigate("reports")}
-        />
-      )}
+      {!isSales ? (
+        <>
+          <Text
+            style={[styles.sectionLabel, { color: theme.colors.onSurfaceVariant }]}
+          >
+            Tracking
+          </Text>
+          <NavButton
+            label="Material Usage"
+            icon="chart-box"
+            active={currentScreen === "materialUsage"}
+            onPress={() => onNavigate("materialUsage")}
+          />
+          <NavButton
+            label="Waste Tracking"
+            icon="delete-variant"
+            active={currentScreen === "wasteTracking"}
+            onPress={() => onNavigate("wasteTracking")}
+          />
+          {isAdmin && (
+            <NavButton
+              label="Reports"
+              icon="chart-line"
+              active={currentScreen === "reports"}
+              onPress={() => onNavigate("reports")}
+            />
+          )}
+        </>
+      ) : null}
 
       <View style={styles.footer}>
         <Text style={[styles.version, { color: theme.colors.outline }]}>

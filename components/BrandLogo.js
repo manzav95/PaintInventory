@@ -78,7 +78,7 @@ export default function BrandLogo({
         ]}
         numberOfLines={2}
       >
-        {CURE_ACRONYM}
+        {/* {CURE_ACRONYM} */}
       </AppText>
     ) : null;
 

@@ -225,6 +225,7 @@ export default function InventoryListScreen({
   onRefresh,
   isRefreshing = false,
   isAdmin = false,
+  isSales = false,
   onOrderSummary = {},
   onRefreshOnOrderSummary,
   recycleDueFilter = false,
@@ -266,6 +267,7 @@ export default function InventoryListScreen({
   const [sortBy, setSortBy] = useState("name"); // 'name', 'quantity', 'lastScanned', 'location'
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc', 'desc'
   const [listOrderMode, setListOrderMode] = useState("alphabetical"); // 'alphabetical' | 'trueOrder'
+  const [customOrderMode, setCustomOrderMode] = useState("stack"); // 'stack' | 'name'
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
   const [apOnly, setApOnly] = useState(false);
   /** Admin: when true, inventory list includes custom colors at 0 gal. */
@@ -380,6 +382,52 @@ export default function InventoryListScreen({
 
   const isCustomInventoryView =
     viewMode === "inventory" && bookFilter === "custom";
+  const effectiveCustomOrderMode = isSales ? "name" : customOrderMode;
+
+  const toggleListOrder = () => {
+    if (bookFilter === "custom") {
+      setCustomOrderMode((prev) => (prev === "stack" ? "name" : "stack"));
+      return;
+    }
+    setListOrderMode((prev) =>
+      prev === "trueOrder" ? "alphabetical" : "trueOrder",
+    );
+  };
+
+  const orderButtonLabel =
+    bookFilter === "custom"
+      ? effectiveCustomOrderMode === "stack"
+        ? "Alphabetical"
+        : "Stacks A–Z"
+      : listOrderMode === "trueOrder"
+        ? "Alphabetical"
+        : "True Order";
+
+  const inventoryOrderSummary =
+    viewMode === "colorBook"
+      ? bookFilter === "standard"
+        ? "Stock"
+        : "Custom"
+      : bookFilter === "custom"
+        ? effectiveCustomOrderMode === "name"
+          ? "Custom · Alphabetical"
+          : "Custom · Stacks A–Z"
+        : listOrderMode === "trueOrder"
+          ? "Stock - True order"
+          : "Stock - Alphabetical";
+
+  const searchPlaceholder = isSales
+    ? "Search by name, color, or ID"
+    : viewMode === "colorBook"
+      ? "Search by name, color, or ID — Enter scans ID/barcode for check in/out"
+      : "Search or Scan";
+
+  const onOrderHighlight = (isLate) =>
+    isLate
+      ? kitColors.semantic.recycleDueDate
+      : theme.dark
+        ? kitColors.brand.accentBright
+        : kitColors.brand.accent;
 
   const openItemActionMenu = (item, event) => {
     const anchor = pressAnchorFromEvent(event, width);
@@ -391,6 +439,7 @@ export default function InventoryListScreen({
   };
 
   const handleItemActivate = (item, event) => {
+    if (isSales) return;
     // Custom view: always use caret popup (jobs + transactions; edit if admin).
     // Standard view: admin gets caret popup (transactions + edit); others go to history.
     if (isCustomInventoryView || isAdmin) {
@@ -1034,16 +1083,24 @@ export default function InventoryListScreen({
 
     // Sort
     if (bookFilter === "custom") {
-      filtered.sort((a, b) => {
-        const aLetter = customStackGroupLetter(a);
-        const bLetter = customStackGroupLetter(b);
-        const aKey = aLetter === "—" ? "ZZ" : aLetter;
-        const bKey = bLetter === "—" ? "ZZ" : bLetter;
-        if (aKey !== bKey) return aKey.localeCompare(bKey);
-        const aName = (a.name || "").toLowerCase();
-        const bName = (b.name || "").toLowerCase();
-        return aName.localeCompare(bName);
-      });
+      if (effectiveCustomOrderMode === "name") {
+        filtered.sort((a, b) => {
+          const aName = (a.name || "").toLowerCase();
+          const bName = (b.name || "").toLowerCase();
+          return aName.localeCompare(bName);
+        });
+      } else {
+        filtered.sort((a, b) => {
+          const aLetter = customStackGroupLetter(a);
+          const bLetter = customStackGroupLetter(b);
+          const aKey = aLetter === "—" ? "ZZ" : aLetter;
+          const bKey = bLetter === "—" ? "ZZ" : bLetter;
+          if (aKey !== bKey) return aKey.localeCompare(bKey);
+          const aName = (a.name || "").toLowerCase();
+          const bName = (b.name || "").toLowerCase();
+          return aName.localeCompare(bName);
+        });
+      }
     } else if (listOrderMode === "trueOrder") {
       filtered.sort((a, b) => {
         const aIsPaint = (a.type || "").toLowerCase() === "paint";
@@ -1107,8 +1164,10 @@ export default function InventoryListScreen({
     bookFilter,
     effectiveRecycleDue,
     isAdmin,
+    isSales,
     apOnly,
     showZeroCustoms,
+    effectiveCustomOrderMode,
   ]);
 
   // Paint/custom items with valid hex for color book grid (filtered by bookFilter)
@@ -1592,6 +1651,7 @@ export default function InventoryListScreen({
 
   const renderItem = ({ item, index }) => {
     const isLowStock =
+      !isSales &&
       (item.quantity || 0) < (item.minQuantity ?? minQuantity ?? 30);
     const itemId = item.id?.toString() || "N/A";
     const orderInfo = onOrderSummary[item.id] || onOrderSummary[itemId];
@@ -1604,6 +1664,7 @@ export default function InventoryListScreen({
     const prevItem = filteredAndSortedInventory[index - 1];
     const showStackHeader =
       isCustomInventoryView &&
+      effectiveCustomOrderMode === "stack" &&
       (!prevItem || customStackGroupLetter(prevItem) !== stackLetter);
 
     // Theme-aware low stock card style
@@ -1691,7 +1752,7 @@ export default function InventoryListScreen({
                 {item.quantity || 0} gal
               </Text>
             </View>
-            {(item.location || hasOpen) && (
+            {(item.location || hasOpen) && !isSales && (
               <View style={styles.itemMetaRow}>
                 {item.location ? (
                   <Text
@@ -1723,6 +1784,7 @@ export default function InventoryListScreen({
               textStyle: [styles.itemId, { color: ink.dim }],
             })}
             {(() => {
+              if (isSales) return null;
               const orderInfo =
                 onOrderSummary[item.id] || onOrderSummary[itemId];
               if (orderInfo && orderInfo.quantity > 0) {
@@ -1737,9 +1799,7 @@ export default function InventoryListScreen({
                     })
                   : "";
                 const isLate = expDate && expDate.getTime() < Date.now();
-                const textColor = isLate
-                  ? kitColors.semantic.recycleDueDate
-                  : theme.colors.primary;
+                const textColor = onOrderHighlight(isLate);
                 const po = orderInfo.poNumber || orderInfo.po_number || "";
                 return (
                   <View style={styles.onOrderBlock}>
@@ -1789,6 +1849,7 @@ export default function InventoryListScreen({
               />
             ) : null}
             <View style={styles.cardBottomRow}>
+              {!isSales ? (
               <Text
                 style={[styles.lastScanned, { color: ink.dim }]}
                 numberOfLines={1}
@@ -1807,6 +1868,9 @@ export default function InventoryListScreen({
                     )} by ${item?.lastScannedBy || "unknown"}`
                   : " "}
               </Text>
+              ) : (
+                <View style={{ flex: 1 }} />
+              )}
               {getValidHex(item.hex_color) ? (
                 <Pressable
                   onPress={() => setColorPreviewItem(item)}
@@ -1901,7 +1965,7 @@ export default function InventoryListScreen({
             >
               <OutlinedSearchInput
                 ref={searchInputRef}
-                placeholder="Search by name, color, or ID — Enter scans ID/barcode for check in/out"
+                placeholder={searchPlaceholder}
                 onChangeText={setSearchQuery}
                 value={searchQuery}
                 style={styles.colorBookSearchbar}
@@ -1946,6 +2010,7 @@ export default function InventoryListScreen({
                 ]}
               >
                 {/* Analytics Cards */}
+                {!isSales ? (
                 <View style={styles.analyticsRow}>
                   {isAdmin ? (
                     <Pressable
@@ -2274,6 +2339,7 @@ export default function InventoryListScreen({
                     </Pressable>
                   )}
                 </View>
+                ) : null}
 
                 {/* Search and Table - fills remaining height, scrolls internally */}
                 <View style={styles.tableCardWrapper}>
@@ -2293,22 +2359,19 @@ export default function InventoryListScreen({
                         <View style={styles.tableHeaderTopRow}>
                           {viewMode !== "colorBook" && (
                             <View style={styles.headerFilterGroup}>
-                              {isAdmin && (
+                              {isAdmin && !isSales && (
                                 <AppButton
                                   // Keep mode constant to avoid layout shift between outlined/contained
                                   mode="outlined"
                                   compact
-                                  onPress={() =>
-                                    setListOrderMode((prev) =>
-                                      prev === "trueOrder"
-                                        ? "alphabetical"
-                                        : "trueOrder",
-                                    )
-                                  }
+                                  onPress={toggleListOrder}
                                   style={[
                                     styles.viewModeButton,
                                     styles.viewModeButtonLong,
-                                    listOrderMode === "trueOrder" && {
+                                    ((bookFilter === "custom" &&
+                                      effectiveCustomOrderMode === "name") ||
+                                      (bookFilter !== "custom" &&
+                                        listOrderMode === "trueOrder")) && {
                                       backgroundColor: theme.dark
                                         ? "rgba(255,255,255,0.08)"
                                         : "rgba(0,0,0,0.06)",
@@ -2316,11 +2379,8 @@ export default function InventoryListScreen({
                                   ]}
                                   contentStyle={invBtnContentStyle}
                                   labelStyle={invBtnLabelStyle}
-                                  disabled={bookFilter === "custom"}
                                 >
-                                  {listOrderMode === "trueOrder"
-                                    ? "Alphabetical"
-                                    : "True Order"}
+                                  {orderButtonLabel}
                                 </AppButton>
                               )}
                               <AppButton
@@ -2374,11 +2434,7 @@ export default function InventoryListScreen({
                           )}
                           <View style={styles.tableHeaderTopRight}>
                             <Text style={styles.filterSummaryText}>
-                              {bookFilter === "custom"
-                                ? "Custom · Stacks A–Z"
-                                : listOrderMode === "trueOrder"
-                                  ? "Stock - True order"
-                                  : "Stock - Alphabetical"}
+                              {inventoryOrderSummary}
                             </Text>
                             <Text style={styles.resultCount}>
                               {filteredAndSortedInventory.length} of{" "}
@@ -2389,7 +2445,7 @@ export default function InventoryListScreen({
                         <View style={styles.tableHeaderSearchRow}>
                           <OutlinedSearchInput
                             ref={searchInputRef}
-                            placeholder="Search or Scan"
+                            placeholder={searchPlaceholder}
                             onChangeText={setSearchQuery}
                             value={searchQuery}
                             style={styles.webSearchbar}
@@ -2398,7 +2454,7 @@ export default function InventoryListScreen({
                             autoCorrect={false}
                             autoCapitalize="none"
                           />
-                          {actorName ? (
+                          {actorName && !isSales ? (
                             <View
                               ref={receivePoAnchorRef}
                               collapsable={false}
@@ -2473,14 +2529,16 @@ export default function InventoryListScreen({
                                 >
                                   Material Type
                                 </DataTable.Title>
-                                <DataTable.Title
-                                  style={[
-                                    styles.tableCell,
-                                    styles.locationColCell,
-                                  ]}
-                                >
-                                  Location
-                                </DataTable.Title>
+                                {!isSales ? (
+                                  <DataTable.Title
+                                    style={[
+                                      styles.tableCell,
+                                      styles.locationColCell,
+                                    ]}
+                                  >
+                                    Location
+                                  </DataTable.Title>
+                                ) : null}
                                 <DataTable.Title
                                   style={[
                                     styles.tableCell,
@@ -2489,27 +2547,31 @@ export default function InventoryListScreen({
                                 >
                                   Color
                                 </DataTable.Title>
-                                <DataTable.Title
-                                  style={styles.lastScannedCell}
-                                  sortDirection={
-                                    getSortIcon("lastScanned")
-                                      ? sortOrder === "asc"
-                                        ? "ascending"
-                                        : "descending"
-                                      : null
-                                  }
-                                  onPress={() => handleSort("lastScanned")}
-                                >
-                                  Last Action
-                                </DataTable.Title>
-                                <DataTable.Title
-                                  style={[
-                                    styles.tableCell,
-                                    styles.onOrderColCell,
-                                  ]}
-                                >
-                                  On order
-                                </DataTable.Title>
+                                {!isSales ? (
+                                  <DataTable.Title
+                                    style={styles.lastScannedCell}
+                                    sortDirection={
+                                      getSortIcon("lastScanned")
+                                        ? sortOrder === "asc"
+                                          ? "ascending"
+                                          : "descending"
+                                        : null
+                                    }
+                                    onPress={() => handleSort("lastScanned")}
+                                  >
+                                    Last Action
+                                  </DataTable.Title>
+                                ) : null}
+                                {!isSales ? (
+                                  <DataTable.Title
+                                    style={[
+                                      styles.tableCell,
+                                      styles.onOrderColCell,
+                                    ]}
+                                  >
+                                    On order
+                                  </DataTable.Title>
+                                ) : null}
                               </DataTable.Header>
                             </DataTable>
                             <View
@@ -2574,20 +2636,22 @@ export default function InventoryListScreen({
                                 <DataTable style={styles.dataTable}>
                                   {filteredAndSortedInventory.map((item, index) => {
                                   const isLowStock =
+                                    !isSales &&
                                     (item.quantity || 0) <
-                                    (item.minQuantity ?? minQuantity ?? 30);
+                                      (item.minQuantity ?? minQuantity ?? 30);
                                   const isOutOfStock =
-                                    (item.quantity || 0) === 0;
+                                    !isSales && (item.quantity || 0) === 0;
                                   const stackLetter = isCustomInventoryView
                                     ? customStackGroupLetter(item)
                                     : null;
                                   const prevItem =
                                     filteredAndSortedInventory[index - 1];
-                                  const showStackHeader =
-                                    isCustomInventoryView &&
-                                    (!prevItem ||
-                                      customStackGroupLetter(prevItem) !==
-                                        stackLetter);
+                                    const showStackHeader =
+                                      isCustomInventoryView &&
+                                      effectiveCustomOrderMode === "stack" &&
+                                      (!prevItem ||
+                                        customStackGroupLetter(prevItem) !==
+                                          stackLetter);
                                   return (
                                     <React.Fragment key={item.id}>
                                     {showStackHeader ? (
@@ -2733,6 +2797,7 @@ export default function InventoryListScreen({
                                           );
                                         })()}
                                       </DataTable.Cell>
+                                      {!isSales ? (
                                       <DataTable.Cell
                                         style={[
                                           styles.tableCell,
@@ -2753,6 +2818,7 @@ export default function InventoryListScreen({
                                             "-"}
                                         </Text>
                                       </DataTable.Cell>
+                                      ) : null}
                                       <DataTable.Cell
                                         style={[
                                           styles.tableCell,
@@ -2775,6 +2841,7 @@ export default function InventoryListScreen({
                                           />
                                         ) : null}
                                       </DataTable.Cell>
+                                      {!isSales ? (
                                       <DataTable.Cell
                                         style={styles.lastScannedCell}
                                       >
@@ -2857,6 +2924,8 @@ export default function InventoryListScreen({
                                           );
                                         })()}
                                       </DataTable.Cell>
+                                      ) : null}
+                                      {!isSales ? (
                                       <DataTable.Cell
                                         style={[
                                           styles.tableCell,
@@ -2890,9 +2959,8 @@ export default function InventoryListScreen({
                                             const isLate =
                                               expDate &&
                                               expDate.getTime() < Date.now();
-                                            const textColor = isLate
-                                              ? kitColors.semantic.recycleDueDate
-                                              : theme.colors.primary;
+                                            const textColor =
+                                              onOrderHighlight(isLate);
                                             const po =
                                               orderInfo.poNumber ||
                                               orderInfo.po_number ||
@@ -2903,6 +2971,7 @@ export default function InventoryListScreen({
                                                   style={{
                                                     fontSize: 12,
                                                     color: textColor,
+                                                    fontWeight: "700",
                                                   }}
                                                 >
                                                   {orderInfo.quantity} gal
@@ -2935,6 +3004,7 @@ export default function InventoryListScreen({
                                           return null;
                                         })()}
                                       </DataTable.Cell>
+                                      ) : null}
                                     </DataTable.Row>
                                     </React.Fragment>
                                   );
@@ -3035,28 +3105,30 @@ export default function InventoryListScreen({
           <View style={styles.header}>
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
-                {isAdmin && viewMode !== "colorBook" && (
+                {isAdmin && !isSales && viewMode !== "colorBook" && (
                   <AppButton
                     mode={
-                      listOrderMode === "trueOrder" ? "contained" : "outlined"
+                      (bookFilter === "custom" &&
+                        effectiveCustomOrderMode === "name") ||
+                      (bookFilter !== "custom" &&
+                        listOrderMode === "trueOrder")
+                        ? "contained"
+                        : "outlined"
                     }
                     compact
-                    onPress={() =>
-                      setListOrderMode((prev) =>
-                        prev === "trueOrder" ? "alphabetical" : "trueOrder",
-                      )
-                    }
+                    onPress={toggleListOrder}
                     style={[
                       styles.viewModeButtonMobile,
                       styles.viewModeButtonLong,
                     ]}
                     contentStyle={invBtnContentStyle}
                     labelStyle={invBtnLabelStyle}
-                    disabled={bookFilter === "custom"}
                   >
-                    {listOrderMode === "trueOrder"
-                      ? "Display order"
-                      : "Sort by display order"}
+                    {bookFilter === "custom"
+                      ? orderButtonLabel
+                      : listOrderMode === "trueOrder"
+                        ? "Display order"
+                        : "Sort by display order"}
                   </AppButton>
                 )}
                 <AppButton
@@ -3118,25 +3190,13 @@ export default function InventoryListScreen({
 
           <View style={styles.filterSummaryRow}>
             <Text style={styles.filterSummaryText}>
-              {viewMode === "colorBook"
-                ? bookFilter === "standard"
-                  ? "Stock"
-                  : "Custom"
-                : bookFilter === "custom"
-                  ? "Custom · Stacks A–Z"
-                  : listOrderMode === "trueOrder"
-                    ? "Stock - True order"
-                    : "Stock - Alphabetical"}
+              {inventoryOrderSummary}
             </Text>
           </View>
           <View style={styles.searchRow}>
             <OutlinedSearchInput
               ref={searchInputRef}
-              placeholder={
-                viewMode === "colorBook"
-                  ? "Search by name or color"
-                  : "Search or Scan"
-              }
+              placeholder={searchPlaceholder}
               onChangeText={setSearchQuery}
               value={searchQuery}
               style={styles.searchbar}
@@ -3145,7 +3205,7 @@ export default function InventoryListScreen({
               blurOnSubmit={false}
               onSubmitEditing={handleSearchSubmit}
             />
-            {actorName && viewMode !== "colorBook" ? (
+            {actorName && !isSales && viewMode !== "colorBook" ? (
               <View
                 ref={receivePoAnchorRef}
                 collapsable={false}
@@ -3182,7 +3242,7 @@ export default function InventoryListScreen({
               </AppButton>
             </View>
           )}
-          {viewMode === "inventory" && (
+          {viewMode === "inventory" && !isSales && (
             <View
               style={[
                 styles.analyticsRowMobile,
@@ -3546,20 +3606,19 @@ export default function InventoryListScreen({
       <View style={styles.headerMobilePortrait}>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
-            {isAdmin && viewMode !== "colorBook" && (
+            {isAdmin && !isSales && viewMode !== "colorBook" && (
               <AppButton
                 // Keep mode constant to avoid layout shift between outlined/contained
                 mode="outlined"
                 compact
-                onPress={() =>
-                  setListOrderMode((prev) =>
-                    prev === "trueOrder" ? "alphabetical" : "trueOrder",
-                  )
-                }
+                onPress={toggleListOrder}
                 style={[
                   styles.viewModeButtonMobile,
                   styles.viewModeButtonLong,
-                  listOrderMode === "trueOrder" && {
+                  ((bookFilter === "custom" &&
+                    effectiveCustomOrderMode === "name") ||
+                    (bookFilter !== "custom" &&
+                      listOrderMode === "trueOrder")) && {
                     backgroundColor: theme.dark
                       ? "rgba(255,255,255,0.08)"
                       : "rgba(0,0,0,0.06)",
@@ -3567,9 +3626,8 @@ export default function InventoryListScreen({
                 ]}
                 contentStyle={invBtnContentStyle}
                 labelStyle={invBtnLabelStyle}
-                disabled={bookFilter === "custom"}
               >
-                {listOrderMode === "trueOrder" ? "True Order" : "Alphabetical"}
+                {orderButtonLabel}
               </AppButton>
             )}
             <AppButton
@@ -3605,25 +3663,13 @@ export default function InventoryListScreen({
       <View style={styles.searchbarWrap}>
         <View style={styles.filterSummaryRow}>
           <Text style={styles.filterSummaryText}>
-            {viewMode === "colorBook"
-              ? bookFilter === "standard"
-                ? "Stock"
-                : "Custom"
-              : bookFilter === "custom"
-                ? "Custom · Stacks A–Z"
-                : listOrderMode === "trueOrder"
-                  ? "Stock - True order"
-                  : "Stock - Alphabetical"}
+            {inventoryOrderSummary}
           </Text>
         </View>
         <View style={styles.searchRow}>
           <OutlinedSearchInput
             ref={searchInputRef}
-            placeholder={
-              viewMode === "colorBook"
-                  ? "Search by name or color"
-                  : "Search or Scan"
-            }
+            placeholder={searchPlaceholder}
             onChangeText={setSearchQuery}
             value={searchQuery}
             style={styles.searchbar}
@@ -3632,7 +3678,7 @@ export default function InventoryListScreen({
             blurOnSubmit={false}
             onSubmitEditing={handleSearchSubmit}
           />
-          {actorName && viewMode !== "colorBook" ? (
+          {actorName && !isSales && viewMode !== "colorBook" ? (
             <View
               ref={receivePoAnchorRef}
               collapsable={false}
@@ -4164,6 +4210,7 @@ const styles = StyleSheet.create({
   onOrderText: {
     fontSize: 12,
     marginBottom: 2,
+    fontWeight: "700",
   },
   onOrderBlock: {
     marginBottom: 4,

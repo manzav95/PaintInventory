@@ -7,6 +7,10 @@ export function isAdminUser(userName) {
   return userName === "admin123";
 }
 
+export function isSalesRole(role) {
+  return String(role || "").toLowerCase() === "sales";
+}
+
 export async function recordUserActivity() {
   try {
     await AsyncStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));

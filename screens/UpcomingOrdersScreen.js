@@ -1241,7 +1241,7 @@ export default function UpcomingOrdersScreen({
             </ToolbarCard>
           </>
         )}
-        {showForm && (
+        {showForm && isCompactLayout && (
           <View
             style={[
               styles.filterRow,
