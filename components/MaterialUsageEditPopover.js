@@ -18,12 +18,26 @@ import {
 import AppButton from "./ui/AppButton";
 import DateField from "./DateField";
 import TimeField from "./TimeField";
+import ScrollFrame from "./ScrollFrame";
+import { AppEmptyState } from "./ui";
 import { BOOTH_OPTIONS } from "../services/materialUsageService";
+import { getMaterialTypeColor } from "../utils/materialTypes";
 import { space, radius } from "../theme/tokens";
 
 const PANEL_WIDTH = 380;
 
-/** Capitalize the first letter of each whitespace-separated word. */
+const MATERIAL_USAGE_COLOR_TYPES = [
+  "paint",
+  "custom_paint",
+  "clear",
+  "primer",
+  "stain",
+  "custom_stain",
+];
+
+const MATERIAL_USAGE_EXCLUDE_NAME_RE =
+  /^(acetone|catalyst|slow\s*reducer)$/i;
+
 function titleCaseWords(text) {
   return String(text ?? "")
     .trim()
@@ -34,12 +48,70 @@ function titleCaseWords(text) {
     .join(" ");
 }
 
+function isMaterialUsageEligibleItem(item) {
+  const type = String(item?.type || "").toLowerCase();
+  if (!MATERIAL_USAGE_COLOR_TYPES.includes(type)) return false;
+  const name = String(item?.name || "").trim();
+  const id = String(item?.id || "").trim();
+  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(name)) return false;
+  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(id)) return false;
+  return true;
+}
+
+function formatMaterialPickerLabel(item) {
+  const name = String(item?.name || item?.id || "").trim();
+  if (!name) return "";
+  const type = String(item?.type || "").toLowerCase();
+  if (
+    (type === "stain" || type === "custom_stain") &&
+    !/\bstain\b/i.test(name)
+  ) {
+    return `${name} stain`;
+  }
+  return name;
+}
+
+function parseCustomMaterialInput(text) {
+  if (!text || typeof text !== "string") {
+    return { ok: false, error: "no_keyword" };
+  }
+  const raw = text.trim();
+  const t = raw.toLowerCase();
+  if (/^\d{4}$/.test(raw) || /^#\d+$/.test(raw)) {
+    return { ok: true, type: "paint" };
+  }
+  const hasDye = t.includes("dye");
+  const hasStain = t.includes("stain");
+  const hasToner = t.includes("toner");
+  const count = [hasDye, hasStain, hasToner].filter(Boolean).length;
+  if (count === 0) return { ok: false, error: "no_keyword" };
+  if (count > 1) return { ok: false, error: "multiple_keywords" };
+  if (hasDye) return { ok: true, type: "dye" };
+  if (hasStain) return { ok: true, type: "stain" };
+  return { ok: true, type: "clear" };
+}
+
+function deriveCustomCategory(text) {
+  const result = parseCustomMaterialInput(text);
+  return result.ok ? result.type : "";
+}
+
+function getMaterialInputAccent(type, theme) {
+  const t = String(type || "").toLowerCase();
+  if (!t) return null;
+  if (t === "primer") {
+    return theme?.dark ? "#eceff1" : "#8A8478";
+  }
+  return getMaterialTypeColor(t, theme);
+}
+
 /**
  * Bell/settings-style caret popup for editing a material-usage log row.
  */
 export default function MaterialUsageEditPopover({
   visible,
   row = null,
+  inventory = [],
   anchor = { pageX: 0, pageY: 0 },
   onClose,
   onSave,
@@ -51,7 +123,10 @@ export default function MaterialUsageEditPopover({
   const [entryDate, setEntryDate] = useState("");
   const [entryTime, setEntryTime] = useState("");
   const [jobName, setJobName] = useState("");
-  const [material, setMaterial] = useState("");
+  const [colorQuery, setColorQuery] = useState("");
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [customColor, setCustomColor] = useState("");
+  const [materialFocused, setMaterialFocused] = useState(false);
   const [qty, setQty] = useState("");
   const [booth, setBooth] = useState(BOOTH_OPTIONS[0].value);
   const [cupGun, setCupGun] = useState(false);
@@ -62,7 +137,6 @@ export default function MaterialUsageEditPopover({
     setEntryDate(row.entry_date || "");
     setEntryTime(row.entry_time || "");
     setJobName(row.job_name || "");
-    setMaterial(row.color_name || "");
     setBooth(row.booth || BOOTH_OPTIONS[0].value);
     const isCup = !!row.cup_gun;
     setCupGun(isCup);
@@ -73,10 +147,71 @@ export default function MaterialUsageEditPopover({
         : String(gal),
     );
     setError("");
-  }, [visible, row]);
+    setMaterialFocused(false);
+
+    const itemId = row.item_id != null ? String(row.item_id).trim() : "";
+    const match =
+      itemId && Array.isArray(inventory)
+        ? inventory.find((i) => String(i.id) === itemId)
+        : null;
+    if (match) {
+      setSelectedItem(match);
+      setCustomColor("");
+      setColorQuery("");
+    } else {
+      setSelectedItem(null);
+      setCustomColor(row.color_name || "");
+      setColorQuery("");
+    }
+  }, [visible, row, inventory]);
 
   const jobOptional = booth === "Booth 2";
   const panelWidth = Math.min(PANEL_WIDTH, Math.max(300, windowWidth - 24));
+
+  const effectiveMaterialType = useMemo(() => {
+    if (selectedItem) return (selectedItem.type || "").toLowerCase() || null;
+    const custom = (customColor || colorQuery || "").trim();
+    return custom ? deriveCustomCategory(custom) || null : null;
+  }, [selectedItem, customColor, colorQuery]);
+
+  const materialInputAccent = useMemo(
+    () => getMaterialInputAccent(effectiveMaterialType, theme),
+    [effectiveMaterialType, theme],
+  );
+
+  const materialFieldValue = selectedItem
+    ? formatMaterialPickerLabel(selectedItem)
+    : customColor || colorQuery;
+
+  const materialSuggestions = useMemo(() => {
+    if (selectedItem) return [];
+    const eligible = (inventory || []).filter(isMaterialUsageEligibleItem);
+    const q = (colorQuery || "").trim().toLowerCase();
+    const filtered = q
+      ? eligible.filter(
+          (i) =>
+            (i.name || "").toLowerCase().includes(q) ||
+            (i.id || "").toLowerCase().includes(q) ||
+            String(i.color_label || "")
+              .toLowerCase()
+              .includes(q),
+        )
+      : eligible;
+    return filtered
+      .sort((a, b) => {
+        const aName = (a.name || a.id || "").toLowerCase();
+        const bName = (b.name || b.id || "").toLowerCase();
+        if (q) {
+          const aStarts = aName.startsWith(q) ? 0 : 1;
+          const bStarts = bName.startsWith(q) ? 0 : 1;
+          if (aStarts !== bStarts) return aStarts - bStarts;
+        }
+        return aName.localeCompare(bName);
+      })
+      .slice(0, 12);
+  }, [inventory, colorQuery, selectedItem]);
+
+  const showMaterialSuggestions = materialFocused && !selectedItem;
 
   const panelPos = useMemo(() => {
     const gap = 10;
@@ -84,10 +219,10 @@ export default function MaterialUsageEditPopover({
     const margin = 8;
     const x = Number(anchor?.pageX) || windowWidth / 2;
     const y = Number(anchor?.pageY) || 80;
-    const maxH = Math.min(520, windowHeight - 24);
+    const maxH = Math.min(560, windowHeight - 24);
     let top = y + gap;
-    if (top + Math.min(360, maxH) > windowHeight - margin) {
-      top = Math.max(margin + caretSize, y - gap - 280);
+    if (top + Math.min(400, maxH) > windowHeight - margin) {
+      top = Math.max(margin + caretSize, y - gap - 320);
     }
     top = Math.max(margin + caretSize, Math.min(top, windowHeight - 200));
     const preferredLeft = x - panelWidth / 2;
@@ -113,10 +248,21 @@ export default function MaterialUsageEditPopover({
       setError("Job number is required for this booth.");
       return;
     }
-    const mat = titleCaseWords(material || "");
-    if (!mat) {
-      setError("Enter a material / color name.");
+    const customTrim = titleCaseWords(customColor || colorQuery || "");
+    if (!selectedItem && !customTrim) {
+      setError("Select or enter a material.");
       return;
+    }
+    if (customTrim && !selectedItem) {
+      const parsed = parseCustomMaterialInput(customTrim);
+      if (!parsed.ok) {
+        setError(
+          parsed.error === "multiple_keywords"
+            ? "Custom material needs exactly one of: dye, stain, or toner."
+            : "Custom material needs dye, stain, toner, or a 4-digit paint ID.",
+        );
+        return;
+      }
     }
     if (!entryDate) {
       setError("Date is required.");
@@ -135,15 +281,23 @@ export default function MaterialUsageEditPopover({
     if (cupGun) {
       qtyGallons = rawQty / 128;
     }
-    // Exact gallons as entered (no 0.25 snap)
+
+    const colorName = selectedItem
+      ? formatMaterialPickerLabel(selectedItem)
+      : customTrim;
+    const materialType = selectedItem
+      ? (selectedItem.type || "").toLowerCase() || null
+      : parseCustomMaterialInput(customTrim).type || null;
+    const itemId = selectedItem ? String(selectedItem.id) : "";
+
     setError("");
     onSave?.({
       entry_date: entryDate,
       entry_time: entryTime,
       job_name: job,
-      color_name: mat,
-      item_id: row?.item_id != null ? String(row.item_id) : "",
-      material_type: row?.material_type || null,
+      color_name: colorName,
+      item_id: itemId,
+      material_type: materialType,
       qty_gallons: qtyGallons,
       catalyst_oz: row?.catalyst_oz,
       catalyzed_confirmed: row?.catalyzed_confirmed !== false,
@@ -227,7 +381,10 @@ export default function MaterialUsageEditPopover({
               style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
               numberOfLines={1}
             >
-              {row.user_name || "Unknown"} · {row.color_name || "Material"}
+              {row.user_name || "Unknown"}
+              {effectiveMaterialType
+                ? ` · ${String(effectiveMaterialType).replace(/_/g, " ")}`
+                : ""}
             </Text>
 
             <ScrollView
@@ -288,15 +445,127 @@ export default function MaterialUsageEditPopover({
                 disabled={saving}
               />
 
-              <TextInput
-                label="Material"
-                value={material}
-                onChangeText={setMaterial}
-                mode="outlined"
-                dense
-                style={styles.input}
-                disabled={saving}
-              />
+              <View style={styles.colorSection}>
+                <TextInput
+                  label="Material"
+                  value={materialFieldValue}
+                  onChangeText={(t) => {
+                    setColorQuery(t);
+                    setCustomColor("");
+                    if (selectedItem) setSelectedItem(null);
+                  }}
+                  onFocus={() => setMaterialFocused(true)}
+                  onBlur={() => {
+                    setTimeout(() => setMaterialFocused(false), 150);
+                  }}
+                  mode="outlined"
+                  dense
+                  style={styles.input}
+                  disabled={saving}
+                  placeholder="Search inventory or type custom dye/toner"
+                  outlineColor={
+                    materialInputAccent ||
+                    theme.colors?.outlineVariant ||
+                    theme.colors?.outline
+                  }
+                  activeOutlineColor={
+                    materialInputAccent || theme.colors?.primary
+                  }
+                  textColor={
+                    materialInputAccent || theme.colors?.onSurface
+                  }
+                  right={
+                    selectedItem || customColor || colorQuery ? (
+                      <TextInput.Icon
+                        icon="close"
+                        disabled={saving}
+                        onPress={() => {
+                          setSelectedItem(null);
+                          setCustomColor("");
+                          setColorQuery("");
+                        }}
+                      />
+                    ) : null
+                  }
+                />
+                {showMaterialSuggestions ? (
+                  <ScrollFrame maxHeight={180} style={styles.suggestBox}>
+                    {materialSuggestions.map((item) => {
+                      const type = String(item.type || "").toLowerCase();
+                      const rowColor = getMaterialInputAccent(type, theme);
+                      const label = formatMaterialPickerLabel(item);
+                      return (
+                        <Pressable
+                          key={item.id}
+                          onPress={() => {
+                            setSelectedItem(item);
+                            setCustomColor("");
+                            setColorQuery("");
+                            setMaterialFocused(false);
+                          }}
+                          style={({ pressed }) => [
+                            styles.colorRow,
+                            pressed && styles.colorRowPressed,
+                          ]}
+                        >
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.colorRowText,
+                              rowColor ? { color: rowColor } : null,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    {(colorQuery || "").trim() ? (
+                      <Pressable
+                        onPress={() => {
+                          setCustomColor((colorQuery || "").trim());
+                          setSelectedItem(null);
+                          setMaterialFocused(false);
+                        }}
+                        style={({ pressed }) => [
+                          styles.colorRow,
+                          styles.colorRowCustom,
+                          pressed && styles.colorRowPressed,
+                        ]}
+                      >
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.colorRowText,
+                            {
+                              fontStyle: "italic",
+                              ...(materialInputAccent
+                                ? { color: materialInputAccent }
+                                : null),
+                            },
+                          ]}
+                        >
+                          Use custom: {(colorQuery || "").trim()}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {materialSuggestions.length === 0 &&
+                    !(colorQuery || "").trim() ? (
+                      <AppEmptyState
+                        title="No eligible materials"
+                        style={styles.emptyList}
+                      />
+                    ) : null}
+                    {materialSuggestions.length === 0 &&
+                    (colorQuery || "").trim() ? (
+                      <AppEmptyState
+                        title="No matches — use custom above"
+                        style={styles.emptyList}
+                      />
+                    ) : null}
+                  </ScrollFrame>
+                ) : null}
+              </View>
 
               <TextInput
                 label={cupGun ? "Qty (oz)" : "Qty (gal)"}
@@ -414,7 +683,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   scroll: {
-    maxHeight: 360,
+    maxHeight: 400,
   },
   scrollContent: {
     paddingHorizontal: space[5],
@@ -443,6 +712,35 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: "transparent",
+  },
+  colorSection: {
+    gap: 4,
+  },
+  suggestBox: {
+    borderWidth: 1,
+    borderColor: "rgba(128,128,128,0.35)",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  colorRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(128,128,128,0.25)",
+  },
+  colorRowCustom: {
+    backgroundColor: "rgba(128,128,128,0.08)",
+  },
+  colorRowPressed: {
+    opacity: 0.7,
+  },
+  colorRowText: {
+    fontSize: 14,
+  },
+  emptyList: {
+    flex: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
   },
   error: {
     fontSize: 12,

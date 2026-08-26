@@ -27,7 +27,12 @@ import { enqueueQuantityAction, syncPendingQuantity } from './utils/offlineQueue
 import OrderService from './services/orderService';
 import MaterialUsageService from './services/materialUsageService';
 import config from './config';
-import { formatCustomStackDisplay } from './utils/customStacks';
+import HexBackfillBanner from './components/HexBackfillBanner';
+import { getValidHex } from './utils/colorUtils';
+import {
+  buildColorLookupQueries,
+  lookupColorHex,
+} from './utils/colorHexLookup';
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import QRScanScreen from './screens/QRScanScreen';
@@ -99,6 +104,9 @@ export default function App() {
   const [formRefreshKey, setFormRefreshKey] = useState(0);
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [actionLoadingMessage, setActionLoadingMessage] = useState('');
+  /** Admin background job: fill missing custom color hex codes. */
+  const [hexBackfillJob, setHexBackfillJob] = useState(null);
+  const hexBackfillRunningRef = useRef(false);
   const [scanLookupLoading, setScanLookupLoading] = useState(false);
   const [showAdminItemDialog, setShowAdminItemDialog] = useState(false);
   const [onOrderSummary, setOnOrderSummary] = useState({});
@@ -931,6 +939,50 @@ export default function App() {
     });
   };
 
+  const handleChangeLocation = async (newLocation) => {
+    if (!scannedItem) return;
+    const loc = String(newLocation || '').trim();
+    if (!loc) {
+      showAlert('Missing location', 'Choose a stack location (A–Z).');
+      return;
+    }
+    await runWithLoading('Saving location...', async () => {
+      try {
+        const result = await InventoryService.updateItem(
+          scannedItem.id,
+          { location: loc },
+          actorName,
+        );
+        if (result.success) {
+          showToast({
+            title: 'Location updated',
+            message: `${scannedItem.name || scannedItem.id} → ${formatCustomStackDisplay(loc)}`,
+          });
+          await loadInventory(false, { refreshCaches: true });
+        } else {
+          const msg = result.error || 'Failed to update location.';
+          showAlert('Cannot update location', msg);
+          showToast({
+            type: 'error',
+            title: 'Cannot update location',
+            message: msg,
+            duration: 5000,
+          });
+          return;
+        }
+      } catch (err) {
+        showAlert(
+          'Error',
+          err?.message || 'Failed to update location. Try again when online.',
+        );
+        return;
+      }
+      setScannedItem(null);
+      const target = previousScreen || 'list';
+      setCurrentScreen(target);
+    });
+  };
+
   const handleRecyclePaint = async (quantity) => {
     if (!scannedItem || !isAdmin) return;
     const t = String(scannedItem.type || '').toLowerCase();
@@ -1295,6 +1347,135 @@ export default function App() {
     });
   };
 
+  const handleFillMissingCustomHex = async () => {
+    if (!isAdmin) {
+      showAlert('Not Allowed', 'Only admin can fill color hex codes.');
+      return;
+    }
+    if (hexBackfillRunningRef.current || hexBackfillJob?.status === 'running') {
+      showToast({
+        title: 'Already running',
+        message: 'Hex lookup is in progress — check the bar at the top.',
+      });
+      return;
+    }
+    const missing = (inventory || []).filter((item) => {
+      const t = String(item?.type || '').toLowerCase();
+      if (t !== 'custom_paint' && t !== 'custom_stain') return false;
+      return !getValidHex(item?.hex_color);
+    });
+    if (missing.length === 0) {
+      showToast({
+        title: 'Nothing to fill',
+        message: 'All custom colors already have a hex code.',
+      });
+      return;
+    }
+    const ok = await confirmAction(
+      'Look up missing hex colors?',
+      `Search the web for hex codes for ${missing.length} custom color${missing.length === 1 ? '' : 's'} that have a name but no hex. You can keep using the app while this runs.`,
+      { confirmLabel: 'Start lookup' },
+    );
+    if (!ok) return;
+
+    hexBackfillRunningRef.current = true;
+    setHexBackfillJob({
+      status: 'running',
+      total: missing.length,
+      done: 0,
+      updated: 0,
+      failed: 0,
+      skipped: 0,
+      current: '',
+    });
+
+    let updated = 0;
+    let failed = 0;
+    let skipped = 0;
+    try {
+      for (let i = 0; i < missing.length; i++) {
+        const item = missing[i];
+        const label =
+          item.color_label || item.name || item.external_code || item.id || '';
+        setHexBackfillJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                done: i,
+                current: String(label),
+                updated,
+                failed,
+                skipped,
+              }
+            : prev,
+        );
+        const queries = buildColorLookupQueries(item);
+        if (queries.length === 0) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const hit = await lookupColorHex(queries);
+          if (!hit?.hex) {
+            failed += 1;
+          } else {
+            const result = await InventoryService.updateItem(
+              item.id,
+              { hex_color: hit.hex },
+              actorName,
+            );
+            if (result?.success === false) {
+              failed += 1;
+            } else {
+              updated += 1;
+              setInventory((prev) =>
+                (prev || []).map((row) =>
+                  String(row.id) === String(item.id)
+                    ? { ...row, hex_color: hit.hex }
+                    : row,
+                ),
+              );
+            }
+          }
+        } catch {
+          failed += 1;
+        }
+        // Gentle pacing so public APIs stay happy.
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      setHexBackfillJob({
+        status: 'done',
+        total: missing.length,
+        done: missing.length,
+        updated,
+        failed,
+        skipped,
+        current: '',
+      });
+      await loadInventory(false, { refreshCaches: true });
+      const summary = `Updated ${updated} of ${missing.length}. ${failed} not found${skipped ? `, ${skipped} skipped` : ''}.`;
+      showToast({
+        title: 'Hex lookup complete',
+        message: summary,
+      });
+      showAlert('Hex lookup complete', summary);
+    } catch (e) {
+      setHexBackfillJob({
+        status: 'error',
+        total: missing.length,
+        done: updated + failed + skipped,
+        updated,
+        failed,
+        skipped,
+        current: '',
+        message: e?.message || 'Lookup failed.',
+      });
+      showAlert('Hex lookup failed', e?.message || 'Could not finish lookup.');
+    } finally {
+      hexBackfillRunningRef.current = false;
+    }
+  };
+
   const handleExportMaterialUsageExcel = (fromDate, toDate) => {
     if (!isAdmin) return;
     const from = (fromDate || '').trim();
@@ -1418,6 +1599,7 @@ export default function App() {
             onCheckIn={handleCheckIn}
             onCheckOut={handleCheckOut}
             onRecyclePaint={handleRecyclePaint}
+            onChangeLocation={handleChangeLocation}
             onCancel={exitCheckInFlow}
             onOrderSummary={onOrderSummary}
             onReceiveDelivery={handleReceiveDelivery}
@@ -1607,6 +1789,8 @@ export default function App() {
             onExportMaterialUsageExcel={handleExportMaterialUsageExcel}
             onZeroCustomQuantities={handleZeroCustomQuantities}
             onZeroStaleCustomQuantities={handleZeroStaleCustomQuantities}
+            onFillMissingCustomHex={handleFillMissingCustomHex}
+            hexBackfillRunning={hexBackfillJob?.status === 'running'}
           />
         );
       default:
@@ -1707,6 +1891,14 @@ export default function App() {
           (currentScreen === 'list' && !isWebDesktop)
         }
         lockMainScroll={currentScreen === 'settings' && isWebDesktop}
+        statusBanner={
+          hexBackfillJob ? (
+            <HexBackfillBanner
+              job={hexBackfillJob}
+              onDismiss={() => setHexBackfillJob(null)}
+            />
+          ) : null
+        }
         topBarExtras={
           currentScreen === 'list' && isWebDesktop ? (
             <>

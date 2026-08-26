@@ -85,6 +85,7 @@ export default function CheckInOutScreen({
   onCheckIn,
   onCheckOut,
   onRecyclePaint,
+  onChangeLocation,
   onCancel,
   onOrderSummary = {},
   onReceiveDelivery,
@@ -99,7 +100,7 @@ export default function CheckInOutScreen({
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
   const [quantity, setQuantity] = useState("");
-  const [action, setAction] = useState(null); // 'in' | 'out' | 'recycle'
+  const [action, setAction] = useState(null); // 'in' | 'out' | 'recycle' | 'location'
   const [showDeliveryPrompt, setShowDeliveryPrompt] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -180,7 +181,9 @@ export default function CheckInOutScreen({
     item?.location != null && String(item.location).trim() !== "";
   const showStoredLocation = isCustomColor && currentStock > 0 && hasLocation;
   const showRecycleButton = isAdmin && onRecyclePaint && isCustomColor;
-  const showQuickQty = action && quickQtyEnabledTypes.has(itemType);
+  const showLocationOnlyButton = isCustomColor && !!onChangeLocation;
+  const showQuickQty =
+    action && action !== "location" && quickQtyEnabledTypes.has(itemType);
   const halfGallonItem = allowsHalfGallon(itemType);
   const quickQtyOptions = isCustomColor
     ? [1, 2, 3, 4, 5]
@@ -233,6 +236,15 @@ export default function CheckInOutScreen({
   };
 
   const handleSubmit = () => {
+    if (action === "location") {
+      if (!onChangeLocation) {
+        showAlert("Unavailable", "Location change is not available.");
+        return;
+      }
+      onChangeLocation(resolveCustomStackLocation(stackLocation));
+      return;
+    }
+
     const parsed = parseGallonQuantity(quantity, itemType);
     if (!parsed.ok) {
       showAlert("Invalid Quantity", parsed.error);
@@ -614,6 +626,19 @@ export default function CheckInOutScreen({
                     Recycle
                   </AppButton>
                 ) : null}
+                {showLocationOnlyButton ? (
+                  <AppButton
+                    mode={action === "location" ? "contained" : "outlined"}
+                    onPress={() => setAction("location")}
+                    style={[
+                      styles.actionButton,
+                      action === "location" && styles.selectedButton,
+                    ]}
+                    icon="map-marker"
+                  >
+                    Change Location
+                  </AppButton>
+                ) : null}
               </View>
 
               {action && (
@@ -645,22 +670,25 @@ export default function CheckInOutScreen({
                       </View>
                     </View>
                   )}
-                  <TextInput
-                    label={
-                      action === "in"
-                        ? "Quantity to add (gallons)"
-                        : action === "recycle"
-                          ? "Quantity to recycle (gallons)"
-                          : "Quantity to remove (gallons)"
-                    }
-                    value={quantity}
-                    onChangeText={setQuantity}
-                    mode="outlined"
-                    keyboardType="decimal-pad"
-                    style={styles.input}
-                    right={<TextInput.Affix text={unitAffix} />}
-                  />
-                  {action === "in" && isCustomColor ? (
+                  {action !== "location" ? (
+                    <TextInput
+                      label={
+                        action === "in"
+                          ? "Quantity to add (gallons)"
+                          : action === "recycle"
+                            ? "Quantity to recycle (gallons)"
+                            : "Quantity to remove (gallons)"
+                      }
+                      value={quantity}
+                      onChangeText={setQuantity}
+                      mode="outlined"
+                      keyboardType="decimal-pad"
+                      style={styles.input}
+                      right={<TextInput.Affix text={unitAffix} />}
+                    />
+                  ) : null}
+                  {(action === "in" || action === "location") &&
+                  isCustomColor ? (
                     <View style={styles.stackField}>
                       <Text
                         style={[
@@ -706,7 +734,8 @@ export default function CheckInOutScreen({
                         { color: theme.colors.error },
                       ]}
                     >
-                      No {unitWord} available to {action === "recycle" ? "recycle" : "check out"}.
+                      No {unitWord} available to{" "}
+                      {action === "recycle" ? "recycle" : "check out"}.
                     </Text>
                   ) : null}
                   <View style={styles.submitRow}>
@@ -722,16 +751,22 @@ export default function CheckInOutScreen({
                       onPress={handleSubmit}
                       style={styles.button}
                       disabled={
-                        !quantity ||
-                        parseFloat(quantity) <= 0 ||
-                        ((action === "out" || action === "recycle") &&
-                          currentStock <= 0)
+                        action === "location"
+                          ? !stackLocation
+                          : !quantity ||
+                            parseFloat(quantity) <= 0 ||
+                            ((action === "out" || action === "recycle") &&
+                              currentStock <= 0)
                       }
                       buttonColor={
                         action === "recycle" ? colors.action.receive : undefined
                       }
                     >
-                      {action === "recycle" ? "Confirm Recycle" : "Submit"}
+                      {action === "recycle"
+                        ? "Confirm Recycle"
+                        : action === "location"
+                          ? "Save Location"
+                          : "Submit"}
                     </AppButton>
                   </View>
                 </>

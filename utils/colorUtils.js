@@ -14,6 +14,19 @@ function hexLuminance(hex) {
   return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
 }
 
+/** Normalize and validate a hex color. Returns "#RRGGBB" or null. */
+export function getValidHex(raw) {
+  if (raw == null) return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  if (!s.startsWith("#")) s = `#${s}`;
+  if (/^#[0-9A-Fa-f]{3}$/.test(s)) {
+    s = `#${s[1]}${s[1]}${s[2]}${s[2]}${s[3]}${s[3]}`;
+  }
+  if (!/^#[0-9A-Fa-f]{6}$/.test(s)) return null;
+  return s.toUpperCase();
+}
+
 /**
  * Returns text colors that contrast with the given hex background.
  * Use for any text drawn on top of a paint/hex color so it works in both light and dark app themes.

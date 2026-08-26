@@ -2021,7 +2021,7 @@ class Database {
     return { success: true, id: row.id, created_at: row.created_at };
   }
 
-  async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null, excludeAdmin = false) {
+  async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null, excludeAdmin = false, options = {}) {
     const conditions = [];
     const params = [];
     let paramIndex = 1;
@@ -2042,6 +2042,28 @@ class Database {
       conditions.push(`entry_date <= $${paramIndex}`);
       params.push(String(toDate).trim());
       paramIndex++;
+    }
+    const itemId =
+      options?.itemId != null && String(options.itemId).trim() !== ""
+        ? String(options.itemId).trim()
+        : null;
+    const colorName =
+      options?.colorName != null && String(options.colorName).trim() !== ""
+        ? String(options.colorName).trim()
+        : null;
+    if (itemId || colorName) {
+      const ors = [];
+      if (itemId) {
+        ors.push(`item_id = $${paramIndex}`);
+        params.push(itemId);
+        paramIndex++;
+      }
+      if (colorName) {
+        ors.push(`LOWER(TRIM(color_name)) = LOWER($${paramIndex})`);
+        params.push(colorName);
+        paramIndex++;
+      }
+      conditions.push(`(${ors.join(" OR ")})`);
     }
     const whereClause =
       conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

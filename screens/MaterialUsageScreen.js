@@ -2025,6 +2025,7 @@ export default function MaterialUsageScreen({
         <MaterialUsageEditPopover
           visible={!!editRow}
           row={editRow}
+          inventory={inventory}
           anchor={editAnchor}
           onClose={closeEditPopover}
           onSave={handleSaveEdit}

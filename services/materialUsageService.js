@@ -67,6 +67,15 @@ class MaterialUsageService {
     if (options.excludeAdmin) {
       params.set('excludeAdmin', 'true');
     }
+    if (options.item_id || options.itemId) {
+      params.set('item_id', String(options.item_id || options.itemId).trim());
+    }
+    if (options.color_name || options.colorName) {
+      params.set(
+        'color_name',
+        String(options.color_name || options.colorName).trim(),
+      );
+    }
     const data = await _fetch(`/api/material-usage?${params.toString()}`);
     return Array.isArray(data) ? data : [];
   }

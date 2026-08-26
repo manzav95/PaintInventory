@@ -367,6 +367,7 @@ export default function InventoryListScreen({
     const value =
       typeof next === "function" ? next(bookFilter) : next;
     setBookFilter(value);
+    if (value === "custom") setApOnly(false);
     notifyViewState({ bookFilter: value });
   };
 
@@ -2359,19 +2360,15 @@ export default function InventoryListScreen({
                         <View style={styles.tableHeaderTopRow}>
                           {viewMode !== "colorBook" && (
                             <View style={styles.headerFilterGroup}>
-                              {isAdmin && !isSales && (
+                              {bookFilter === "custom" && !isSales ? (
                                 <AppButton
-                                  // Keep mode constant to avoid layout shift between outlined/contained
                                   mode="outlined"
                                   compact
                                   onPress={toggleListOrder}
                                   style={[
                                     styles.viewModeButton,
                                     styles.viewModeButtonLong,
-                                    ((bookFilter === "custom" &&
-                                      effectiveCustomOrderMode === "name") ||
-                                      (bookFilter !== "custom" &&
-                                        listOrderMode === "trueOrder")) && {
+                                    effectiveCustomOrderMode === "name" && {
                                       backgroundColor: theme.dark
                                         ? "rgba(255,255,255,0.08)"
                                         : "rgba(0,0,0,0.06)",
@@ -2382,7 +2379,29 @@ export default function InventoryListScreen({
                                 >
                                   {orderButtonLabel}
                                 </AppButton>
-                              )}
+                              ) : null}
+                              {isAdmin &&
+                              !isSales &&
+                              bookFilter !== "custom" ? (
+                                <AppButton
+                                  mode="outlined"
+                                  compact
+                                  onPress={toggleListOrder}
+                                  style={[
+                                    styles.viewModeButton,
+                                    styles.viewModeButtonLong,
+                                    listOrderMode === "trueOrder" && {
+                                      backgroundColor: theme.dark
+                                        ? "rgba(255,255,255,0.08)"
+                                        : "rgba(0,0,0,0.06)",
+                                    },
+                                  ]}
+                                  contentStyle={invBtnContentStyle}
+                                  labelStyle={invBtnLabelStyle}
+                                >
+                                  {orderButtonLabel}
+                                </AppButton>
+                              ) : null}
                               <AppButton
                                 mode={
                                   bookFilter === "standard"
@@ -2397,7 +2416,7 @@ export default function InventoryListScreen({
                               >
                                 {bookFilter === "standard" ? "Custom" : "Stock"}
                               </AppButton>
-                              {isAdmin && (
+                              {isAdmin && bookFilter !== "custom" && (
                                 <AppButton
                                   mode={apOnly ? "contained" : "outlined"}
                                   compact
@@ -3105,13 +3124,12 @@ export default function InventoryListScreen({
           <View style={styles.header}>
             <View style={styles.refreshContainer}>
               <View style={styles.headerFilterGroup}>
-                {isAdmin && !isSales && viewMode !== "colorBook" && (
+                {bookFilter === "custom" &&
+                !isSales &&
+                viewMode !== "colorBook" ? (
                   <AppButton
                     mode={
-                      (bookFilter === "custom" &&
-                        effectiveCustomOrderMode === "name") ||
-                      (bookFilter !== "custom" &&
-                        listOrderMode === "trueOrder")
+                      effectiveCustomOrderMode === "name"
                         ? "contained"
                         : "outlined"
                     }
@@ -3124,13 +3142,31 @@ export default function InventoryListScreen({
                     contentStyle={invBtnContentStyle}
                     labelStyle={invBtnLabelStyle}
                   >
-                    {bookFilter === "custom"
-                      ? orderButtonLabel
-                      : listOrderMode === "trueOrder"
-                        ? "Display order"
-                        : "Sort by display order"}
+                    {orderButtonLabel}
                   </AppButton>
-                )}
+                ) : null}
+                {isAdmin &&
+                !isSales &&
+                viewMode !== "colorBook" &&
+                bookFilter !== "custom" ? (
+                  <AppButton
+                    mode={
+                      listOrderMode === "trueOrder" ? "contained" : "outlined"
+                    }
+                    compact
+                    onPress={toggleListOrder}
+                    style={[
+                      styles.viewModeButtonMobile,
+                      styles.viewModeButtonLong,
+                    ]}
+                    contentStyle={invBtnContentStyle}
+                    labelStyle={invBtnLabelStyle}
+                  >
+                    {listOrderMode === "trueOrder"
+                      ? "Display order"
+                      : "Sort by display order"}
+                  </AppButton>
+                ) : null}
                 <AppButton
                   mode={bookFilter === "standard" ? "outlined" : "contained"}
                   compact
@@ -3141,7 +3177,7 @@ export default function InventoryListScreen({
                 >
                   {bookFilter === "standard" ? "Stock" : "Custom"}
                 </AppButton>
-                {isAdmin && (
+                {isAdmin && bookFilter !== "custom" && (
                   <AppButton
                     mode={apOnly ? "contained" : "outlined"}
                     compact
@@ -3606,19 +3642,17 @@ export default function InventoryListScreen({
       <View style={styles.headerMobilePortrait}>
         <View style={styles.headerFilterRow}>
           <View style={styles.headerFilterGroup}>
-            {isAdmin && !isSales && viewMode !== "colorBook" && (
+            {bookFilter === "custom" &&
+            !isSales &&
+            viewMode !== "colorBook" ? (
               <AppButton
-                // Keep mode constant to avoid layout shift between outlined/contained
                 mode="outlined"
                 compact
                 onPress={toggleListOrder}
                 style={[
                   styles.viewModeButtonMobile,
                   styles.viewModeButtonLong,
-                  ((bookFilter === "custom" &&
-                    effectiveCustomOrderMode === "name") ||
-                    (bookFilter !== "custom" &&
-                      listOrderMode === "trueOrder")) && {
+                  effectiveCustomOrderMode === "name" && {
                     backgroundColor: theme.dark
                       ? "rgba(255,255,255,0.08)"
                       : "rgba(0,0,0,0.06)",
@@ -3629,7 +3663,30 @@ export default function InventoryListScreen({
               >
                 {orderButtonLabel}
               </AppButton>
-            )}
+            ) : null}
+            {isAdmin &&
+            !isSales &&
+            viewMode !== "colorBook" &&
+            bookFilter !== "custom" ? (
+              <AppButton
+                mode="outlined"
+                compact
+                onPress={toggleListOrder}
+                style={[
+                  styles.viewModeButtonMobile,
+                  styles.viewModeButtonLong,
+                  listOrderMode === "trueOrder" && {
+                    backgroundColor: theme.dark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.06)",
+                  },
+                ]}
+                contentStyle={invBtnContentStyle}
+                labelStyle={invBtnLabelStyle}
+              >
+                {orderButtonLabel}
+              </AppButton>
+            ) : null}
             <AppButton
               mode={bookFilter === "standard" ? "outlined" : "contained"}
               compact

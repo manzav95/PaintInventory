@@ -786,7 +786,18 @@ app.get('/api/material-usage', async (req, res) => {
     const fromDate = (req.query.from && String(req.query.from).trim()) || null;
     const toDate = (req.query.to && String(req.query.to).trim()) || null;
     const excludeAdmin = req.query.excludeAdmin === 'true' || req.query.excludeAdmin === '1';
-    const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate, excludeAdmin);
+    const itemId =
+      (req.query.item_id && String(req.query.item_id).trim()) ||
+      (req.query.itemId && String(req.query.itemId).trim()) ||
+      null;
+    const colorName =
+      (req.query.color_name && String(req.query.color_name).trim()) ||
+      (req.query.colorName && String(req.query.colorName).trim()) ||
+      null;
+    const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate, excludeAdmin, {
+      itemId,
+      colorName,
+    });
     res.json(rows);
   } catch (error) {
     console.error('Error fetching material usage:', error);

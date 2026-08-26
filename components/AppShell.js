@@ -46,6 +46,8 @@ export default function AppShell({
   notifications,
   /** Optional controls rendered in the top bar immediately before Refresh (desktop). */
   topBarExtras = null,
+  /** Optional full-width status strip under the top bar (e.g. background jobs). */
+  statusBanner = null,
 }) {
   const theme = useTheme();
   const { enablePullToRefresh } = useAppLayout();
@@ -292,6 +294,10 @@ export default function AppShell({
             {topActions}
           </View>
 
+          {statusBanner ? (
+            <View style={styles.statusBannerSlot}>{statusBanner}</View>
+          ) : null}
+
           <PullToRefresh
             style={[
               styles.webMain,
@@ -436,6 +442,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingLeft: space[1],
     zIndex: 5,
+  },
+  statusBannerSlot: {
+    flexShrink: 0,
+    zIndex: 4,
   },
   topBarLeft: {
     flexDirection: "row",

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -13,9 +13,10 @@ import {
   useTheme,
   IconButton,
   ActivityIndicator,
+  SegmentedButtons,
 } from "react-native-paper";
-import AppButton from "../components/ui/AppButton";
 import AuditService from "../services/auditService";
+import MaterialUsageService from "../services/materialUsageService";
 import { AppText, AppEmptyState } from "../components/ui";
 import { getActionColor } from "../utils/actionColors";
 
@@ -34,7 +35,6 @@ function getDayKey(ts) {
 function formatDayHeader(ts) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "—";
-  // Example: "Monday 3/22"
   const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
   const md = d.toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
   return `${weekday} ${md}`;
@@ -70,7 +70,10 @@ function getQuantity(action, details) {
     action === "recycled" ||
     (action === "update" &&
       details._actionType &&
-      (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving" || details._actionType === "recycled"));
+      (details._actionType === "check_in" ||
+        details._actionType === "check_out" ||
+        details._actionType === "receiving" ||
+        details._actionType === "recycled"));
   if (isCheckInOut) {
     const q = details.quantityChange ?? details._quantityChange;
     if (typeof q === "number") return Math.abs(q);
@@ -90,7 +93,12 @@ function getTotalQuantity(action, details) {
     action === "check_out" ||
     action === "receiving" ||
     action === "recycled" ||
-    (action === "update" && details._actionType && (details._actionType === "check_in" || details._actionType === "check_out" || details._actionType === "receiving" || details._actionType === "recycled"));
+    (action === "update" &&
+      details._actionType &&
+      (details._actionType === "check_in" ||
+        details._actionType === "check_out" ||
+        details._actionType === "receiving" ||
+        details._actionType === "recycled"));
   if (isCheckInOut && typeof details.quantity === "number") return details.quantity;
   if (action === "update" && typeof details.quantity === "number") return details.quantity;
   if (action === "add" && typeof details.quantity === "number") return details.quantity;
@@ -102,63 +110,288 @@ function getDisplayUserName(log) {
   const u = (log.userName || "").trim().toLowerCase();
   if (u && u !== "unknown") return log.userName;
   const adminOnly =
-    ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(log.action) ||
-    (log.action === "update" && !(log.details?._actionType === "check_in" || log.details?._actionType === "check_out" || log.details?._actionType === "receiving" || log.details?._actionType === "recycled"));
-  return adminOnly ? "Admin" : (log.userName || "Unknown");
+    ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(
+      log.action,
+    ) ||
+    (log.action === "update" &&
+      !(
+        log.details?._actionType === "check_in" ||
+        log.details?._actionType === "check_out" ||
+        log.details?._actionType === "receiving" ||
+        log.details?._actionType === "recycled"
+      ));
+  return adminOnly ? "Admin" : log.userName || "Unknown";
 }
 
 function filterToStandardUserVisible(logs) {
   return logs.filter((log) => {
     const a = log.action;
     const d = log.details;
-    if (a === "check_in" || a === "check_out" || a === "receiving" || a === "recycled" || a === "delete") return true;
-    if (a === "update" && d?._actionType && (d._actionType === "check_in" || d._actionType === "check_out" || d._actionType === "receiving" || d._actionType === "recycled")) return true;
+    if (
+      a === "check_in" ||
+      a === "check_out" ||
+      a === "receiving" ||
+      a === "recycled" ||
+      a === "delete"
+    )
+      return true;
+    if (
+      a === "update" &&
+      d?._actionType &&
+      (d._actionType === "check_in" ||
+        d._actionType === "check_out" ||
+        d._actionType === "receiving" ||
+        d._actionType === "recycled")
+    )
+      return true;
     return false;
   });
 }
 
-export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = true }) {
+function formatUsageQty(row) {
+  const gal = Number(row?.qty_gallons) || 0;
+  if (row?.cup_gun) {
+    const oz = Math.round(gal * 128 * 100) / 100;
+    return `${oz} oz`;
+  }
+  return `${gal} gal`;
+}
+
+function formatUsageWhen(row) {
+  const date = row?.entry_date || "";
+  const time = row?.entry_time || "";
+  if (date && time) return `${date} · ${time}`;
+  return date || time || "—";
+}
+
+export default function ItemTransactionHistoryScreen({
+  item,
+  onBack,
+  isAdmin = true,
+}) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isWeb = Platform.OS === "web";
   const isDesktop = isWeb && width >= 700;
+  const [activeTab, setActiveTab] = useState("checks");
   const [logs, setLogs] = useState([]);
+  const [usageLogs, setUsageLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const cutoff = useMemo(() => Date.now() - THREE_MONTHS_MS, []);
 
-  const loadLogs = async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    try {
-      const all = await AuditService.list(2000);
-      const itemId = item?.id != null ? String(item.id) : "";
-      let filtered = (Array.isArray(all) ? all : [])
-        .filter((log) => String(log.itemId) === itemId)
-        .filter((log) => {
-          const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-          return t >= cutoff;
-        })
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      if (!isAdmin) filtered = filterToStandardUserVisible(filtered);
-      setLogs(filtered);
-    } catch (e) {
-      console.error("ItemTransactionHistoryScreen load:", e);
-      setLogs([]);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const loadChecks = useCallback(async () => {
+    const all = await AuditService.list(2000);
+    const itemId = item?.id != null ? String(item.id) : "";
+    let filtered = (Array.isArray(all) ? all : [])
+      .filter((log) => String(log.itemId) === itemId)
+      .filter((log) => {
+        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+        return t >= cutoff;
+      })
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    if (!isAdmin) filtered = filterToStandardUserVisible(filtered);
+    setLogs(filtered);
+  }, [item?.id, isAdmin, cutoff]);
+
+  const loadUsage = useCallback(async () => {
+    const itemId = item?.id != null ? String(item.id) : "";
+    const colorName =
+      (item?.name && String(item.name).trim()) ||
+      (item?.color && String(item.color).trim()) ||
+      "";
+    const list = await MaterialUsageService.list(null, 2000, {
+      item_id: itemId || undefined,
+      color_name: colorName || undefined,
+      ...(isAdmin ? {} : { excludeAdmin: true }),
+    });
+    const cutoffIso = new Date(cutoff).toISOString().slice(0, 10);
+    const filtered = (Array.isArray(list) ? list : [])
+      .filter((row) => {
+        const d = String(row.entry_date || "").slice(0, 10);
+        return !d || d >= cutoffIso;
+      })
+      .sort((a, b) => {
+        const ta = `${a.entry_date || ""} ${a.entry_time || ""}`;
+        const tb = `${b.entry_date || ""} ${b.entry_time || ""}`;
+        return tb.localeCompare(ta);
+      });
+    setUsageLogs(filtered);
+  }, [item?.id, item?.name, item?.color, isAdmin, cutoff]);
+
+  const loadAll = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      try {
+        await Promise.all([loadChecks(), loadUsage()]);
+      } catch (e) {
+        console.error("ItemTransactionHistoryScreen load:", e);
+        setLogs([]);
+        setUsageLogs([]);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [loadChecks, loadUsage],
+  );
 
   useEffect(() => {
-    if (item) loadLogs();
-  }, [item?.id, isAdmin]);
+    if (item) loadAll();
+  }, [item?.id, isAdmin, loadAll]);
 
   if (!item) {
     return null;
   }
+
+  const checksContent =
+    logs.length === 0 ? (
+      <AppEmptyState
+        title="No check-in/out activity in the last 3 months"
+        style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
+      />
+    ) : (
+      logs.map((log, index) => {
+        const showDayDividers = isAdmin && isDesktop;
+        const dayKey = showDayDividers ? getDayKey(log.timestamp) : null;
+        const prevKey =
+          showDayDividers && index > 0
+            ? getDayKey(logs[index - 1]?.timestamp)
+            : null;
+        const startsNewDay = showDayDividers && dayKey && dayKey !== prevKey;
+        const actionText = formatAction(log.action, log.details);
+        const color = getActionColor(log.action, log.details);
+        const qty = getQuantity(log.action, log.details);
+        const total = getTotalQuantity(log.action, log.details);
+        const dateStr = log.timestamp
+          ? new Date(log.timestamp).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—";
+        return (
+          <React.Fragment key={`${log.timestamp}-${index}`}>
+            {startsNewDay && (
+              <View style={styles.dayDivider}>
+                <Text
+                  style={[
+                    styles.dayDividerText,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {formatDayHeader(log.timestamp)}
+                </Text>
+                <View
+                  style={[
+                    styles.dayDividerLine,
+                    {
+                      backgroundColor: theme.dark
+                        ? "rgba(255,255,255,0.18)"
+                        : "rgba(0,0,0,0.12)",
+                    },
+                  ]}
+                />
+              </View>
+            )}
+            <View
+              style={[
+                styles.row,
+                index < logs.length - 1 && styles.rowBorder,
+                { borderBottomColor: theme.colors.outlineVariant },
+              ]}
+            >
+              <View style={styles.rowLeft}>
+                <Text
+                  style={[
+                    styles.time,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {dateStr}
+                </Text>
+                <Text
+                  style={[
+                    styles.user,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {getDisplayUserName(log)}
+                </Text>
+              </View>
+              <View
+                style={[styles.actionChip, { backgroundColor: color + "22" }]}
+              >
+                <Text style={[styles.actionText, { color }]}>{actionText}</Text>
+              </View>
+              <Text style={[styles.qty, { color: theme.colors.onSurface }]}>
+                {qty !== "-" ? `${qty}` : "-"}
+              </Text>
+              <Text style={[styles.total, { color: theme.colors.onSurface }]}>
+                {total !== "-" ? `${total} gal` : "-"}
+              </Text>
+            </View>
+          </React.Fragment>
+        );
+      })
+    );
+
+  const usageContent =
+    usageLogs.length === 0 ? (
+      <AppEmptyState
+        title="No mix / usage history in the last 3 months"
+        style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
+      />
+    ) : (
+      usageLogs.map((row, index) => (
+        <View
+          key={row.id != null ? String(row.id) : `usage-${index}`}
+          style={[
+            styles.row,
+            index < usageLogs.length - 1 && styles.rowBorder,
+            { borderBottomColor: theme.colors.outlineVariant },
+          ]}
+        >
+          <View style={styles.rowLeft}>
+            <Text
+              style={[styles.time, { color: theme.colors.onSurfaceVariant }]}
+            >
+              {formatUsageWhen(row)}
+            </Text>
+            <Text
+              style={[styles.user, { color: theme.colors.onSurfaceVariant }]}
+            >
+              {row.user_name || "Unknown"}
+              {row.booth ? ` · ${row.booth}` : ""}
+            </Text>
+            <Text
+              style={[styles.user, { color: theme.colors.onSurfaceVariant }]}
+            >
+              Job {row.job_name || "—"}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.actionChip,
+              { backgroundColor: theme.colors.primaryContainer },
+            ]}
+          >
+            <Text
+              style={[styles.actionText, { color: theme.colors.onPrimaryContainer }]}
+            >
+              Mixed
+            </Text>
+          </View>
+          <Text style={[styles.total, { color: theme.colors.onSurface }]}>
+            {formatUsageQty(row)}
+          </Text>
+        </View>
+      ))
+    );
 
   const content = (
     <>
@@ -194,6 +427,23 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
         <Text style={[styles.itemId, { color: theme.colors.onSurfaceVariant }]}>
           ID: {item.id} · Last 3 months
         </Text>
+        <SegmentedButtons
+          value={activeTab}
+          onValueChange={setActiveTab}
+          style={styles.tabs}
+          buttons={[
+            {
+              value: "checks",
+              label: "Checks",
+              icon: "swap-vertical",
+            },
+            {
+              value: "usage",
+              label: "Usage",
+              icon: "beaker-outline",
+            },
+          ]}
+        />
       </View>
       {loading ? (
         <View style={styles.centered}>
@@ -206,7 +456,7 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => loadLogs(true)}
+              onRefresh={() => loadAll(true)}
               tintColor={theme.colors.primary}
             />
           }
@@ -218,106 +468,7 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
             ]}
           >
             <Card.Content style={styles.cardContent}>
-              {logs.length === 0 ? (
-                <AppEmptyState
-                  title="No transactions in the last 3 months"
-                  style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
-                />
-              ) : (
-                logs.map((log, index) => {
-                  const showDayDividers = isAdmin && isDesktop;
-                  const dayKey = showDayDividers ? getDayKey(log.timestamp) : null;
-                  const prevKey =
-                    showDayDividers && index > 0
-                      ? getDayKey(logs[index - 1]?.timestamp)
-                      : null;
-                  const startsNewDay =
-                    showDayDividers && dayKey && dayKey !== prevKey;
-                  const actionText = formatAction(log.action, log.details);
-                  const color = getActionColor(log.action, log.details);
-                  const qty = getQuantity(log.action, log.details);
-                  const total = getTotalQuantity(log.action, log.details);
-                  const dateStr = log.timestamp
-                    ? new Date(log.timestamp).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "—";
-                  return (
-                    <React.Fragment key={`${log.timestamp}-${index}`}>
-                      {startsNewDay && (
-                        <View style={styles.dayDivider}>
-                          <Text
-                            style={[
-                              styles.dayDividerText,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            {formatDayHeader(log.timestamp)}
-                          </Text>
-                          <View
-                            style={[
-                              styles.dayDividerLine,
-                              {
-                                backgroundColor: theme.dark
-                                  ? "rgba(255,255,255,0.18)"
-                                  : "rgba(0,0,0,0.12)",
-                              },
-                            ]}
-                          />
-                        </View>
-                      )}
-                      <View
-                        style={[
-                          styles.row,
-                          index < logs.length - 1 && styles.rowBorder,
-                          { borderBottomColor: theme.colors.outlineVariant },
-                        ]}
-                      >
-                        <View style={styles.rowLeft}>
-                          <Text
-                            style={[
-                              styles.time,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            {dateStr}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.user,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            {getDisplayUserName(log)}
-                          </Text>
-                        </View>
-                        <View
-                          style={[
-                            styles.actionChip,
-                            { backgroundColor: color + "22" },
-                          ]}
-                        >
-                          <Text style={[styles.actionText, { color }]}>
-                            {actionText}
-                          </Text>
-                        </View>
-                        <Text style={[styles.qty, { color: theme.colors.onSurface }]}>
-                          {qty !== "-" ? `${qty}` : "-"}
-                        </Text>
-                        <Text
-                          style={[styles.total, { color: theme.colors.onSurface }]}
-                        >
-                          {total !== "-" ? `${total} gal` : "-"}
-                        </Text>
-                      </View>
-                    </React.Fragment>
-                  );
-                })
-              )}
+              {activeTab === "checks" ? checksContent : usageContent}
             </Card.Content>
           </Card>
         </ScrollView>
@@ -327,18 +478,9 @@ export default function ItemTransactionHistoryScreen({ item, onBack, isAdmin = t
 
   return (
     <View
-      style={[
-        styles.container,
-        { backgroundColor: theme.colors.background },
-      ]}
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      {isDesktop ? (
-        <View style={styles.webContainer}>
-          {content}
-        </View>
-      ) : (
-        content
-      )}
+      {isDesktop ? <View style={styles.webContainer}>{content}</View> : content}
     </View>
   );
 }
@@ -383,6 +525,9 @@ const styles = StyleSheet.create({
   itemId: {
     fontSize: 13,
     marginTop: 4,
+  },
+  tabs: {
+    marginTop: 14,
   },
   centered: {
     flex: 1,
@@ -459,7 +604,7 @@ const styles = StyleSheet.create({
   total: {
     fontSize: 14,
     fontWeight: "600",
-    width: 56,
+    width: 64,
     textAlign: "right",
   },
 });

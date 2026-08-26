@@ -56,6 +56,7 @@ const PANEL = {
   "admin-export": { title: "Export", parent: "admin" },
   "admin-overtime": { title: "Overtime", parent: "admin" },
   "admin-zeros": { title: "Zero quantities", parent: "admin" },
+  "admin-hex": { title: "Color hex lookup", parent: "admin" },
   "admin-codes": { title: "External codes", parent: "admin" },
 };
 
@@ -178,6 +179,8 @@ export default function SettingsScreen({
   onExportMaterialUsageExcel,
   onZeroCustomQuantities,
   onZeroStaleCustomQuantities,
+  onFillMissingCustomHex,
+  hexBackfillRunning = false,
   embeddedInShell = false,
 }) {
   const theme = useTheme();
@@ -585,6 +588,14 @@ export default function SettingsScreen({
                 onPress={() => setPanel("admin-zeros")}
               />
               <SettingsMenuRow
+                icon="palette-swatch-outline"
+                title="Color hex lookup"
+                compact
+                showChevron={false}
+                selected={panel === "admin-hex"}
+                onPress={() => setPanel("admin-hex")}
+              />
+              <SettingsMenuRow
                 icon="barcode"
                 title="External codes"
                 compact
@@ -724,6 +735,13 @@ export default function SettingsScreen({
         description="Reset custom color stock to 0"
         onPress={() => setPanel("admin-zeros")}
         danger
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="palette-swatch-outline"
+        title="Color hex lookup"
+        description="Fill missing hex codes from color names"
+        onPress={() => setPanel("admin-hex")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
       <SettingsMenuRow
@@ -1087,6 +1105,31 @@ export default function SettingsScreen({
     </AppSurface>
   );
 
+  const renderAdminHex = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        Fill missing color hex
+      </AppText>
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Finds custom paint/stain items that have a name (or color book code)
+        but no hex, then looks up hex codes online. Progress shows in a bar at
+        the top of the app so you can keep working. Confirm when it finishes.
+      </AppText>
+      <AppButton
+        mode="contained"
+        onPress={onFillMissingCustomHex}
+        style={styles.adminButton}
+        icon="palette-swatch"
+        loading={hexBackfillRunning}
+        disabled={hexBackfillRunning || !onFillMissingCustomHex}
+      >
+        {hexBackfillRunning
+          ? "Lookup running…"
+          : "Look up missing custom hex colors"}
+      </AppButton>
+    </AppSurface>
+  );
+
   const renderAdminCodes = () => (
     <AppSurface>
       <AppText variant="sectionTitle" style={styles.sectionTitle}>
@@ -1163,6 +1206,8 @@ export default function SettingsScreen({
         return isAdmin ? renderAdminOvertime() : renderRoot();
       case "admin-zeros":
         return isAdmin ? renderAdminZeros() : renderRoot();
+      case "admin-hex":
+        return isAdmin ? renderAdminHex() : renderRoot();
       case "admin-codes":
         return isAdmin ? renderAdminCodes() : renderRoot();
       case "root":
