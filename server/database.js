@@ -1,6 +1,9 @@
 const { Pool } = require("pg");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
+const {
+  resolveMaterialBaseKey,
+} = require("./materialUsageBase");
 
 const BCRYPT_ROUNDS = 12;
 
@@ -348,6 +351,28 @@ class Database {
         END IF;
       END $$
     `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'items' AND column_name = 'hide_from_material_usage'
+        ) THEN
+          ALTER TABLE items ADD COLUMN hide_from_material_usage BOOLEAN NOT NULL DEFAULT FALSE;
+        END IF;
+      END $$
+    `);
+    // Backfill: items historically excluded from the material-usage picker
+    await client.query(`
+      UPDATE items
+      SET hide_from_material_usage = TRUE
+      WHERE hide_from_material_usage IS NOT TRUE
+        AND (
+          LOWER(TRIM(COALESCE(name, ''))) ~ '^(acetone|catalyst|slow[[:space:]]*reducer)$'
+          OR LOWER(TRIM(COALESCE(id, ''))) ~ '^(acetone|catalyst|slow[[:space:]]*reducer)$'
+          OR LOWER(TRIM(COALESCE("type", ''))) = 'catalyst'
+          OR LOWER(TRIM(COALESCE(name, ''))) ~ '^(dye|stain|toner)[[:space:]]*base$'
+        )
+    `);
     // Legacy "Custom Container" → default stack C-A for custom paint/stain with stock.
     // Leave empty location when quantity is 0 (no stack when empty).
     const stackBackfill = await client.query(
@@ -424,6 +449,24 @@ class Database {
       CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log (action)
     `);
     console.log("Audit log table ready");
+
+    // Idempotency keys for check-in/out (and related) quantity updates.
+    // Prevents duplicate inventory + audit rows when the client retries
+    // after a dropped response or offline-queue replay.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS processed_transactions (
+        transaction_id TEXT PRIMARY KEY,
+        item_id TEXT,
+        action TEXT,
+        user_name TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_processed_transactions_created
+      ON processed_transactions (created_at)
+    `);
+    console.log("Processed transactions table ready");
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS login_log (
@@ -613,6 +656,48 @@ class Database {
         END IF;
       END $$
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lineup (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        job_name TEXT NOT NULL DEFAULT '',
+        color_name TEXT NOT NULL DEFAULT '',
+        material_type TEXT NOT NULL DEFAULT '',
+        item_id TEXT DEFAULT NULL,
+        item_type TEXT NOT NULL DEFAULT '',
+        cars_qty REAL NOT NULL DEFAULT 0,
+        laps INTEGER NOT NULL DEFAULT 1,
+        cart_number TEXT NOT NULL DEFAULT '',
+        user_name TEXT NOT NULL DEFAULT ''
+      )
+    `);
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'lineup' AND column_name = 'material_type'
+        ) THEN
+          ALTER TABLE lineup ADD COLUMN material_type TEXT NOT NULL DEFAULT '';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'lineup' AND column_name = 'item_id'
+        ) THEN
+          ALTER TABLE lineup ADD COLUMN item_id TEXT DEFAULT NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lineup_mixed (
+        lineup_id INTEGER NOT NULL REFERENCES lineup(id) ON DELETE CASCADE,
+        user_name TEXT NOT NULL DEFAULT '',
+        mixed_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (lineup_id, user_name)
+      )
+    `);
+    console.log("Lineup table ready");
   }
 
   async getAllItems() {
@@ -757,6 +842,16 @@ class Database {
           colorLabel,
         ],
       );
+      const hideFromMu =
+        item.hide_from_material_usage === true ||
+        item.hide_from_material_usage === "true" ||
+        item.hide_from_material_usage === 1;
+      if (hideFromMu) {
+        await this.pool.query(
+          `UPDATE items SET hide_from_material_usage = TRUE WHERE id = $1`,
+          [item.id],
+        );
+      }
     } catch (e) {
       // Friendly duplicate messages for UI
       if (e && e.code === "23505") {
@@ -789,6 +884,10 @@ class Database {
         unit_label: unitLabel,
         catalyst_percent: catalystPercent,
         color_label: colorLabel,
+        hide_from_material_usage:
+          item.hide_from_material_usage === true ||
+          item.hide_from_material_usage === "true" ||
+          item.hide_from_material_usage === 1,
       }),
     };
   }
@@ -817,6 +916,7 @@ class Database {
       "unit_label",
       "catalyst_percent",
       "color_label",
+      "hide_from_material_usage",
       // Legacy PO fields (kept for backward compatibility)
       "po_label_ap",
       "po_label_mixing",
@@ -894,6 +994,12 @@ class Database {
           values.push(
             v != null && String(v).trim() !== "" ? String(v).trim() : null,
           );
+        } else if (key === "hide_from_material_usage") {
+          const v = updates[key];
+          if (v === true || v === false) values.push(v);
+          else if (v === "true" || v === 1 || v === "1") values.push(true);
+          else if (v === "false" || v === 0 || v === "0") values.push(false);
+          else values.push(false);
         } else if (key === "po_label_ap" || key === "po_label_mixing") {
           const v = updates[key];
           if (v === true || v === false) values.push(v);
@@ -1049,6 +1155,44 @@ class Database {
       ],
     );
     return { success: true, id: result.rows[0].id };
+  }
+
+  /**
+   * Claim an idempotency key. Returns { claimed: true } if this is the first
+   * time we've seen the id, or { claimed: false } if it was already processed.
+   * Empty/missing ids are treated as always-claimed (no-op protection off).
+   */
+  async claimTransactionId(transactionId, itemId, action, userName) {
+    const id = transactionId != null ? String(transactionId).trim() : "";
+    if (!id) return { claimed: true, skipped: true };
+    try {
+      await this.pool.query(
+        `INSERT INTO processed_transactions
+           (transaction_id, item_id, action, user_name)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          id,
+          itemId != null ? String(itemId) : null,
+          action != null ? String(action) : null,
+          userName != null ? String(userName) : null,
+        ],
+      );
+      return { claimed: true };
+    } catch (error) {
+      if (error && error.code === "23505") {
+        return { claimed: false };
+      }
+      throw error;
+    }
+  }
+
+  async releaseTransactionId(transactionId) {
+    const id = transactionId != null ? String(transactionId).trim() : "";
+    if (!id) return;
+    await this.pool.query(
+      `DELETE FROM processed_transactions WHERE transaction_id = $1`,
+      [id],
+    );
   }
 
   async getAuditLogs(limit = 100) {
@@ -1984,6 +2128,435 @@ class Database {
     return { success: true, updated: result.rowCount || 0 };
   }
 
+  // --- Lineup (line load estimates for mixers) ---
+
+  static LINEUP_PIECE_TYPES = ["cabs", "door/drawers", "molding"];
+
+  _normalizeLineupPieceTypes(raw) {
+    const allowed = new Set(Database.LINEUP_PIECE_TYPES);
+    const parts = String(raw || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => allowed.has(s));
+    return [...new Set(parts)];
+  }
+
+  _formatLineupPieceTypes(types) {
+    return types.join(",");
+  }
+
+  async getLineup(limit = 100, viewerUserName = "") {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+    const viewer = String(viewerUserName || "").trim().toLowerCase();
+    const result = await this.pool.query(
+      `SELECT l.*,
+              CASE WHEN m.lineup_id IS NOT NULL THEN true ELSE false END AS mixed_by_me
+       FROM lineup l
+       LEFT JOIN lineup_mixed m
+         ON m.lineup_id = l.id
+        AND lower(trim(m.user_name)) = $2
+       ORDER BY l.created_at DESC, l.id DESC
+       LIMIT $1`,
+      [lim, viewer || ""],
+    );
+    return result.rows;
+  }
+
+  async getLatestLineup() {
+    const result = await this.pool.query(
+      `SELECT * FROM lineup
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+    );
+    return result.rows[0] || null;
+  }
+
+  async setLineupMixed(id, userName, mixed) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const requester = String(userName || "").trim();
+    if (!requester) {
+      return { success: false, error: "User name is required" };
+    }
+    const exists = await this.pool.query(
+      `SELECT id FROM lineup WHERE id = $1 LIMIT 1`,
+      [entryId],
+    );
+    if (!exists.rows[0]) {
+      return { success: false, error: "Entry not found" };
+    }
+    if (mixed === false || mixed === "false" || mixed === 0) {
+      await this.pool.query(
+        `DELETE FROM lineup_mixed
+         WHERE lineup_id = $1 AND lower(trim(user_name)) = lower(trim($2))`,
+        [entryId, requester],
+      );
+      return { success: true, mixed: false };
+    }
+    await this.pool.query(
+      `INSERT INTO lineup_mixed (lineup_id, user_name, mixed_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (lineup_id, user_name)
+       DO UPDATE SET mixed_at = NOW()`,
+      [entryId, requester],
+    );
+    return { success: true, mixed: true };
+  }
+
+  async addLineup(entry) {
+    const jobName =
+      entry.job_name != null ? String(entry.job_name).trim() : "";
+    const colorName =
+      entry.color_name != null ? String(entry.color_name).trim() : "";
+    const materialType =
+      entry.material_type != null
+        ? String(entry.material_type).trim().toLowerCase()
+        : "";
+    const itemId =
+      entry.item_id != null && String(entry.item_id).trim() !== ""
+        ? String(entry.item_id).trim()
+        : null;
+    const pieceTypes = this._normalizeLineupPieceTypes(entry.item_type);
+    const itemType = this._formatLineupPieceTypes(pieceTypes);
+    const cartNumber =
+      entry.cart_number != null ? String(entry.cart_number).trim() : "";
+    const userName =
+      entry.user_name != null ? String(entry.user_name).trim() : "";
+    const carsQty = Number(entry.cars_qty);
+    let laps = parseInt(entry.laps, 10);
+    if (laps !== 2) laps = 1;
+    if (/^rework$/i.test(jobName)) laps = 1;
+    if (!jobName) return { success: false, error: "Job number is required" };
+    if (!colorName) return { success: false, error: "Color is required" };
+    if (!itemType) {
+      return {
+        success: false,
+        error: "Select at least one item type (cabs, door/drawers, molding)",
+      };
+    }
+    if (!Number.isFinite(carsQty) || carsQty <= 0) {
+      return { success: false, error: "Cars qty must be greater than zero" };
+    }
+    if (!cartNumber) {
+      return { success: false, error: "Starting cart number is required" };
+    }
+    if (!userName) return { success: false, error: "User name is required" };
+
+    const result = await this.pool.query(
+      `INSERT INTO lineup (
+         job_name, color_name, material_type, item_id, item_type,
+         cars_qty, laps, cart_number, user_name
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING *`,
+      [
+        jobName,
+        colorName,
+        materialType,
+        itemId,
+        itemType,
+        carsQty,
+        laps,
+        cartNumber,
+        userName,
+      ],
+    );
+    return { success: true, entry: result.rows[0] };
+  }
+
+  async updateLineup(id, entry, requestingUser) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const existing = await this.pool.query(
+      `SELECT * FROM lineup WHERE id = $1 LIMIT 1`,
+      [entryId],
+    );
+    const row = existing.rows[0];
+    if (!row) return { success: false, error: "Entry not found" };
+    const requester = String(requestingUser || "").trim().toLowerCase();
+    const owner = String(row.user_name || "").trim().toLowerCase();
+    const isAdmin =
+      requester === "admin123" || requester === "admin";
+    if (!requester || (requester !== owner && !isAdmin)) {
+      return {
+        success: false,
+        error: "Only the person who added this lineup can edit it",
+      };
+    }
+
+    const jobName =
+      entry.job_name != null
+        ? String(entry.job_name).trim()
+        : row.job_name;
+    const colorName =
+      entry.color_name != null
+        ? String(entry.color_name).trim()
+        : row.color_name;
+    const materialType =
+      entry.material_type != null
+        ? String(entry.material_type).trim().toLowerCase()
+        : row.material_type || "";
+    const itemId =
+      entry.item_id !== undefined
+        ? entry.item_id != null && String(entry.item_id).trim() !== ""
+          ? String(entry.item_id).trim()
+          : null
+        : row.item_id;
+    const pieceTypes =
+      entry.item_type != null
+        ? this._normalizeLineupPieceTypes(entry.item_type)
+        : this._normalizeLineupPieceTypes(row.item_type);
+    const itemType = this._formatLineupPieceTypes(pieceTypes);
+    const cartNumber =
+      entry.cart_number != null
+        ? String(entry.cart_number).trim()
+        : row.cart_number;
+    const carsQty =
+      entry.cars_qty != null ? Number(entry.cars_qty) : Number(row.cars_qty);
+    let laps =
+      entry.laps != null ? parseInt(entry.laps, 10) : parseInt(row.laps, 10);
+    if (laps !== 2) laps = 1;
+    if (/^rework$/i.test(jobName)) laps = 1;
+    if (!jobName) return { success: false, error: "Job number is required" };
+    if (!colorName) return { success: false, error: "Color is required" };
+    if (!itemType) {
+      return {
+        success: false,
+        error: "Select at least one item type (cabs, door/drawers, molding)",
+      };
+    }
+    if (!Number.isFinite(carsQty) || carsQty <= 0) {
+      return { success: false, error: "Cars qty must be greater than zero" };
+    }
+    if (!cartNumber) {
+      return { success: false, error: "Starting cart number is required" };
+    }
+
+    const result = await this.pool.query(
+      `UPDATE lineup SET
+         job_name = $2,
+         color_name = $3,
+         material_type = $4,
+         item_id = $5,
+         item_type = $6,
+         cars_qty = $7,
+         laps = $8,
+         cart_number = $9,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        entryId,
+        jobName,
+        colorName,
+        materialType,
+        itemId,
+        itemType,
+        carsQty,
+        laps,
+        cartNumber,
+      ],
+    );
+    if (result.rowCount === 0) {
+      return { success: false, error: "Entry not found" };
+    }
+    return { success: true, entry: result.rows[0] };
+  }
+
+  async deleteLineup(id, requestingUser) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid entry ID" };
+    }
+    const existing = await this.pool.query(
+      `SELECT id, user_name FROM lineup WHERE id = $1 LIMIT 1`,
+      [entryId],
+    );
+    const row = existing.rows[0];
+    if (!row) return { success: false, error: "Entry not found" };
+    const requester = String(requestingUser || "").trim().toLowerCase();
+    const owner = String(row.user_name || "").trim().toLowerCase();
+    const isAdmin =
+      requester === "admin123" || requester === "admin";
+    if (!requester || (requester !== owner && !isAdmin)) {
+      return {
+        success: false,
+        error: "Only the person who added this lineup can delete it",
+      };
+    }
+    const result = await this.pool.query(
+      `DELETE FROM lineup WHERE id = $1`,
+      [entryId],
+    );
+    if (result.rowCount === 0) {
+      return { success: false, error: "Entry not found" };
+    }
+    return { success: true, deleted: result.rowCount };
+  }
+
+  /**
+   * Find DYE Base / STAIN Base inventory row by name.
+   */
+  async findMaterialBaseItem(baseKey) {
+    if (!baseKey) return null;
+    const pattern =
+      baseKey === "dye"
+        ? "^dye[[:space:]]*base$"
+        : baseKey === "stain"
+          ? "^stain[[:space:]]*base$"
+          : null;
+    if (!pattern) return null;
+    const result = await this.pool.query(
+      `SELECT * FROM items
+       WHERE LOWER(TRIM(COALESCE(name, ''))) ~ $1
+          OR LOWER(TRIM(COALESCE(id, ''))) ~ $1
+       ORDER BY id
+       LIMIT 1`,
+      [pattern],
+    );
+    return result.rows[0] ? normalizeItemPoFields(result.rows[0]) : null;
+  }
+
+  async hasProcessedTransaction(transactionId) {
+    const id = transactionId != null ? String(transactionId).trim() : "";
+    if (!id) return false;
+    const result = await this.pool.query(
+      `SELECT 1 FROM processed_transactions WHERE transaction_id = $1 LIMIT 1`,
+      [id],
+    );
+    return result.rows.length > 0;
+  }
+
+  materialUsageBaseConsumeTxnId(muId) {
+    return `mu-base-consume-${muId}`;
+  }
+
+  /**
+   * Apply or reverse base-stock check-out for a material-usage row.
+   * @param {object} muRow - material_usage row fields
+   * @param {{ reverse?: boolean, qtyOverride?: number, transactionId?: string }} opts
+   */
+  async applyMaterialUsageBaseConsumption(muRow, opts = {}) {
+    const reverse = opts.reverse === true;
+    const baseKey = resolveMaterialBaseKey(
+      muRow.material_type,
+      muRow.color_name,
+      muRow.item_id,
+    );
+    if (!baseKey) return { applied: false, reason: "no_base_key" };
+
+    const qty =
+      opts.qtyOverride != null
+        ? Number(opts.qtyOverride)
+        : Number(muRow.qty_gallons) || 0;
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { applied: false, reason: "no_qty" };
+    }
+
+    const baseItem = await this.findMaterialBaseItem(baseKey);
+    if (!baseItem) {
+      console.warn(
+        `[MU base] No inventory item matching ${baseKey} base — skipped consumption`,
+      );
+      return { applied: false, reason: "base_item_missing", baseKey };
+    }
+
+    const muId = muRow.id != null ? String(muRow.id) : "unknown";
+    const transactionId =
+      opts.transactionId ||
+      (reverse
+        ? `mu-base-reverse-${muId}`
+        : this.materialUsageBaseConsumeTxnId(muId));
+
+    const claim = await this.claimTransactionId(
+      transactionId,
+      baseItem.id,
+      reverse ? "check_in" : "check_out",
+      muRow.user_name || "unknown",
+    );
+    if (!claim.claimed) {
+      return { applied: false, reason: "duplicate", transactionId, baseKey };
+    }
+
+    const oldQty = Number(baseItem.quantity) || 0;
+    const delta = reverse ? qty : -qty;
+    // Allow negative on base so overuse is visible
+    const newQty = Math.round((oldQty + delta) * 1000) / 1000;
+    const now = new Date().toISOString();
+    const userName =
+      muRow.user_name != null && String(muRow.user_name).trim() !== ""
+        ? String(muRow.user_name).trim()
+        : "unknown";
+
+    try {
+      await this.pool.query(
+        `UPDATE items SET
+           quantity = $2,
+           "lastScanned" = $3,
+           "lastScannedBy" = $4,
+           "updatedAt" = $3
+         WHERE id = $1`,
+        [baseItem.id, newQty, now, userName],
+      );
+
+      await this.addAuditLog(reverse ? "check_in" : "check_out", baseItem.id, userName, {
+        quantity: newQty,
+        oldQuantity: oldQty,
+        newQuantity: newQty,
+        quantityChange: qty,
+        material_usage_id: muRow.id || null,
+        material_type: muRow.material_type || null,
+        color_name: muRow.color_name || null,
+        job_name: muRow.job_name || null,
+        booth: muRow.booth || null,
+        base_key: baseKey,
+        source: "material_usage",
+        transactionId,
+        note: reverse
+          ? "Reversed material-usage base consumption"
+          : "Material-usage base consumption",
+      });
+
+      return {
+        applied: true,
+        baseKey,
+        itemId: baseItem.id,
+        oldQuantity: oldQty,
+        newQuantity: newQty,
+        quantityChange: qty,
+        reverse,
+      };
+    } catch (error) {
+      try {
+        await this.releaseTransactionId(transactionId);
+      } catch (_) {
+        // ignore
+      }
+      throw error;
+    }
+  }
+
+  /** Undo a prior MU base consume (if it was applied), then clear its claim. */
+  async reverseMaterialUsageBaseIfNeeded(muRow) {
+    if (!muRow?.id) return { applied: false };
+    const consumeId = this.materialUsageBaseConsumeTxnId(muRow.id);
+    const had = await this.hasProcessedTransaction(consumeId);
+    if (!had) return { applied: false, reason: "not_consumed" };
+    const result = await this.applyMaterialUsageBaseConsumption(muRow, {
+      reverse: true,
+      transactionId: `mu-base-reverse-${muRow.id}-${Date.now()}`,
+    });
+    try {
+      await this.releaseTransactionId(consumeId);
+    } catch (_) {
+      // ignore
+    }
+    return result;
+  }
+
   async addMaterialUsage(entry) {
     const qtyGallons = Number(entry.qty_gallons) || 0;
     let catalystOz;
@@ -2000,7 +2573,7 @@ class Database {
     const cupGun = entry.cup_gun === true;
     const result = await this.pool.query(
       `INSERT INTO material_usage (entry_date, entry_time, job_name, item_id, color_name, qty_gallons, catalyst_gallons, catalyst_oz, catalyzed_confirmed, booth, user_name, material_type, cup_gun)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [
         entry.entry_date || null,
         entry.entry_time || null,
@@ -2018,7 +2591,19 @@ class Database {
       ],
     );
     const row = result.rows[0];
-    return { success: true, id: row.id, created_at: row.created_at };
+    let baseConsumption = null;
+    try {
+      baseConsumption = await this.applyMaterialUsageBaseConsumption(row);
+    } catch (e) {
+      console.error("[MU base] consume after create failed:", e?.message || e);
+    }
+    return {
+      success: true,
+      id: row.id,
+      created_at: row.created_at,
+      entry: row,
+      baseConsumption,
+    };
   }
 
   async getMaterialUsage(boothFilter = null, limit = 500, fromDate = null, toDate = null, excludeAdmin = false, options = {}) {
@@ -2137,6 +2722,13 @@ class Database {
     if (!Number.isInteger(entryId) || entryId < 1) {
       return { success: false, error: "Invalid entry ID" };
     }
+    const existing = await this.pool.query(
+      `SELECT * FROM material_usage WHERE id = $1 LIMIT 1`,
+      [entryId],
+    );
+    const prev = existing.rows[0];
+    if (!prev) return { success: false, error: "Not found" };
+
     const qtyGallons = Number(entry.qty_gallons) || 0;
     const catalystOz =
       entry.catalyst_oz != null && !isNaN(Number(entry.catalyst_oz))
@@ -2186,13 +2778,41 @@ class Database {
       ],
     );
     if (result.rowCount === 0) return { success: false, error: "Not found" };
-    return { success: true, entry: result.rows[0] };
+    const next = result.rows[0];
+
+    // Adjust base consumption: reverse previous (if applied), then apply new
+    try {
+      await this.reverseMaterialUsageBaseIfNeeded(prev);
+    } catch (e) {
+      console.error("[MU base] reverse before edit failed:", e?.message || e);
+    }
+    let baseConsumption = null;
+    try {
+      baseConsumption = await this.applyMaterialUsageBaseConsumption(next);
+    } catch (e) {
+      console.error("[MU base] consume after edit failed:", e?.message || e);
+    }
+
+    return { success: true, entry: next, baseConsumption };
   }
 
   async deleteMaterialUsage(id) {
     const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
     if (!Number.isInteger(entryId) || entryId < 1) {
       return { success: false, error: "Invalid entry ID" };
+    }
+    const existing = await this.pool.query(
+      `SELECT * FROM material_usage WHERE id = $1 LIMIT 1`,
+      [entryId],
+    );
+    const prev = existing.rows[0];
+    if (!prev) {
+      return { success: false, error: "Entry not found" };
+    }
+    try {
+      await this.reverseMaterialUsageBaseIfNeeded(prev);
+    } catch (e) {
+      console.error("[MU base] reverse on delete failed:", e?.message || e);
     }
     const result = await this.pool.query(
       `DELETE FROM material_usage WHERE id = $1`,

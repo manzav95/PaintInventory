@@ -69,6 +69,12 @@ import {
 } from "../utils/materialUsageDay";
 import { getMaterialTypeColor } from "../utils/materialTypes";
 import {
+  isMaterialUsageEligibleItem,
+  formatMaterialPickerLabel,
+  getMaterialInputAccent,
+  resolvePaintItemFromNumericInput,
+} from "../utils/materialUsageItems";
+import {
   colors,
   mutedTextColor,
 } from "../theme/tokens";
@@ -297,53 +303,6 @@ function formatLogDate(entryDate) {
 }
 
 /** Inventory types shown in the material picker. Excludes acetone/catalyst/slow reducer. */
-const MATERIAL_USAGE_COLOR_TYPES = [
-  "paint",
-  "custom_paint",
-  "clear",
-  "primer",
-  "stain",
-  "custom_stain",
-];
-
-const MATERIAL_USAGE_EXCLUDE_NAME_RE =
-  /^(acetone|catalyst|slow\s*reducer)$/i;
-
-function isMaterialUsageEligibleItem(item) {
-  const type = String(item?.type || "").toLowerCase();
-  if (!MATERIAL_USAGE_COLOR_TYPES.includes(type)) return false;
-  const name = String(item?.name || "").trim();
-  const id = String(item?.id || "").trim();
-  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(name)) return false;
-  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(id)) return false;
-  return true;
-}
-
-/** Show "stain" after stain / custom_stain names when not already present. */
-function formatMaterialPickerLabel(item) {
-  const name = String(item?.name || item?.id || "").trim();
-  if (!name) return "";
-  const type = String(item?.type || "").toLowerCase();
-  if (
-    (type === "stain" || type === "custom_stain") &&
-    !/\bstain\b/i.test(name)
-  ) {
-    return `${name} stain`;
-  }
-  return name;
-}
-
-/** Accent for the Material field outline/text (toner → clear/orange). */
-function getMaterialInputAccent(type, theme) {
-  const t = String(type || "").toLowerCase();
-  if (!t) return null;
-  if (t === "primer") {
-    // White / neutral — slightly muted on light surfaces so the outline stays visible.
-    return theme?.dark ? "#eceff1" : "#8A8478";
-  }
-  return getMaterialTypeColor(t, theme);
-}
-
 /** Parse custom material input:
  * - If user types a paint ID (e.g. "1234" or "#1234"), treat as paint.
  * - Otherwise, exactly one of dye/stain/toner required. toner → clear.
@@ -551,11 +510,21 @@ export default function MaterialUsageScreen({
     };
   }, []);
 
+  const resolvedTypedPaint = useMemo(() => {
+    if (selectedItem) return null;
+    const custom = (customColor || colorQuery || "").trim();
+    if (!custom) return null;
+    return resolvePaintItemFromNumericInput(custom, inventory);
+  }, [selectedItem, customColor, colorQuery, inventory]);
+
   const effectiveMaterialType = useMemo(() => {
     if (selectedItem) return (selectedItem.type || "").toLowerCase() || null;
+    if (resolvedTypedPaint) {
+      return (resolvedTypedPaint.type || "").toLowerCase() || "paint";
+    }
     const custom = (customColor || colorQuery || "").trim();
     return custom ? deriveCustomCategory(custom) : null;
-  }, [selectedItem, customColor, colorQuery]);
+  }, [selectedItem, resolvedTypedPaint, customColor, colorQuery]);
 
   const materialInputAccent = useMemo(
     () => getMaterialInputAccent(effectiveMaterialType, theme),
@@ -566,14 +535,20 @@ export default function MaterialUsageScreen({
     ? formatMaterialPickerLabel(selectedItem)
     : customColor || colorQuery;
 
+  const activeMaterialItem = selectedItem || resolvedTypedPaint;
+
+  const isPrimerSelected =
+    String(effectiveMaterialType || "").toLowerCase() === "primer" &&
+    !!selectedItem;
+
   const needsCatalyst = useMemo(
-    () => materialNeedsCatalyst(effectiveMaterialType, selectedItem),
-    [effectiveMaterialType, selectedItem],
+    () => materialNeedsCatalyst(effectiveMaterialType, activeMaterialItem),
+    [effectiveMaterialType, activeMaterialItem],
   );
 
   const catalystPercent = useMemo(
-    () => resolveCatalystPercent(effectiveMaterialType, selectedItem),
-    [effectiveMaterialType, selectedItem],
+    () => resolveCatalystPercent(effectiveMaterialType, activeMaterialItem),
+    [effectiveMaterialType, activeMaterialItem],
   );
 
   const catalystOz = useMemo(() => {
@@ -1136,7 +1111,15 @@ export default function MaterialUsageScreen({
       });
       return;
     }
-    if (customTrim && !selectedItem) {
+    // Bare paint numbers (4386 / #4386) → link inventory paint/custom_paint when present
+    let resolvedItem = selectedItem;
+    if (!resolvedItem && customTrim) {
+      resolvedItem = resolvePaintItemFromNumericInput(
+        customColor || colorQuery || customTrim,
+        inventory,
+      );
+    }
+    if (customTrim && !resolvedItem) {
       const parsed = parseCustomMaterialInput(customTrim);
       if (!parsed.ok) {
         const title =
@@ -1177,12 +1160,12 @@ export default function MaterialUsageScreen({
         catOz = computeCatalystOz(rawQty, catalystPercent, false);
       }
     }
-    const itemId = selectedItem ? selectedItem.id : "";
-    const colorName = selectedItem
-      ? formatMaterialPickerLabel(selectedItem)
+    const itemId = resolvedItem ? resolvedItem.id : "";
+    const colorName = resolvedItem
+      ? formatMaterialPickerLabel(resolvedItem)
       : customTrim;
-    const materialType = selectedItem
-      ? (selectedItem.type || "").toLowerCase() || null
+    const materialType = resolvedItem
+      ? (resolvedItem.type || "").toLowerCase() || null
       : parseCustomMaterialInput(customTrim).type;
     const entry = {
       entry_date: entryDate,
@@ -1218,7 +1201,7 @@ export default function MaterialUsageScreen({
     }
 
     const checkoutWarn = assessMissingCheckout({
-      item: selectedItem,
+      item: resolvedItem,
       materialType,
       auditLogs,
     });
@@ -1445,7 +1428,14 @@ export default function MaterialUsageScreen({
                 setTimeout(() => setMaterialFocused(false), 150);
               }}
               mode="outlined"
-              style={styles.input}
+              style={[
+                styles.input,
+                isPrimerSelected && {
+                  backgroundColor: theme.dark
+                    ? "rgba(255,255,255,0.12)"
+                    : "rgba(93,64,55,0.08)",
+                },
+              ]}
               placeholder="Search inventory or type custom dye/toner"
               outlineColor={
                 materialInputAccent ||
@@ -1471,12 +1461,43 @@ export default function MaterialUsageScreen({
                 ) : null
               }
             />
+            {selectedItem ? (
+              <Text
+                style={[
+                  styles.materialSelectedHint,
+                  {
+                    color:
+                      materialInputAccent || theme.colors.onSurfaceVariant,
+                  },
+                ]}
+              >
+                Selected from inventory
+                {effectiveMaterialType
+                  ? ` · ${formatMaterialTypeLabel(effectiveMaterialType)}`
+                  : ""}
+                {isPrimerSelected ? " — tap Log to submit" : ""}
+              </Text>
+            ) : resolvedTypedPaint ? (
+              <Text
+                style={[
+                  styles.materialSelectedHint,
+                  {
+                    color:
+                      materialInputAccent || theme.colors.onSurfaceVariant,
+                  },
+                ]}
+              >
+                Matches inventory{" "}
+                {formatMaterialPickerLabel(resolvedTypedPaint)}
+              </Text>
+            ) : null}
             {showMaterialSuggestions ? (
               <ScrollFrame maxHeight={220} style={styles.suggestBox}>
                 {materialSuggestions.map((item) => {
                   const type = String(item.type || "").toLowerCase();
                   const rowColor = getMaterialInputAccent(type, theme);
                   const label = formatMaterialPickerLabel(item);
+                  const isPrimerRow = type === "primer";
                   return (
                     <Pressable
                       key={item.id}
@@ -1488,6 +1509,11 @@ export default function MaterialUsageScreen({
                       }}
                       style={({ pressed }) => [
                         styles.colorRow,
+                        isPrimerRow && {
+                          backgroundColor: theme.dark
+                            ? "rgba(255,255,255,0.1)"
+                            : "rgba(93,64,55,0.08)",
+                        },
                         pressed && styles.colorRowPressed,
                       ]}
                     >
@@ -1496,6 +1522,7 @@ export default function MaterialUsageScreen({
                         style={[
                           styles.colorRowText,
                           rowColor ? { color: rowColor } : null,
+                          isPrimerRow && { fontWeight: "700" },
                         ]}
                       >
                         {label}
@@ -2153,6 +2180,11 @@ const styles = StyleSheet.create({
     maxWidth: "100%",
     minWidth: 0,
     zIndex: 2,
+  },
+  materialSelectedHint: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "700",
   },
   suggestBox: {
     marginTop: 6,

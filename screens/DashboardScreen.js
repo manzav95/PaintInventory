@@ -172,6 +172,7 @@ export default function DashboardScreen({
   onOpenInventory,
   onOpenMaterialUsage,
   onOpenWasteTracking,
+  onOpenLineup,
   onOpenCheckInOut,
   showCheckInOutNav = true,
 }) {
@@ -1713,6 +1714,7 @@ export default function DashboardScreen({
         (onOpenInventory ||
         onOpenMaterialUsage ||
         onOpenWasteTracking ||
+        onOpenLineup ||
         onOpenCheckInOut) && (
         <View style={styles.quickActionsBlock}>
           <Text
@@ -1813,6 +1815,29 @@ export default function DashboardScreen({
                   numberOfLines={1}
                 >
                   Waste
+                </Text>
+              </Pressable>
+            ) : null}
+            {onOpenLineup ? (
+              <Pressable
+                onPress={onOpenLineup}
+                style={[styles.quickAction, surfaceCardStyle]}
+                accessibilityRole="button"
+                accessibilityLabel="Lineup"
+              >
+                <Icon
+                  source="clipboard-list-outline"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Lineup
                 </Text>
               </Pressable>
             ) : null}

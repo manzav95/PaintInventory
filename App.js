@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, ActivityIndicator, Text } from "react-native-paper";
+import { Provider as PaperProvider, ActivityIndicator, Text, Dialog, Portal, Paragraph } from "react-native-paper";
 import AppButton from "./components/ui/AppButton";
 import {
-  normalizeItemIdQuery,
-  resolveBestInventoryMatch,
+  findExactInventoryScanMatch,
+  getScanRejectReason,
+  scanRejectMessage,
 } from './utils/itemLookup';
 import showAlert from './utils/showAlert';
 import showToast from './utils/showToast';
@@ -24,6 +25,7 @@ import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
 import AuditService from './services/auditService';
 import { enqueueQuantityAction, syncPendingQuantity } from './utils/offlineQueue';
+import { createTransactionId, isNetworkError } from './utils/transactionId';
 import OrderService from './services/orderService';
 import MaterialUsageService from './services/materialUsageService';
 import config from './config';
@@ -47,7 +49,9 @@ import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
+import LineupScreen from './screens/LineupScreen';
 import ReportsScreen from './screens/ReportsScreen';
+import LineupService from './services/lineupService';
 import AppShell from './components/AppShell';
 import AppSidebar from './components/AppSidebar';
 import NotificationsBell from './components/NotificationsBell';
@@ -133,6 +137,10 @@ export default function App() {
   });
   const [materialUsageVisited, setMaterialUsageVisited] = useState(false);
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
+  const [lineupAlert, setLineupAlert] = useState(null);
+  const lineupAlertInitializedRef = useRef(false);
+  const currentScreenRef = useRef(currentScreen);
+  currentScreenRef.current = currentScreen;
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
   const embeddedInShell = shouldUseShell(currentScreen);
 
@@ -145,6 +153,66 @@ export default function App() {
   useEffect(() => {
     if (showPersistentSidebar) setNavDrawerOpen(false);
   }, [showPersistentSidebar]);
+
+  // Poll for new lineup posts and alert other users
+  useEffect(() => {
+    if (!userName || isSales) {
+      lineupAlertInitializedRef.current = false;
+      setLineupAlert(null);
+      return undefined;
+    }
+    const LINEUP_SEEN_KEY = "lineup_alert_seen_id";
+    let cancelled = false;
+
+    const sameLineupUser = (a, b) =>
+      String(a || "")
+        .trim()
+        .toLowerCase() ===
+      String(b || "")
+        .trim()
+        .toLowerCase();
+
+    const checkLineupAlert = async () => {
+      try {
+        const latest = await LineupService.latest();
+        if (cancelled || !latest?.id) return;
+
+        const seenRaw = await AsyncStorage.getItem(LINEUP_SEEN_KEY);
+        const seenId = seenRaw != null ? parseInt(seenRaw, 10) : null;
+
+        if (!lineupAlertInitializedRef.current) {
+          lineupAlertInitializedRef.current = true;
+          if (seenId == null || Number.isNaN(seenId)) {
+            await AsyncStorage.setItem(LINEUP_SEEN_KEY, String(latest.id));
+            return;
+          }
+        }
+
+        if (seenId === latest.id) return;
+
+        // Poster already knows; users already on Lineup don't need a popup
+        if (
+          sameLineupUser(latest.user_name, actorName) ||
+          currentScreenRef.current === "lineup"
+        ) {
+          await AsyncStorage.setItem(LINEUP_SEEN_KEY, String(latest.id));
+          setLineupAlert(null);
+          return;
+        }
+
+        setLineupAlert(latest);
+      } catch {
+        // Silent — lineup alert is best-effort
+      }
+    };
+
+    checkLineupAlert();
+    const interval = setInterval(checkLineupAlert, 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [userName, isSales, actorName]);
 
   const navigateTo = (screen, options = {}) => {
     setNavDrawerOpen(false);
@@ -174,6 +242,12 @@ export default function App() {
         '',
         `${window.location.pathname}${window.location.search || ''}#/waste-tracking`,
       );
+    } else if (screen === 'lineup' && isWeb && typeof window !== 'undefined') {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}#/lineup`,
+      );
     } else if (screen === 'reports' && isWeb && typeof window !== 'undefined') {
       window.history.replaceState(
         null,
@@ -193,6 +267,19 @@ export default function App() {
     }
     setPreviousScreen(currentScreen);
     setCurrentScreen(screen);
+  };
+
+  const dismissLineupAlert = async (openLineup = false) => {
+    const id = lineupAlert?.id;
+    if (id != null) {
+      try {
+        await AsyncStorage.setItem("lineup_alert_seen_id", String(id));
+      } catch {
+        // ignore
+      }
+    }
+    setLineupAlert(null);
+    if (openLineup) navigateTo("lineup");
   };
 
   // When we have a logged-in user, try to sync any offline check-in/out actions.
@@ -239,6 +326,7 @@ export default function App() {
       const titles = {
         materialUsage: 'Material Usage',
         wasteTracking: 'Waste Tracking',
+        lineup: 'Lineup',
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         list: 'Inventory',
@@ -261,6 +349,8 @@ export default function App() {
         setCurrentScreen('materialUsage');
       } else if (path === '/waste-tracking' && userName != null) {
         setCurrentScreen('wasteTracking');
+      } else if (path === '/lineup' && userName != null) {
+        setCurrentScreen('lineup');
       } else if (path === '/reports' && userName != null && userName === 'admin123') {
         setCurrentScreen('reports');
       }
@@ -274,6 +364,8 @@ export default function App() {
         setCurrentScreen('materialUsage');
       } else if (p === '/waste-tracking' && userName != null) {
         setCurrentScreen('wasteTracking');
+      } else if (p === '/lineup' && userName != null) {
+        setCurrentScreen('lineup');
       } else if (p === '/reports' && userName != null && userName === 'admin123') {
         setCurrentScreen('reports');
       }
@@ -666,6 +758,15 @@ export default function App() {
     await loadInventory(true, { refreshCaches: true });
   };
 
+  const handleLogoPress = () => {
+    if (isSales) {
+      navigateTo('list');
+    } else {
+      navigateTo('home');
+    }
+    handleRefresh();
+  };
+
   const handleScanNFC = async () => {
     // NFC scanning is disabled in the current UI; keep handler as a no-op.
     Alert.alert('Not Available', 'NFC scanning is currently disabled. Use QR codes instead.');
@@ -695,57 +796,49 @@ export default function App() {
   const handleScanResult = async (itemId) => {
     if (!itemId) {
       Alert.alert('Scan Failed', 'Could not read item ID.');
-      setCurrentScreen(previousScreen || 'home');
+      setCurrentScreen('list');
       return;
     }
 
     const rawQuery = itemId.toString().trim();
-    if (rawQuery.length < 3) {
-      Alert.alert(
-        'Scan Too Short',
-        'Enter or scan at least 3 characters so the wrong item is not matched.',
-      );
-      setCurrentScreen('qrscan');
+    const rejectReason = getScanRejectReason(rawQuery);
+    if (rejectReason) {
+      const { title, message } = scanRejectMessage(rejectReason, rawQuery);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`${title}\n\n${message}`);
+      } else {
+        Alert.alert(title, message);
+      }
+      setCurrentScreen('list');
       return;
     }
 
     setScanLookupLoading(true);
     try {
-      const normalizedId = normalizeItemIdQuery(rawQuery);
-
       let item = null;
       try {
-        // Online lookup by ID first (exact)
-        item = await InventoryService.getItem(normalizedId);
+        // Exact ID / external_code only — never pad short codes or fuzzy-match
+        item = await InventoryService.getItem(rawQuery);
       } catch (err) {
-        // Network / server errors — fall through to local name/fuzzy search
-        console.warn('Item ID lookup failed, trying local search:', err?.message || err);
+        console.warn('Item ID lookup failed, trying local exact match:', err?.message || err);
       }
 
       if (!item) {
-        const { item: localBest, matches } = resolveBestInventoryMatch(
-          inventory,
-          rawQuery,
-        );
-        if (localBest) {
-          item = localBest;
-        } else if (matches.length > 0) {
-          item = matches[0]?.item || null;
-        }
+        item = findExactInventoryScanMatch(inventory, rawQuery);
       }
 
       if (!item) {
-        const title = 'Material Not Found';
+        const title = 'Not in System';
         const msg =
-          `No material matched "${rawQuery}".\n\n` +
-          'Try the full name, ID, or pick a suggestion from the list. If you are offline, sync inventory while online first.';
+          `No material found for "${rawQuery}".\n\n` +
+          'Item codes must match exactly.';
 
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
           window.alert(`${title}\n\n${msg}`);
-          setCurrentScreen('qrscan');
+          setCurrentScreen('list');
         } else {
           showAlert(title, msg, [
-            { text: 'OK', onPress: () => setCurrentScreen('qrscan') },
+            { text: 'OK', onPress: () => setCurrentScreen('list') },
           ]);
         }
         return;
@@ -761,47 +854,48 @@ export default function App() {
   const handleCheckIn = async (quantity, options = {}) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-in...', async () => {
-      try {
-        // All users can check in via QR scan
-        const extras =
-          options?.location != null && String(options.location).trim() !== ''
-            ? { location: String(options.location).trim() }
-            : {};
-        const result = await InventoryService.updateQuantity(
-          scannedItem.id,
-          quantity,
-          actorName,
-          'check_in',
-          extras,
-        );
-        if (result.success) {
-          const stackNote = extras.location
-            ? ` · ${formatCustomStackDisplay(extras.location)}`
-            : '';
-          showToast({
-            title: 'Checked in',
-            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
-          });
-          AuditService.log({
-            type: 'check_in',
-            user: actorName,
-            itemId: scannedItem.id,
-            quantity: quantity,
-            newQuantity: result.item.quantity,
-            ...(extras.location && { location: extras.location }),
-          });
+      const transactionId = createTransactionId();
+      const extras = {
+        transactionId,
+        ...(options?.location != null && String(options.location).trim() !== ''
+          ? { location: String(options.location).trim() }
+          : {}),
+      };
+      const result = await InventoryService.updateQuantity(
+        scannedItem.id,
+        quantity,
+        actorName,
+        'check_in',
+        extras,
+      );
+      if (result.success) {
+        const stackNote = extras.location
+          ? ` · ${formatCustomStackDisplay(extras.location)}`
+          : '';
+        showToast({
+          title: 'Checked in',
+          message: `${quantity} gal · ${scannedItem.name} → ${result.item?.quantity ?? '—'} gal${stackNote}`,
+        });
+        AuditService.log({
+          type: 'check_in',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity: quantity,
+          newQuantity: result.item?.quantity,
+          ...(extras.location && { location: extras.location }),
+        });
+        try {
           await loadInventory(false, { refreshCaches: true });
-        } else {
-          showAlert('Cannot check in', result.error || 'Failed to check in quantity.');
-          return;
+        } catch (refreshErr) {
+          console.error('Post check-in refresh failed:', refreshErr);
         }
-      } catch (err) {
-        // Likely offline – enqueue for later sync instead of failing the user flow
+      } else if (result.networkError || isNetworkError(result.error)) {
         await enqueueQuantityAction({
           itemId: scannedItem.id,
           change: quantity,
           userName: actorName,
           actionType: 'check_in',
+          transactionId,
           ...(options?.location && { location: options.location }),
         });
         showToast({
@@ -809,6 +903,9 @@ export default function App() {
           title: 'Saved offline',
           message: `Check-in for "${scannedItem.name}" will sync when online.`,
         });
+      } else {
+        showAlert('Cannot check in', result.error || 'Failed to check in quantity.');
+        return;
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -819,6 +916,7 @@ export default function App() {
   const handleReceiveDelivery = async (orderId, quantity, options = {}) => {
     if (!scannedItem) return;
     await runWithLoading('Recording delivery...', async () => {
+      const transactionId = createTransactionId();
       try {
         const receiveResult = await OrderService.receiveOrderLine(orderId, scannedItem.id, quantity);
         if (!receiveResult.success) {
@@ -829,6 +927,7 @@ export default function App() {
           return;
         }
         const extras = {
+          transactionId,
           currentItem: scannedItem,
           ...(options?.location != null &&
             String(options.location).trim() !== '' && {
@@ -842,46 +941,70 @@ export default function App() {
           'receiving',
           extras,
         );
-        if (!result.success) {
+        if (result.success) {
+          const stackNote = extras.location
+            ? ` · ${formatCustomStackDisplay(extras.location)}`
+            : '';
+          showToast({
+            title: 'Received',
+            message: `${quantity} gal · ${scannedItem.name} → ${result.item?.quantity ?? '—'} gal${stackNote}`,
+          });
+          AuditService.log({
+            type: 'receiving',
+            user: actorName,
+            itemId: scannedItem.id,
+            quantity,
+            newQuantity: result.item?.quantity,
+            orderId,
+            ...(extras.location && { location: extras.location }),
+          });
+          try {
+            await loadInventory(false, { refreshCaches: true });
+          } catch (refreshErr) {
+            console.error('Post receive refresh failed:', refreshErr);
+          }
+        } else if (result.networkError || isNetworkError(result.error)) {
+          await enqueueQuantityAction({
+            itemId: scannedItem.id,
+            change: quantity,
+            userName: actorName,
+            actionType: 'receiving',
+            orderId,
+            transactionId,
+            ...(options?.location && { location: options.location }),
+          });
+          showToast({
+            type: 'info',
+            title: 'Saved offline',
+            message: `Receiving for "${scannedItem.name}" will sync when online.`,
+          });
+        } else {
           showAlert(
             'Cannot receive',
             result.error || 'Failed to update inventory.',
           );
           return;
         }
-        const stackNote = extras.location
-          ? ` · ${formatCustomStackDisplay(extras.location)}`
-          : '';
-        showToast({
-          title: 'Received',
-          message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal${stackNote}`,
-        });
-        AuditService.log({
-          type: 'receiving',
-          user: actorName,
-          itemId: scannedItem.id,
-          quantity,
-          newQuantity: result.item.quantity,
-          orderId,
-          ...(extras.location && { location: extras.location }),
-        });
-        // Inventory + background cache warm; don't await heavy audit fetch.
-        await loadInventory(false, { refreshCaches: true });
       } catch (err) {
-        // Likely offline – enqueue for later sync instead of failing the user flow
-        await enqueueQuantityAction({
-          itemId: scannedItem.id,
-          change: quantity,
-          userName: actorName,
-          actionType: 'receiving',
-          orderId,
-          ...(options?.location && { location: options.location }),
-        });
-        showToast({
-          type: 'info',
-          title: 'Saved offline',
-          message: `Receiving for "${scannedItem.name}" will sync when online.`,
-        });
+        if (isNetworkError(err)) {
+          await enqueueQuantityAction({
+            itemId: scannedItem.id,
+            change: quantity,
+            userName: actorName,
+            actionType: 'receiving',
+            orderId,
+            transactionId,
+            ...(options?.location && { location: options.location }),
+          });
+          showToast({
+            type: 'info',
+            title: 'Saved offline',
+            message: `Receiving for "${scannedItem.name}" will sync when online.`,
+          });
+        } else {
+          showAlert('Cannot receive', err?.message || 'Failed to record delivery.');
+          return;
+        }
       }
       setScannedItem(null);
       const target = previousScreen || 'home';
@@ -892,46 +1015,54 @@ export default function App() {
   const handleCheckOut = async (quantity) => {
     if (!scannedItem) return;
     await runWithLoading('Saving check-out...', async () => {
-      try {
-        // All users can check out via QR scan
-        const result = await InventoryService.updateQuantity(scannedItem.id, -quantity, actorName, 'check_out');
-        if (result.success) {
-          showToast({
-            title: 'Checked out',
-            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
-          });
-          AuditService.log({
-            type: 'check_out',
-            user: actorName,
-            itemId: scannedItem.id,
-            quantity: quantity,
-            newQuantity: result.item.quantity,
-          });
+      const transactionId = createTransactionId();
+      const result = await InventoryService.updateQuantity(
+        scannedItem.id,
+        -quantity,
+        actorName,
+        'check_out',
+        { transactionId },
+      );
+      if (result.success) {
+        showToast({
+          title: 'Checked out',
+          message: `${quantity} gal · ${scannedItem.name} → ${result.item?.quantity ?? '—'} gal`,
+        });
+        AuditService.log({
+          type: 'check_out',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity: quantity,
+          newQuantity: result.item?.quantity,
+        });
+        try {
           await loadInventory(false, { refreshCaches: true });
-        } else {
-          const msg = result.error || 'Failed to check out quantity.';
-          showAlert('Cannot check out', msg);
-          showToast({
-            type: 'error',
-            title: 'Cannot check out',
-            message: msg,
-            duration: 5000,
-          });
-          return;
+        } catch (refreshErr) {
+          console.error('Post check-out refresh failed:', refreshErr);
         }
-      } catch (err) {
-        // Likely offline – enqueue for later sync instead of failing the user flow
+      } else if (result.networkError || isNetworkError(result.error)) {
         await enqueueQuantityAction({
           itemId: scannedItem.id,
           change: -quantity,
           userName: actorName,
           actionType: 'check_out',
+          transactionId,
         });
         showToast({
           type: 'info',
           title: 'Saved offline',
           message: `Check-out for "${scannedItem.name}" will sync when online.`,
         });
+      } else {
+        const msg = result.error || 'Failed to check out quantity.';
+        showAlert('Cannot check out', msg);
+        showToast({
+          type: 'error',
+          title: 'Cannot check out',
+          message: msg,
+          duration: 5000,
+        });
+        return;
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -988,45 +1119,50 @@ export default function App() {
     const t = String(scannedItem.type || '').toLowerCase();
     if (t !== 'custom_paint' && t !== 'custom_stain') return;
     await runWithLoading('Recording recycle...', async () => {
-      try {
-        const result = await InventoryService.updateQuantity(
-          scannedItem.id,
-          -quantity,
-          actorName,
-          'recycled',
-        );
-        if (result.success) {
-          showToast({
-            title: 'Recycled',
-            message: `${quantity} gal · ${scannedItem.name} → ${result.item.quantity} gal`,
-          });
-          AuditService.log({
-            type: 'recycled',
-            user: actorName,
-            itemId: scannedItem.id,
-            quantity,
-            newQuantity: result.item.quantity,
-          });
+      const transactionId = createTransactionId();
+      const result = await InventoryService.updateQuantity(
+        scannedItem.id,
+        -quantity,
+        actorName,
+        'recycled',
+        { transactionId },
+      );
+      if (result.success) {
+        showToast({
+          title: 'Recycled',
+          message: `${quantity} gal · ${scannedItem.name} → ${result.item?.quantity ?? '—'} gal`,
+        });
+        AuditService.log({
+          type: 'recycled',
+          user: actorName,
+          itemId: scannedItem.id,
+          quantity,
+          newQuantity: result.item?.quantity,
+        });
+        try {
           await loadInventory(false, { refreshCaches: true });
-        } else {
-          showAlert(
-            'Cannot recycle',
-            result.error || 'Failed to record recycle.',
-          );
-          return;
+        } catch (refreshErr) {
+          console.error('Post recycle refresh failed:', refreshErr);
         }
-      } catch (err) {
+      } else if (result.networkError || isNetworkError(result.error)) {
         await enqueueQuantityAction({
           itemId: scannedItem.id,
           change: -quantity,
           userName: actorName,
           actionType: 'recycled',
+          transactionId,
         });
         showToast({
           type: 'info',
           title: 'Saved offline',
           message: `Recycle for "${scannedItem.name}" will sync when online.`,
         });
+      } else {
+        showAlert(
+          'Cannot recycle',
+          result.error || 'Failed to record recycle.',
+        );
+        return;
       }
       setScannedItem(null);
       const target = previousScreen || 'list';
@@ -1769,6 +1905,17 @@ export default function App() {
             onBack={() => navigateTo('home')}
           />
         );
+      case 'lineup':
+        return (
+          <LineupScreen
+            userName={actorName}
+            inventory={inventory}
+            isAdmin={isAdmin}
+            embeddedInShell={embeddedInShell}
+            formRefreshKey={formRefreshKey}
+            onBack={() => navigateTo('home')}
+          />
+        );
       case 'settings':
         return (
           <SettingsScreen
@@ -1826,6 +1973,7 @@ export default function App() {
           onOpenInventory={() => navigateTo('list')}
           onOpenMaterialUsage={() => navigateTo('materialUsage')}
           onOpenWasteTracking={() => navigateTo('wasteTracking')}
+          onOpenLineup={() => navigateTo('lineup')}
           onOpenCheckInOut={() => navigateTo('qrscan')}
           onItemSelect={
             isAdmin
@@ -1852,7 +2000,10 @@ export default function App() {
           embeddedInShell
           formRefreshKey={formRefreshKey}
           onBack={() => navigateTo('home')}
-          onUsageDataChanged={() => refreshAuditLogs(true)}
+          onUsageDataChanged={() => {
+            refreshAuditLogs(true);
+            loadInventory(false, { refreshCaches: true });
+          }}
         />
       </KeepAlivePane>
     ) : null;
@@ -1881,6 +2032,7 @@ export default function App() {
         drawerOpen={navDrawerOpen}
         onOpenDrawer={() => setNavDrawerOpen(true)}
         onCloseDrawer={() => setNavDrawerOpen(false)}
+        onLogoPress={handleLogoPress}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
         disablePullToRefresh={
@@ -2015,6 +2167,7 @@ export default function App() {
                 : undefined
             }
             showCheckInOutNav={showCheckInOutNav && !isSales}
+            onLogoPress={handleLogoPress}
           />
         }
       >
@@ -2049,6 +2202,34 @@ export default function App() {
         <ToastHost />
         <ConfirmHost />
         <UpdateRequiredModal visible={updateRequired} />
+        <Portal>
+          <Dialog
+            visible={!!lineupAlert}
+            onDismiss={() => dismissLineupAlert(false)}
+            style={{ backgroundColor: paperTheme.colors.surfaceContainerHighest }}
+          >
+            <Dialog.Title>New lineup posted</Dialog.Title>
+            <Dialog.Content>
+              <Paragraph style={{ color: paperTheme.colors.onSurfaceVariant }}>
+                View lineup to see what is coming up on the line
+                {lineupAlert?.color_name
+                  ? ` (${lineupAlert.color_name}${
+                      lineupAlert.job_name ? ` · ${lineupAlert.job_name}` : ""
+                    })`
+                  : ""}
+                .
+              </Paragraph>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <AppButton mode="text" onPress={() => dismissLineupAlert(false)}>
+                Dismiss
+              </AppButton>
+              <AppButton mode="contained" onPress={() => dismissLineupAlert(true)}>
+                View lineup
+              </AppButton>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
         <Modal
           visible={showAdminItemDialog}
           transparent

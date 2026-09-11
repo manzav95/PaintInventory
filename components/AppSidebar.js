@@ -65,6 +65,7 @@ export default function AppSidebar({
   isAdmin,
   isSales = false,
   onNavigate,
+  onLogoPress,
   onAddManual,
   showCheckInOutNav = true,
   inDrawer = false,
@@ -79,7 +80,10 @@ export default function AppSidebar({
     >
       {!inDrawer ? (
         <View style={styles.headerRow}>
-          <BrandLogo variant="sidebar" />
+          <BrandLogo
+            variant="sidebar"
+            onPress={onLogoPress || (() => onNavigate?.("home"))}
+          />
         </View>
       ) : null}
 
@@ -162,6 +166,12 @@ export default function AppSidebar({
             icon="delete-variant"
             active={currentScreen === "wasteTracking"}
             onPress={() => onNavigate("wasteTracking")}
+          />
+          <NavButton
+            label="Lineup"
+            icon="clipboard-list-outline"
+            active={currentScreen === "lineup"}
+            onPress={() => onNavigate("lineup")}
           />
           {isAdmin && (
             <NavButton

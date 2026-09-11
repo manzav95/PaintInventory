@@ -16,6 +16,7 @@ import {
   useTheme,
   Menu,
   ActivityIndicator,
+  Switch,
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
@@ -180,6 +181,7 @@ export default function ItemDetailScreen({
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [poCategory, setPoCategory] = useState("mixing");
+  const [hideFromMaterialUsage, setHideFromMaterialUsage] = useState(false);
   const [catalystPercentInput, setCatalystPercentInput] = useState("");
   const [colorLabelInput, setColorLabelInput] = useState(
     item?.color_label != null ? String(item.color_label) : "",
@@ -270,6 +272,14 @@ export default function ItemDetailScreen({
   useEffect(() => {
     setPoCategory(item?.is_mixing === false ? "ap" : "mixing");
   }, [item?.id]);
+
+  useEffect(() => {
+    setHideFromMaterialUsage(
+      item?.hide_from_material_usage === true ||
+        item?.hide_from_material_usage === "true" ||
+        item?.hide_from_material_usage === 1,
+    );
+  }, [item?.id, item?.hide_from_material_usage]);
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type)) {
@@ -448,6 +458,7 @@ export default function ItemDetailScreen({
       is_mixing: poCategory !== "ap",
       po_label_ap: poCategory === "ap",
       po_label_mixing: poCategory !== "ap",
+      hide_from_material_usage: !!hideFromMaterialUsage,
     };
 
     setSaving(true);
@@ -856,6 +867,44 @@ export default function ItemDetailScreen({
     );
   };
 
+  const renderHideFromMaterialUsageField = () => {
+    if (!isAdmin) {
+      return hideFromMaterialUsage ? (
+        <Text
+          style={{
+            color: theme.colors.onSurfaceVariant,
+            fontSize: 13,
+            marginBottom: 12,
+          }}
+        >
+          Hidden from material usage
+        </Text>
+      ) : null;
+    }
+    return (
+      <View style={styles.hideMuRow}>
+        <View style={styles.hideMuTextCol}>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "600" }}>
+            Hide from material usage
+          </Text>
+          <Text
+            style={{
+              color: theme.colors.onSurfaceVariant,
+              fontSize: 12,
+              marginTop: 2,
+            }}
+          >
+            When on, this item won’t appear in the Material Usage material list.
+          </Text>
+        </View>
+        <Switch
+          value={hideFromMaterialUsage}
+          onValueChange={setHideFromMaterialUsage}
+        />
+      </View>
+    );
+  };
+
   const renderPoCategoryField = () => {
     if (isWeb && isWideDesktop) {
       return (
@@ -1222,6 +1271,12 @@ export default function ItemDetailScreen({
 
                   <FormRow desktop>
                     <FormCol desktop flex={1}>
+                      {renderHideFromMaterialUsageField()}
+                    </FormCol>
+                  </FormRow>
+
+                  <FormRow desktop>
+                    <FormCol desktop flex={1}>
                       <FieldLabel theme={theme}>Paint color</FieldLabel>
                       {colorSection}
                     </FormCol>
@@ -1354,6 +1409,7 @@ export default function ItemDetailScreen({
                   {renderTypeField()}
                   {renderPoCategoryField()}
                   {renderContainerField()}
+                  {renderHideFromMaterialUsageField()}
                   {isAdmin && type === "paint" && (
                     <TextInput
                       label="Display order"
@@ -1565,6 +1621,18 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     flexWrap: "wrap",
     alignItems: "center",
+  },
+  hideMuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  hideMuTextCol: {
+    flex: 1,
+    minWidth: 0,
   },
   advancedDesktopSlot: {
     marginLeft: "auto",

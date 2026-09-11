@@ -1,5 +1,6 @@
 import config from '../config';
 import IDGenerator from './idGenerator';
+import { isNetworkError } from '../utils/transactionId';
 
 const API_URL = config.API_URL;
 
@@ -396,6 +397,10 @@ class InventoryService {
         updateData._actionType = actionType;
         updateData._quantityChange = Math.abs(change); // Store the change amount
       }
+
+      if (extras?.transactionId) {
+        updateData._transactionId = String(extras.transactionId).trim();
+      }
       
       const result = await this.updateItem(itemId, updateData, userName);
       
@@ -410,7 +415,12 @@ class InventoryService {
       return result;
     } catch (error) {
       console.error('Error updating quantity:', error);
-      return { success: false, error: error.message };
+      const networkError = isNetworkError(error);
+      return {
+        success: false,
+        error: error.message,
+        networkError,
+      };
     }
   }
 

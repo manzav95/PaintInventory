@@ -49,7 +49,11 @@ export function getMaterialTypeColor(type, theme) {
   if (t === "paint" || t === "custom_paint" || t === "precat") return mt.paint;
   if (t === "clear") return mt.clear;
   if (t === "stain" || t === "custom_stain") return mt.stain;
-  if (t === "primer") return mt.primer || (theme?.dark ? mt.primerDark : mt.primerLight);
+  if (t === "primer") {
+    return theme?.dark
+      ? mt.primerDark || mt.primer || "#eceff1"
+      : mt.primerLight || "#5d4037";
+  }
   if (t === "dye") return mt.dye;
   if (t === "catalyst") return mt.catalyst;
   return theme?.dark ? "#fff" : colors.light.textMuted;

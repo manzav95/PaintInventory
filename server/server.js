@@ -168,6 +168,8 @@ app.post('/api/items', async (req, res) => {
 
 // Update item
 app.put('/api/items/:id', async (req, res) => {
+  let claimedTransactionId = '';
+  let quantityCommitted = false;
   try {
     const id = decodeURIComponent(req.params.id).trim();
     const updates = req.body;
@@ -184,6 +186,10 @@ app.put('/api/items/:id', async (req, res) => {
     // Extract action type flag (if present) and remove it from updates before saving
     const actionType = updates._actionType;
     const quantityChange = updates._quantityChange;
+    const transactionId =
+      updates._transactionId != null
+        ? String(updates._transactionId).trim()
+        : '';
     const lotDateProvided = Object.prototype.hasOwnProperty.call(updates, 'lot_date');
     if (lotDateProvided) {
       const lotRaw = updates.lot_date;
@@ -198,6 +204,28 @@ app.put('/api/items/:id', async (req, res) => {
 
     delete updates._actionType;
     delete updates._quantityChange;
+    delete updates._transactionId;
+
+    // Idempotency: claim this transaction id before mutating. If already
+    // claimed, return success without changing quantity or writing another
+    // audit row (client retry / offline replay after a dropped response).
+    if (transactionId) {
+      const claim = await db.claimTransactionId(
+        transactionId,
+        id,
+        actionType || 'update',
+        auditUserName,
+      );
+      if (!claim.claimed) {
+        console.log('Duplicate transaction ignored:', transactionId, 'item:', id);
+        return res.json({
+          success: true,
+          duplicate: true,
+          item: currentItem,
+        });
+      }
+      if (!claim.skipped) claimedTransactionId = transactionId;
+    }
 
     // Custom paint/stain: clear stack location when quantity hits 0.
     if (newQuantity !== undefined) {
@@ -230,6 +258,7 @@ app.put('/api/items/:id', async (req, res) => {
 
     const result = await db.updateItem(id, updates);
     if (result.success) {
+      quantityCommitted = true;
       // AP vs mixing is persisted via boolean is_mixing (default true).
       // Determine action type for audit log
       let auditActionType = 'update';
@@ -280,6 +309,10 @@ app.put('/api/items/:id', async (req, res) => {
         auditDetails.oldQuantity = oldQuantity;
         auditDetails.newQuantity = newQuantity; // Store the total quantity after this transaction
       }
+
+      if (transactionId) {
+        auditDetails.transactionId = transactionId;
+      }
       
       console.log('Logging audit:', {
         action: auditActionType,
@@ -300,6 +333,13 @@ app.put('/api/items/:id', async (req, res) => {
       }
       res.json(result);
     } else {
+      if (claimedTransactionId) {
+        try {
+          await db.releaseTransactionId(claimedTransactionId);
+        } catch (releaseErr) {
+          console.error('Failed to release transaction id:', releaseErr);
+        }
+      }
       const errMsg = result?.error || 'Failed to update item';
       const status = errMsg === 'Item not found' ? 404 : 400;
       console.log('Update failed:', id, errMsg);
@@ -307,6 +347,15 @@ app.put('/api/items/:id', async (req, res) => {
     }
   } catch (error) {
     console.error('Error updating item:', error);
+    // Only release if quantity was never committed — otherwise keep the
+    // claim so a client retry cannot double-apply the change.
+    if (claimedTransactionId && !quantityCommitted) {
+      try {
+        await db.releaseTransactionId(claimedTransactionId);
+      } catch (_) {
+        // ignore
+      }
+    }
     if (error && error.code === '23505') {
       return res.status(400).json({
         success: false,
@@ -775,6 +824,126 @@ app.put('/api/waste-tracking/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating waste tracking:', error);
     res.status(500).json({ error: 'Failed to update waste tracking entry' });
+  }
+});
+
+// --- Lineup (line load estimates) ---
+app.get('/api/lineup', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit || '100', 10) || 100, 500);
+    const userName = req.query.userName ? String(req.query.userName) : '';
+    const rows = await db.getLineup(limit, userName);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error fetching lineup:', error);
+    res.status(500).json({ error: 'Failed to fetch lineup' });
+  }
+});
+
+app.get('/api/lineup/latest', async (req, res) => {
+  try {
+    const row = await db.getLatestLineup();
+    res.json(row || null);
+  } catch (error) {
+    console.error('Error fetching latest lineup:', error);
+    res.status(500).json({ error: 'Failed to fetch latest lineup' });
+  }
+});
+
+app.post('/api/lineup', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const result = await db.addLineup({
+      job_name: body.job_name,
+      color_name: body.color_name,
+      material_type: body.material_type,
+      item_id: body.item_id,
+      item_type: body.item_type,
+      cars_qty: body.cars_qty,
+      laps: body.laps,
+      cart_number: body.cart_number,
+      user_name: body.user_name,
+    });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error creating lineup:', error);
+    res.status(500).json({ error: 'Failed to create lineup entry' });
+  }
+});
+
+app.put('/api/lineup/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const body = req.body || {};
+    const requestingUser = body.user_name || body.requesting_user || '';
+    const result = await db.updateLineup(id, body, requestingUser);
+    if (!result.success) {
+      const status =
+        result.error === 'Entry not found'
+          ? 404
+          : result.error && result.error.includes('Only the person')
+            ? 403
+            : 400;
+      return res.status(status).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating lineup:', error);
+    res.status(500).json({ error: 'Failed to update lineup entry' });
+  }
+});
+
+app.delete('/api/lineup/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const requestingUser =
+      (req.query.userName && String(req.query.userName)) ||
+      (req.body && (req.body.user_name || req.body.requesting_user)) ||
+      '';
+    const result = await db.deleteLineup(id, requestingUser);
+    if (!result.success) {
+      const status =
+        result.error === 'Entry not found'
+          ? 404
+          : result.error && result.error.includes('Only the person')
+            ? 403
+            : 400;
+      return res.status(status).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting lineup:', error);
+    res.status(500).json({ error: 'Failed to delete lineup entry' });
+  }
+});
+
+app.put('/api/lineup/:id/mixed', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({ success: false, error: 'Invalid entry ID' });
+    }
+    const body = req.body || {};
+    const userName = body.user_name || body.userName || '';
+    const mixed = body.mixed !== false && body.mixed !== 'false' && body.mixed !== 0;
+    const result = await db.setLineupMixed(id, userName, mixed);
+    if (!result.success) {
+      const status = result.error === 'Entry not found' ? 404 : 400;
+      return res.status(status).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating lineup mixed state:', error);
+    res.status(500).json({ error: 'Failed to update mixed state' });
   }
 });
 

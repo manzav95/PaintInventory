@@ -17,6 +17,7 @@ export const SCREEN_TITLES = {
   placeOrder: "Place Order",
   materialUsage: "Material Usage",
   wasteTracking: "Waste Tracking",
+  lineup: "Lineup",
   reports: "Reports",
   settings: "Settings",
   qrscan: "Check In / Out",

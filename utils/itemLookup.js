@@ -1,5 +1,6 @@
 /**
  * Resolve inventory items by ID, external code, or name — including light typo tolerance.
+ * Scan / check-in paths must use exact match helpers only (no fuzzy).
  */
 
 function normalizeText(s) {
@@ -14,12 +15,108 @@ function compactText(s) {
   return normalizeText(s).replace(/\s+/g, "");
 }
 
-/** Pad legacy 1–4 digit IDs to 4 digits. */
+/** Pad legacy 1–4 digit IDs to 4 digits (typed name search only — not barcode scan). */
 export function normalizeItemIdQuery(raw) {
   const t = String(raw || "").trim().toUpperCase();
   if (!t) return "";
   if (/^\d{1,4}$/.test(t)) return t.padStart(4, "0");
   return t;
+}
+
+/**
+ * Sherwin container-size barcodes printed under the item-code barcode.
+ * 16 ≈ 1 gal, 20 ≈ 5 gal — never identify a material.
+ */
+export const CONTAINER_SIZE_BARCODES = new Set(["16", "20"]);
+
+/**
+ * @returns {null | 'empty' | 'size_barcode' | 'too_short_numeric' | 'too_short'}
+ */
+export function getScanRejectReason(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return "empty";
+
+  if (/^\d+$/.test(t)) {
+    const asInt = String(parseInt(t, 10));
+    if (CONTAINER_SIZE_BARCODES.has(t) || CONTAINER_SIZE_BARCODES.has(asInt)) {
+      return "size_barcode";
+    }
+    // Paint / custom IDs are 4+ digits; never pad "20" → "0020" for scan.
+    if (t.length < 4) return "too_short_numeric";
+  }
+
+  if (t.length < 3) return "too_short";
+  return null;
+}
+
+export function scanRejectMessage(reason, raw) {
+  const shown = String(raw || "").trim() || "(empty)";
+  switch (reason) {
+    case "size_barcode":
+      return {
+        title: "Size Barcode",
+        message:
+          `"${shown}" is a container-size code (not a material ID).\n\n` +
+          "Scan the item-code barcode above it, or type the full material ID.",
+      };
+    case "too_short_numeric":
+      return {
+        title: "Code Too Short",
+        message:
+          `"${shown}" is too short to identify a material.\n\n` +
+          "Use the full item code (for example H66…) or a 4-digit paint ID.",
+      };
+    case "too_short":
+      return {
+        title: "Code Too Short",
+        message:
+          `"${shown}" is too short to identify a material.\n\n` +
+          "Scan or enter the full item code.",
+      };
+    default:
+      return {
+        title: "Invalid Scan",
+        message: "Could not read a material ID.",
+      };
+  }
+}
+
+/** True when input looks like an ID/barcode rather than a material name. */
+export function looksLikeItemCode(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return false;
+  if (/^\d+$/.test(t)) return true;
+  if (/^H66/i.test(t)) return true;
+  // Mixed alphanumerics with digits (external codes / SKUs), not plain names
+  if (/\d/.test(t) && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Exact ID / external_code match only (case-insensitive). No fuzzy, prefix, or includes.
+ */
+export function findExactInventoryScanMatch(inventory, query) {
+  const raw = String(query || "").trim();
+  if (!raw || getScanRejectReason(raw)) return null;
+
+  const variants = new Set([raw, raw.toUpperCase(), raw.toLowerCase()]);
+  // Full 4-digit paint IDs only — never invent padding from shorter scans
+  if (/^\d{4}$/.test(raw)) {
+    variants.add(raw.padStart(4, "0"));
+  }
+
+  const inv = Array.isArray(inventory) ? inventory : [];
+  for (const item of inv) {
+    if (!item) continue;
+    const id = item.id != null ? String(item.id).trim() : "";
+    const ext =
+      item.external_code != null ? String(item.external_code).trim() : "";
+    for (const v of variants) {
+      if (id && id.toLowerCase() === v.toLowerCase()) return item;
+      if (ext && ext.toLowerCase() === v.toLowerCase()) return item;
+    }
+  }
+  return null;
 }
 
 function levenshtein(a, b) {
@@ -69,10 +166,14 @@ function tokenOverlap(a, b) {
  * Score how well an inventory item matches a typed query.
  * Higher is better. Returns 0 when it should not be suggested.
  * Queries shorter than 3 characters never match (avoids "20" → 42007).
+ * For pure numeric queries, require 4+ digits (same as scan gate).
  */
 export function scoreItemLookup(item, query) {
   const raw = String(query || "").trim();
   if (raw.length < 3) return 0;
+  if (/^\d+$/.test(raw) && raw.length < 4) return 0;
+  if (getScanRejectReason(raw) === "size_barcode") return 0;
+
   const qNorm = normalizeText(raw);
   const qCompact = compactText(raw);
   const qId = normalizeItemIdQuery(raw).toLowerCase();
@@ -90,26 +191,24 @@ export function scoreItemLookup(item, query) {
   // Exact name
   if (nameNorm && nameNorm === qNorm) return 960;
 
-  // Prefix / includes — requires 3+ char query (already gated above)
+  // For item-code shaped queries, never soft-match (prefix / includes / fuzzy)
+  if (looksLikeItemCode(raw)) {
+    return 0;
+  }
+
+  // Prefix / includes — name search only
   let score = 0;
-  if (id && (id.startsWith(qId) || id.startsWith(qCompact))) score = Math.max(score, 820);
-  if (ext && (ext.startsWith(qId) || ext.startsWith(qCompact))) score = Math.max(score, 800);
   if (nameNorm && nameNorm.startsWith(qNorm)) score = Math.max(score, 780);
-  if (id && id.includes(qCompact)) score = Math.max(score, 720);
-  if (ext && ext.includes(qCompact)) score = Math.max(score, 700);
   if (nameNorm && nameNorm.includes(qNorm)) score = Math.max(score, 680);
 
-  // Fuzzy name / id (typos)
+  // Fuzzy name (typos) — name search only
   if (qCompact.length >= 3) {
     const nameSim = similarityRatio(qCompact, nameCompact);
-    const idSim = similarityRatio(qCompact, compactText(id));
     const tok = tokenOverlap(qNorm, nameNorm);
     if (nameSim >= 0.72) score = Math.max(score, Math.round(520 + nameSim * 200));
-    if (idSim >= 0.78) score = Math.max(score, Math.round(500 + idSim * 200));
     if (tok >= 0.5 && qNorm.length >= 4) {
       score = Math.max(score, Math.round(480 + tok * 180));
     }
-    // Allow one-char typos on short-ish names
     if (nameCompact.length >= 4) {
       const dist = levenshtein(qCompact, nameCompact);
       const maxDist = qCompact.length <= 5 ? 1 : qCompact.length <= 9 ? 2 : 3;
@@ -123,12 +222,13 @@ export function scoreItemLookup(item, query) {
 }
 
 /**
- * Ranked matches for check-in/out lookup.
+ * Ranked matches for typed name lookup (not barcode scan).
  * @returns {Array<{ item: object, score: number }>}
  */
 export function findInventoryLookupMatches(inventory, query, { limit = 8 } = {}) {
   const q = String(query || "").trim();
   if (q.length < 3) return [];
+  if (getScanRejectReason(q)) return [];
   const scored = [];
   for (const item of inventory || []) {
     if (!item) continue;
@@ -144,8 +244,11 @@ export function findInventoryLookupMatches(inventory, query, { limit = 8 } = {})
   return scored.slice(0, limit);
 }
 
-/** Best single match, or null if ambiguous / weak. */
+/** Best single match for typed name search, or null if ambiguous / weak. */
 export function resolveBestInventoryMatch(inventory, query) {
+  const exact = findExactInventoryScanMatch(inventory, query);
+  if (exact) return { item: exact, matches: [{ item: exact, score: 1000 }] };
+
   const matches = findInventoryLookupMatches(inventory, query, { limit: 5 });
   if (!matches.length) return { item: null, matches: [] };
   const top = matches[0];

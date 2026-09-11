@@ -110,7 +110,7 @@ export default function BrandLogo({
         onPress={onPress}
         {...(onDoubleClick ? { onDoubleClick } : {})}
         accessibilityRole="button"
-        accessibilityLabel="CURE"
+        accessibilityLabel="CURE — refresh and go to dashboard"
         style={({ pressed }) => pressed && { opacity: 0.88 }}
       >
         {content}

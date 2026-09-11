@@ -21,22 +21,15 @@ import TimeField from "./TimeField";
 import ScrollFrame from "./ScrollFrame";
 import { AppEmptyState } from "./ui";
 import { BOOTH_OPTIONS } from "../services/materialUsageService";
-import { getMaterialTypeColor } from "../utils/materialTypes";
+import {
+  isMaterialUsageEligibleItem,
+  formatMaterialPickerLabel,
+  getMaterialInputAccent,
+  resolvePaintItemFromNumericInput,
+} from "../utils/materialUsageItems";
 import { space, radius } from "../theme/tokens";
 
 const PANEL_WIDTH = 380;
-
-const MATERIAL_USAGE_COLOR_TYPES = [
-  "paint",
-  "custom_paint",
-  "clear",
-  "primer",
-  "stain",
-  "custom_stain",
-];
-
-const MATERIAL_USAGE_EXCLUDE_NAME_RE =
-  /^(acetone|catalyst|slow\s*reducer)$/i;
 
 function titleCaseWords(text) {
   return String(text ?? "")
@@ -46,29 +39,6 @@ function titleCaseWords(text) {
     .filter(Boolean)
     .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(" ");
-}
-
-function isMaterialUsageEligibleItem(item) {
-  const type = String(item?.type || "").toLowerCase();
-  if (!MATERIAL_USAGE_COLOR_TYPES.includes(type)) return false;
-  const name = String(item?.name || "").trim();
-  const id = String(item?.id || "").trim();
-  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(name)) return false;
-  if (MATERIAL_USAGE_EXCLUDE_NAME_RE.test(id)) return false;
-  return true;
-}
-
-function formatMaterialPickerLabel(item) {
-  const name = String(item?.name || item?.id || "").trim();
-  if (!name) return "";
-  const type = String(item?.type || "").toLowerCase();
-  if (
-    (type === "stain" || type === "custom_stain") &&
-    !/\bstain\b/i.test(name)
-  ) {
-    return `${name} stain`;
-  }
-  return name;
 }
 
 function parseCustomMaterialInput(text) {
@@ -94,15 +64,6 @@ function parseCustomMaterialInput(text) {
 function deriveCustomCategory(text) {
   const result = parseCustomMaterialInput(text);
   return result.ok ? result.type : "";
-}
-
-function getMaterialInputAccent(type, theme) {
-  const t = String(type || "").toLowerCase();
-  if (!t) return null;
-  if (t === "primer") {
-    return theme?.dark ? "#eceff1" : "#8A8478";
-  }
-  return getMaterialTypeColor(t, theme);
 }
 
 /**
@@ -253,7 +214,14 @@ export default function MaterialUsageEditPopover({
       setError("Select or enter a material.");
       return;
     }
-    if (customTrim && !selectedItem) {
+    let resolvedItem = selectedItem;
+    if (!resolvedItem && customTrim) {
+      resolvedItem = resolvePaintItemFromNumericInput(
+        customColor || colorQuery || customTrim,
+        inventory,
+      );
+    }
+    if (customTrim && !resolvedItem) {
       const parsed = parseCustomMaterialInput(customTrim);
       if (!parsed.ok) {
         setError(
@@ -282,13 +250,13 @@ export default function MaterialUsageEditPopover({
       qtyGallons = rawQty / 128;
     }
 
-    const colorName = selectedItem
-      ? formatMaterialPickerLabel(selectedItem)
+    const colorName = resolvedItem
+      ? formatMaterialPickerLabel(resolvedItem)
       : customTrim;
-    const materialType = selectedItem
-      ? (selectedItem.type || "").toLowerCase() || null
+    const materialType = resolvedItem
+      ? (resolvedItem.type || "").toLowerCase() || null
       : parseCustomMaterialInput(customTrim).type || null;
-    const itemId = selectedItem ? String(selectedItem.id) : "";
+    const itemId = resolvedItem ? String(resolvedItem.id) : "";
 
     setError("");
     onSave?.({

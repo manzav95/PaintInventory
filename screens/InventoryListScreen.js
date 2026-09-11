@@ -48,6 +48,11 @@ import showToast from "../utils/showToast";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
+  findExactInventoryScanMatch,
+  getScanRejectReason,
+  looksLikeItemCode,
+} from "../utils/itemLookup";
+import {
   colors as kitColors,
   space,
   radius,
@@ -162,39 +167,20 @@ function pressAnchorFromEvent(event, fallbackWidth) {
   return { pageX, pageY };
 }
 
-/** Matches App.js handleScanResult normalization for comparing typed/scanned IDs to inventory. */
-function normalizeScanLookupKey(itemId) {
-  const raw = String(itemId ?? "")
-    .trim()
-    .toUpperCase();
-  if (!raw) return null;
-  if (/^\d{1,4}$/.test(raw)) return raw.padStart(4, "0");
-  if (/^H66[A-Z]{3}\d{5}$/.test(raw)) return raw;
-  return raw;
-}
-
 function inventoryMatchesScanQuery(inventory, query) {
   const trimmed = query.trim();
-  if (trimmed.length < 3) return false;
-  const key = normalizeScanLookupKey(trimmed);
-  const inv = Array.isArray(inventory) ? inventory : [];
-  for (const item of inv) {
-    const idKey = normalizeScanLookupKey(item.id);
-    if (idKey && key && idKey === key) return true;
-    const ext =
-      item.external_code != null ? String(item.external_code).trim() : "";
-    if (ext && ext.toUpperCase() === trimmed.toUpperCase()) return true;
-  }
-  return false;
+  if (getScanRejectReason(trimmed)) return false;
+  return !!findExactInventoryScanMatch(inventory, trimmed);
 }
 
-/** Enter in search: scan/check-in-out only when this looks like a material ID/barcode, not a name search. */
+/** Enter in search: scan/check-in-out only for exact ID/barcode hits, not name search. */
 function shouldSubmitSearchAsScan(query, inventory) {
   const t = query.trim();
-  if (t.length < 3) return false;
+  if (getScanRejectReason(t)) return false;
   if (inventoryMatchesScanQuery(inventory, t)) return true;
-  if (/^[a-zA-Z]+$/.test(t)) return false;
-  return true;
+  // Unknown code-shaped input: still attempt exact online lookup in App
+  if (looksLikeItemCode(t)) return true;
+  return false;
 }
 
 /** Parse order line qty from API (snake_case or camelCase, string or number). */

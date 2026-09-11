@@ -14,6 +14,7 @@ import {
   useTheme,
   Menu,
   IconButton,
+  Switch,
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
 import CameraColorPickerModal from "../components/CameraColorPickerModal";
@@ -144,6 +145,7 @@ export default function AddItemScreen({
   const [locationMenuOpen, setLocationMenuOpen] = useState(false);
   const [poCategoryMenuOpen, setPoCategoryMenuOpen] = useState(false);
   const [poCategory, setPoCategory] = useState("mixing");
+  const [hideFromMaterialUsage, setHideFromMaterialUsage] = useState(false);
   const [cameraPickerVisible, setCameraPickerVisible] = useState(false);
   const [catalystPercentInput, setCatalystPercentInput] = useState("");
   const [colorLabel, setColorLabel] = useState("");
@@ -310,6 +312,7 @@ export default function AddItemScreen({
       is_mixing: poCategory !== "ap",
       po_label_ap: poCategory === "ap",
       po_label_mixing: poCategory !== "ap",
+      hide_from_material_usage: !!hideFromMaterialUsage,
       ...(minQ != null && !isNaN(minQ) && { minQuantity: minQ }),
       price: priceNum,
       ...(typeVal && { type: typeVal }),
@@ -384,6 +387,29 @@ export default function AddItemScreen({
       </>
     );
   };
+
+  const renderHideFromMaterialUsageField = () => (
+    <View style={styles.hideMuRow}>
+      <View style={styles.hideMuTextCol}>
+        <Text style={{ color: theme.colors.onSurface, fontWeight: "600" }}>
+          Hide from material usage
+        </Text>
+        <Text
+          style={{
+            color: theme.colors.onSurfaceVariant,
+            fontSize: 12,
+            marginTop: 2,
+          }}
+        >
+          When on, this item won’t appear in the Material Usage material list.
+        </Text>
+      </View>
+      <Switch
+        value={hideFromMaterialUsage}
+        onValueChange={setHideFromMaterialUsage}
+      />
+    </View>
+  );
 
   const renderPoCategoryField = () => {
     if (isWeb && isWideDesktop) {
@@ -701,6 +727,12 @@ export default function AddItemScreen({
                   <FormCol desktop flex={1}>{renderContainerField()}</FormCol>
                 </FormRow>
 
+                <FormRow desktop>
+                  <FormCol desktop flex={1}>
+                    {renderHideFromMaterialUsageField()}
+                  </FormCol>
+                </FormRow>
+
                 <FormRow desktop>{colorSection}</FormRow>
 
                 {isCustomType && (
@@ -822,6 +854,7 @@ export default function AddItemScreen({
                 {renderTypeField()}
                 {renderPoCategoryField()}
                 {renderContainerField()}
+                {renderHideFromMaterialUsageField()}
                 <TextInput
                   label={`Unit price (blank → $${DEFAULT_UNIT_PRICE})`}
                   value={price}
@@ -1024,5 +1057,17 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
     alignItems: "center",
     flexWrap: "wrap",
+  },
+  hideMuRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+    paddingVertical: 4,
+  },
+  hideMuTextCol: {
+    flex: 1,
+    minWidth: 0,
   },
 });

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import InventoryService from "../services/inventoryService";
 import OrderService from "../services/orderService";
+import { createTransactionId, isNetworkError } from "./transactionId";
 
 const QUEUE_KEY = "@pending_inventory_transactions";
 
@@ -26,7 +27,15 @@ async function saveQueue(queue) {
 }
 
 /** Enqueue a pending quantity change / receiving action to be replayed when back online. */
-export async function enqueueQuantityAction({ itemId, change, userName, actionType, orderId, location }) {
+export async function enqueueQuantityAction({
+  itemId,
+  change,
+  userName,
+  actionType,
+  orderId,
+  location,
+  transactionId,
+}) {
   const entry = {
     id: String(itemId ?? "").trim(),
     change: Number(change) || 0,
@@ -34,12 +43,22 @@ export async function enqueueQuantityAction({ itemId, change, userName, actionTy
     actionType: actionType || null, // 'check_in' | 'check_out' | 'receiving' | 'recycled' | null
     orderId: orderId || null,
     location: location ? String(location).trim() : null,
+    // Stable id so server ignores duplicate replays of the same user action
+    transactionId: transactionId || createTransactionId(),
     createdAt: new Date().toISOString(),
   };
-  if (!entry.id || !entry.change) return;
+  if (!entry.id || !entry.change) return entry.transactionId;
   const queue = await loadQueue();
+  // Avoid enqueueing the same transaction twice (e.g. double catch)
+  if (
+    entry.transactionId &&
+    queue.some((q) => q && q.transactionId === entry.transactionId)
+  ) {
+    return entry.transactionId;
+  }
   queue.push(entry);
   await saveQueue(queue);
+  return entry.transactionId;
 }
 
 /** Try to sync all pending quantity changes. Returns { synced, failed, remaining }. */
@@ -51,9 +70,16 @@ export async function syncPendingQuantity(userNameFallback) {
   let failed = 0;
   const remaining = [];
 
-  for (const entry of queue) {
+  for (let i = 0; i < queue.length; i += 1) {
+    const entry = queue[i];
     const userName = entry.userName || userNameFallback || "offline";
-    const extras = entry.location ? { location: entry.location } : {};
+    const extras = {
+      ...(entry.location ? { location: entry.location } : {}),
+      transactionId: entry.transactionId || createTransactionId(),
+    };
+    // Persist generated id back onto the entry for later retries
+    if (!entry.transactionId) entry.transactionId = extras.transactionId;
+
     try {
       let result;
       if (entry.actionType === "receiving" && entry.orderId) {
@@ -86,13 +112,17 @@ export async function syncPendingQuantity(userNameFallback) {
         synced += 1;
         continue;
       }
+      // Network-ish failure returned as success:false — keep for later
+      if (result?.networkError || isNetworkError(result?.error)) {
+        remaining.push(entry, ...queue.slice(i + 1));
+        break;
+      }
       // Business error (e.g. not enough stock) – drop but count as failed.
       failed += 1;
     } catch (e) {
-      const msg = e?.message || String(e);
       // Network-type error: stop here and keep this + rest for later.
-      if (/Network request failed|Failed to fetch|TypeError|NetworkError/i.test(msg)) {
-        remaining.push(entry, ...queue.slice(queue.indexOf(entry) + 1));
+      if (isNetworkError(e)) {
+        remaining.push(entry, ...queue.slice(i + 1));
         break;
       }
       // Other errors: count as failed and continue.
@@ -104,4 +134,3 @@ export async function syncPendingQuantity(userNameFallback) {
   await saveQueue(remaining);
   return { synced, failed, remaining: remaining.length };
 }
-

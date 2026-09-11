@@ -39,6 +39,34 @@ export const WASTE_FORM_HELP = {
   ],
 };
 
+export const LINEUP_FORM_HELP = {
+  title: "How to post lineup",
+  intro:
+    "Lineup is a rough estimate of what’s loading on the line so mixers can grab the right colors early.",
+  sections: [
+    {
+      heading: "1. Job number",
+      body: "Enter the job / work order. Typing “Rework” automatically sets 1 lap.",
+    },
+    {
+      heading: "2. Color & material",
+      body: "Type a color name or ID — paint shows blue, clear orange, stain green (like Material Usage). Custom stain IDs are 4 digits starting with 1 (e.g. 1234).",
+    },
+    {
+      heading: "3. Type of items",
+      body: "Select what’s on the line: cabs, door/drawers, and/or molding. At least one is required.",
+    },
+    {
+      heading: "4. Cars, laps & cart",
+      body: "Estimate how many cars, choose 1 or 2 laps, and the cart number you’ll start loading on.",
+    },
+    {
+      heading: "5. Post & mix",
+      body: "Everyone sees the board. Only you can edit or delete your posts. Mixers can check off items they’ve mixed — only visible on their account.",
+    },
+  ],
+};
+
 export const MATERIAL_USAGE_FORM_HELP = {
   title: "How to log material usage",
   intro:

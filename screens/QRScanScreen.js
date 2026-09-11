@@ -18,10 +18,15 @@ import {
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
+import ShakeView from "../components/ShakeView";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import {
+  findExactInventoryScanMatch,
   findInventoryLookupMatches,
+  getScanRejectReason,
+  looksLikeItemCode,
   resolveBestInventoryMatch,
+  scanRejectMessage,
 } from "../utils/itemLookup";
 import ScrollFrame from "../components/ScrollFrame";
 
@@ -106,13 +111,18 @@ export default function QRScanScreen({
   const [inputMode, setInputMode] = useState("manual");
   const [manualInput, setManualInput] = useState("");
   const [permissionError, setPermissionError] = useState(null);
+  const [shakeTick, setShakeTick] = useState(0);
   const theme = useTheme();
 
-  const lookupMatches = useMemo(
-    () =>
-      findInventoryLookupMatches(inventory, manualInput, { limit: 8 }),
-    [inventory, manualInput],
-  );
+  const trimmedInput = manualInput.trim();
+  const inputRejectReason = getScanRejectReason(trimmedInput);
+  const inputLooksLikeCode = looksLikeItemCode(trimmedInput);
+
+  const lookupMatches = useMemo(() => {
+    // Suggestions are for name search only — never soft-match barcodes/IDs
+    if (!trimmedInput || inputRejectReason || inputLooksLikeCode) return [];
+    return findInventoryLookupMatches(inventory, trimmedInput, { limit: 8 });
+  }, [inventory, trimmedInput, inputRejectReason, inputLooksLikeCode]);
 
   const requestCameraPermission = async () => {
     try {
@@ -159,34 +169,56 @@ export default function QRScanScreen({
     onScanResult(String(item.id));
   };
 
+  const rejectManualInput = (reason, value) => {
+    setShakeTick((n) => n + 1);
+    const { title, message } = scanRejectMessage(reason, value);
+    Alert.alert(title, message);
+  };
+
   const handleManualSubmit = () => {
     const trimmed = manualInput.trim();
     if (!trimmed) {
+      setShakeTick((n) => n + 1);
       Alert.alert("Invalid Input", "Please enter a material name or ID.");
       return;
     }
-    if (trimmed.length < 3) {
-      Alert.alert(
-        "Too Short",
-        "Enter at least 3 characters so the wrong item is not matched.",
-      );
+
+    const rejectReason = getScanRejectReason(trimmed);
+    if (rejectReason) {
+      rejectManualInput(rejectReason, trimmed);
       return;
     }
 
+    // Item codes / barcodes: exact match only (or online exact lookup in App)
+    if (looksLikeItemCode(trimmed)) {
+      const exact = findExactInventoryScanMatch(inventory, trimmed);
+      if (exact?.id) {
+        onScanResult(String(exact.id));
+        return;
+      }
+      onScanResult(trimmed);
+      return;
+    }
+
+    // Name search: may use soft match, but never invent a barcode hit
     const { item, matches } = resolveBestInventoryMatch(inventory, trimmed);
     if (item?.id) {
       onScanResult(String(item.id));
       return;
     }
     if (matches.length > 1) {
+      setShakeTick((n) => n + 1);
       Alert.alert(
         "Multiple matches",
         "Several materials look similar — pick one from the list below.",
       );
       return;
     }
-    // Still allow raw ID submit (online lookup / not yet in local list)
-    onScanResult(trimmed);
+    setShakeTick((n) => n + 1);
+    Alert.alert(
+      "Not in System",
+      `No material found for "${trimmed}".\n\nItem codes must match exactly.`,
+    );
   };
 
   const cardBg = theme.colors.surfaceContainerHighest;
@@ -198,8 +230,11 @@ export default function QRScanScreen({
     />
   ) : null;
 
+  const canContinue =
+    trimmedInput.length > 0 && !inputRejectReason;
+
   const renderManualFields = ({ title, subtitle, autoFocus = false }) => (
-    <>
+    <ShakeView trigger={shakeTick}>
       <Text style={[styles.title, { color: theme.colors.onSurface }]}>
         {title}
       </Text>
@@ -219,8 +254,17 @@ export default function QRScanScreen({
         placeholder="e.g. white primer or H66…"
         autoCorrect={false}
         autoCapitalize="none"
+        error={!!inputRejectReason && trimmedInput.length > 0}
         onSubmitEditing={handleManualSubmit}
       />
+
+      {inputRejectReason && trimmedInput.length > 0 ? (
+        <Text
+          style={[styles.rejectHint, { color: theme.colors.error }]}
+        >
+          {scanRejectMessage(inputRejectReason, trimmedInput).message.split("\n")[0]}
+        </Text>
+      ) : null}
 
       <LookupSuggestions
         matches={lookupMatches}
@@ -236,12 +280,12 @@ export default function QRScanScreen({
           mode="contained"
           onPress={handleManualSubmit}
           style={styles.button}
-          disabled={manualInput.trim().length < 3}
+          disabled={!canContinue}
         >
           Continue
         </AppButton>
       </View>
-    </>
+    </ShakeView>
   );
 
   if (isDesktop) {
@@ -273,7 +317,7 @@ export default function QRScanScreen({
                 {renderManualFields({
                   title: "Find material",
                   subtitle:
-                    "Search by name or ID. Close spellings still match when possible.",
+                    "Item codes must match exactly. Names can use suggestions below.",
                   autoFocus: true,
                 })}
               </Card.Content>
@@ -347,7 +391,7 @@ export default function QRScanScreen({
               {renderManualFields({
                 title: "Find material",
                 subtitle:
-                  "Search by name or ID. Close spellings still match when possible.",
+                  "Item codes must match exactly. Names can use suggestions below.",
                 autoFocus: true,
               })}
             </Card.Content>
@@ -552,6 +596,11 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     marginBottom: 14,
+  },
+  rejectHint: {
+    fontSize: 13,
+    marginTop: -6,
+    marginBottom: 8,
   },
   input: {
     marginBottom: 10,

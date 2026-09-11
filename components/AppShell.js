@@ -36,6 +36,7 @@ export default function AppShell({
   drawerOpen = false,
   onOpenDrawer,
   onCloseDrawer,
+  onLogoPress,
   onRefresh,
   isRefreshing = false,
   disablePullToRefresh = false,
@@ -217,7 +218,15 @@ export default function AppShell({
           { borderBottomColor: theme.colors.outlineVariant },
         ]}
       >
-        <BrandLogo variant="drawer" style={styles.drawerBrandLogo} />
+        <BrandLogo
+          variant="drawer"
+          style={styles.drawerBrandLogo}
+          onPress={() => {
+            onCloseDrawer?.();
+            if (onLogoPress) onLogoPress();
+            else onRefresh?.();
+          }}
+        />
         <IconButton
           icon="close"
           size={22}
