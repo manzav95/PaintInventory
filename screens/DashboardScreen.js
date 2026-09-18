@@ -62,6 +62,12 @@ function resolveActionType(log) {
   return log?.action;
 }
 
+/** Check-out column / stock-removal totals: include recycle. */
+function isCheckOutOrRecycle(log) {
+  const type = resolveActionType(log);
+  return type === "check_out" || type === "recycled";
+}
+
 function logQtyAbs(log) {
   const d = log?.details || {};
   const q = d.quantityChange ?? d._quantityChange;
@@ -315,9 +321,6 @@ export default function DashboardScreen({
   }, []);
 
   const gallonsUsedThisWeek = useMemo(() => {
-    const isCheckOut = (log) =>
-      log.action === "check_out" ||
-      (log.action === "update" && log.details?._actionType === "check_out");
     const getQty = (log) => {
       if (!log.details) return 0;
       const q = log.details.quantityChange ?? log.details._quantityChange;
@@ -325,7 +328,7 @@ export default function DashboardScreen({
     };
     let total = 0;
     auditLogs.forEach((log) => {
-      if (!log.itemId || !isCheckOut(log)) return;
+      if (!log.itemId || !isCheckOutOrRecycle(log)) return;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < thisWeekRange.start || t > thisWeekRange.end) return;
       total += getQty(log);
@@ -334,9 +337,6 @@ export default function DashboardScreen({
   }, [auditLogs, thisWeekRange]);
 
   const gallonsUsedThisMonth = useMemo(() => {
-    const isCheckOut = (log) =>
-      log.action === "check_out" ||
-      (log.action === "update" && log.details?._actionType === "check_out");
     const getQty = (log) => {
       if (!log.details) return 0;
       const q = log.details.quantityChange ?? log.details._quantityChange;
@@ -344,7 +344,7 @@ export default function DashboardScreen({
     };
     let total = 0;
     auditLogs.forEach((log) => {
-      if (!log.itemId || !isCheckOut(log)) return;
+      if (!log.itemId || !isCheckOutOrRecycle(log)) return;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < thisMonthRange.start || t > thisMonthRange.end) return;
       total += getQty(log);
@@ -366,9 +366,6 @@ export default function DashboardScreen({
   };
 
   const checkedOutByItemWeek = useMemo(() => {
-    const isCheckOut = (log) =>
-      log.action === "check_out" ||
-      (log.action === "update" && log.details?._actionType === "check_out");
     const getQty = (log) => {
       if (!log.details) return 0;
       const q = log.details.quantityChange ?? log.details._quantityChange;
@@ -376,7 +373,7 @@ export default function DashboardScreen({
     };
     const totals = {};
     auditLogs.forEach((log) => {
-      if (!log.itemId || !isCheckOut(log)) return;
+      if (!log.itemId || !isCheckOutOrRecycle(log)) return;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < thisWeekRange.start || t > thisWeekRange.end) return;
       const qty = getQty(log);
@@ -396,9 +393,6 @@ export default function DashboardScreen({
   }, [auditLogs, thisWeekRange, inventory]);
 
   const checkedOutByItemMonth = useMemo(() => {
-    const isCheckOut = (log) =>
-      log.action === "check_out" ||
-      (log.action === "update" && log.details?._actionType === "check_out");
     const getQty = (log) => {
       if (!log.details) return 0;
       const q = log.details.quantityChange ?? log.details._quantityChange;
@@ -406,7 +400,7 @@ export default function DashboardScreen({
     };
     const totals = {};
     auditLogs.forEach((log) => {
-      if (!log.itemId || !isCheckOut(log)) return;
+      if (!log.itemId || !isCheckOutOrRecycle(log)) return;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < thisMonthRange.start || t > thisMonthRange.end) return;
       const qty = getQty(log);
@@ -445,7 +439,7 @@ export default function DashboardScreen({
     const totals = new Map();
     for (const log of auditLogs) {
       if (!logBelongsToUser(log, userName)) continue;
-      if (resolveActionType(log) !== "check_out") continue;
+      if (!isCheckOutOrRecycle(log)) continue;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < weekAgo) continue;
       const id = String(log.itemId || "");
@@ -468,11 +462,8 @@ export default function DashboardScreen({
       });
   }, [auditLogs, inventory, userName, isAdmin]);
 
-  // Most used = color with largest qty checked out in the selected period (week or month)
+  // Most used = color with largest qty checked out / recycled in the selected period
   const mostUsedColor = useMemo(() => {
-    const isCheckOut = (log) =>
-      log.action === "check_out" ||
-      (log.action === "update" && log.details?._actionType === "check_out");
     const getCheckOutQty = (log) => {
       if (!log.details) return 0;
       const q = log.details.quantityChange ?? log.details._quantityChange;
@@ -482,7 +473,7 @@ export default function DashboardScreen({
 
     const galByItemId = {};
     auditLogs.forEach((log) => {
-      if (!log.itemId || !isCheckOut(log)) return;
+      if (!log.itemId || !isCheckOutOrRecycle(log)) return;
       const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
       if (t < start || t > end) return;
       const qty = getCheckOutQty(log);
@@ -725,7 +716,7 @@ export default function DashboardScreen({
   const adminPeriodCheckOutLogs = useMemo(() => {
     return auditLogs
       .filter((log) => {
-        if (resolveActionType(log) !== "check_out") return false;
+        if (!isCheckOutOrRecycle(log)) return false;
         if (!inActivityPeriod(log)) return false;
         return matchesStandardScope(log);
       })
@@ -1072,30 +1063,8 @@ export default function DashboardScreen({
               {user}
             </Text>
           </View>
-          {booth ? (
+          {showBooth && (typeLabel || job) ? (
             <View style={styles.briefMetaRow}>
-              <View
-                style={[
-                  styles.briefBoothPill,
-                  {
-                    backgroundColor: boothColor
-                      ? `${boothColor}22`
-                      : "rgba(38,166,154,0.14)",
-                    borderWidth: 1,
-                    borderColor: boothColor || colors.action.materialUsage,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.briefBoothText,
-                    { color: boothColor || colors.action.materialUsage },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {booth}
-                </Text>
-              </View>
               {typeLabel ? (
                 <Text
                   style={[
@@ -1138,32 +1107,58 @@ export default function DashboardScreen({
               ) : null}
             </View>
           ) : null}
-          <Text
-            style={[
-              styles.briefHistorySummary,
-              { color: theme.colors.onSurface },
-            ]}
-            numberOfLines={2}
-          >
+          <View style={styles.briefHistorySummaryRow}>
             <Text
-              style={{
-                color: showBooth
-                  ? isPrimer
-                    ? theme.dark
-                      ? "#eceff1"
-                      : "#6B6458"
-                    : accent
-                  : accent,
-                fontWeight: "700",
-              }}
+              style={[
+                styles.briefHistorySummary,
+                { color: theme.colors.onSurface, flex: 1 },
+              ]}
+              numberOfLines={2}
             >
-              {actionLabel}
+              <Text
+                style={{
+                  color: showBooth
+                    ? isPrimer
+                      ? theme.dark
+                        ? "#eceff1"
+                        : "#6B6458"
+                      : accent
+                    : accent,
+                  fontWeight: "700",
+                }}
+              >
+                {actionLabel}
+              </Text>
+              {qty > 0
+                ? ` ${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
+                : " "}
+              <Text style={{ fontWeight: "700" }}>{colorName}</Text>
             </Text>
-            {qty > 0
-              ? ` ${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
-              : " "}
-            <Text style={{ fontWeight: "700" }}>{colorName}</Text>
-          </Text>
+            {booth ? (
+              <View
+                style={[
+                  styles.briefBoothPill,
+                  {
+                    backgroundColor: boothColor
+                      ? `${boothColor}22`
+                      : "rgba(38,166,154,0.14)",
+                    borderWidth: 1,
+                    borderColor: boothColor || colors.action.materialUsage,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.briefBoothText,
+                    { color: boothColor || colors.action.materialUsage },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {booth}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     );
@@ -1726,6 +1721,33 @@ export default function DashboardScreen({
             Quick actions
           </Text>
           <View style={styles.quickActionsRow}>
+            {onOpenInventory ? (
+              <Pressable
+                onPress={onOpenInventory}
+                style={[
+                  styles.quickAction,
+                  styles.quickActionWide,
+                  surfaceCardStyle,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Inventory"
+              >
+                <Icon
+                  source="format-list-bulleted"
+                  size={16}
+                  color={theme.colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.quickActionLabel,
+                    { color: theme.colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Inventory
+                </Text>
+              </Pressable>
+            ) : null}
             {showCheckInOutNav && onOpenCheckInOut ? (
               <Pressable
                 onPress={onOpenCheckInOut}
@@ -1746,29 +1768,6 @@ export default function DashboardScreen({
                   numberOfLines={1}
                 >
                   In/Out
-                </Text>
-              </Pressable>
-            ) : null}
-            {onOpenInventory ? (
-              <Pressable
-                onPress={onOpenInventory}
-                style={[styles.quickAction, surfaceCardStyle]}
-                accessibilityRole="button"
-                accessibilityLabel="Inventory"
-              >
-                <Icon
-                  source="format-list-bulleted"
-                  size={16}
-                  color={theme.colors.primary}
-                />
-                <Text
-                  style={[
-                    styles.quickActionLabel,
-                    { color: theme.colors.primary },
-                  ]}
-                  numberOfLines={1}
-                >
-                  Inventory
                 </Text>
               </Pressable>
             ) : null}
@@ -2771,10 +2770,12 @@ export default function DashboardScreen({
         <ScrollView
           style={[
             styles.container,
-            styles.containerWeb,
             { backgroundColor: theme.colors.background },
           ]}
-          contentContainerStyle={styles.scrollContentStatsOnly}
+          contentContainerStyle={[
+            styles.scrollContentStatsOnly,
+            isMobileLayout && styles.scrollContentMobile,
+          ]}
           showsVerticalScrollIndicator={true}
         >
           {content}
@@ -2786,6 +2787,7 @@ export default function DashboardScreen({
         style={[
           styles.container,
           styles.containerWeb,
+          isMobileLayout && styles.containerWebMobile,
           { backgroundColor: theme.colors.background },
         ]}
       >
@@ -2799,7 +2801,14 @@ export default function DashboardScreen({
     <View
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
-      <View style={styles.scrollContent}>{content}</View>
+      <View
+        style={[
+          styles.scrollContent,
+          isMobileLayout && styles.scrollContentMobile,
+        ]}
+      >
+        {content}
+      </View>
     </View>
   );
 }
@@ -2814,10 +2823,20 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingTop: 8,
   },
+  containerWebMobile: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
   scrollContent: {
     padding: 20,
     paddingTop: 8,
     flexGrow: 1,
+  },
+  scrollContentMobile: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
   },
   scrollContentStatsOnly: {
     padding: 20,
@@ -2885,6 +2904,11 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     paddingHorizontal: 8,
+  },
+  quickActionWide: {
+    flexBasis: "100%",
+    maxWidth: "100%",
+    minWidth: "100%",
   },
   quickActionLabel: {
     fontSize: 13,
@@ -3391,6 +3415,12 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     lineHeight: 20,
   },
+  briefHistorySummaryRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 8,
+  },
   briefHistoryMoreBtn: {
     marginTop: space[3],
     alignSelf: "stretch",
@@ -3508,6 +3538,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 2,
+    flexShrink: 0,
+    alignSelf: "flex-end",
   },
   briefBoothText: {
     fontSize: 11,

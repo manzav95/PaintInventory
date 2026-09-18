@@ -1,10 +1,6 @@
 const { Pool } = require("pg");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
-const {
-  resolveMaterialBaseKey,
-} = require("./materialUsageBase");
-
 const BCRYPT_ROUNDS = 12;
 
 // Use DATABASE_URL from env (Supabase connection string). Never commit the real URL.
@@ -162,26 +158,9 @@ class Database {
       const client = await this.pool.connect();
       await this.initTables(client);
       client.release();
-      await this.backfillMixingDefaults();
-      const jobSync = await this.syncItemJobHistoryFromOrderLines();
-      if (jobSync?.updated > 0) {
-        console.log(
-          `Job history backfilled for ${jobSync.updated} item/job pair(s).`,
-        );
-      }
-      const recycleSync = await this.syncAllCustomRecycleDatesFromAudit();
-      if (recycleSync.updated > 0) {
-        console.log(
-          `Recycle due dates recomputed for ${recycleSync.updated} custom item(s)` +
-            (recycleSync.fromActivity
-              ? ` (${recycleSync.fromActivity} from activity`
-              : "") +
-            (recycleSync.fromLot
-              ? `${recycleSync.fromActivity ? ", " : " ("}${recycleSync.fromLot} from lot date`
-              : "") +
-            (recycleSync.fromActivity || recycleSync.fromLot ? ")" : "."),
-        );
-      }
+      // Schema only on boot. One-shot data repairs live behind admin API
+      // endpoints (sync-job-history, sync-recycle-dates) — do not re-run them
+      // on every restart.
       console.log("Connected to PostgreSQL database");
     } catch (err) {
       console.error("Error connecting to database:", err);
@@ -190,8 +169,8 @@ class Database {
   }
 
   /**
-   * Backfill is_mixing for legacy rows, then wipe old per-item PO fields.
-   * Rule: default mixing (true). If legacy AP flag exists, set is_mixing=false.
+   * One-shot: fill is_mixing from legacy PO flags, then clear those columns.
+   * Not run on boot — call manually if an old DB still has NULL is_mixing.
    */
   async backfillMixingDefaults() {
     const now = new Date().toISOString();
@@ -208,7 +187,6 @@ class Database {
          WHERE is_mixing IS NULL`,
         [now],
       );
-      // Wipe legacy PO fields so items don't carry old AP/mixing data anymore.
       await this.pool.query(
         `UPDATE items
          SET po_label_ap = NULL,
@@ -361,60 +339,7 @@ class Database {
         END IF;
       END $$
     `);
-    // Backfill: items historically excluded from the material-usage picker
-    await client.query(`
-      UPDATE items
-      SET hide_from_material_usage = TRUE
-      WHERE hide_from_material_usage IS NOT TRUE
-        AND (
-          LOWER(TRIM(COALESCE(name, ''))) ~ '^(acetone|catalyst|slow[[:space:]]*reducer)$'
-          OR LOWER(TRIM(COALESCE(id, ''))) ~ '^(acetone|catalyst|slow[[:space:]]*reducer)$'
-          OR LOWER(TRIM(COALESCE("type", ''))) = 'catalyst'
-          OR LOWER(TRIM(COALESCE(name, ''))) ~ '^(dye|stain|toner)[[:space:]]*base$'
-        )
-    `);
-    // Legacy "Custom Container" → default stack C-A for custom paint/stain with stock.
-    // Leave empty location when quantity is 0 (no stack when empty).
-    const stackBackfill = await client.query(
-      `UPDATE items
-       SET location = 'C-A'
-       WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
-         AND COALESCE(quantity, 0) > 0
-         AND (
-           location IS NULL
-           OR TRIM(location) = ''
-           OR lower(TRIM(location)) = 'custom container'
-         )`,
-    );
-    if (stackBackfill.rowCount > 0) {
-      console.log(
-        `Custom stack location backfill: ${stackBackfill.rowCount} item(s) → C-A`,
-      );
-    }
-    const clearEmptyCustomStacks = await client.query(
-      `UPDATE items
-       SET location = ''
-       WHERE lower(COALESCE(type, '')) IN ('custom_paint', 'custom_stain')
-         AND COALESCE(quantity, 0) <= 0
-         AND location IS NOT NULL
-         AND TRIM(location) <> ''`,
-    );
-    if (clearEmptyCustomStacks.rowCount > 0) {
-      console.log(
-        `Cleared stack location on ${clearEmptyCustomStacks.rowCount} empty custom item(s)`,
-      );
-    }
     console.log("Items table ready");
-
-    // Backfill missing unit prices (blank / null → default)
-    const priceBackfill = await client.query(
-      `UPDATE items SET price = 55.56 WHERE price IS NULL`,
-    );
-    if (priceBackfill.rowCount > 0) {
-      console.log(
-        `Backfilled unit price 55.56 on ${priceBackfill.rowCount} item(s)`,
-      );
-    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -2397,29 +2322,6 @@ class Database {
     return { success: true, deleted: result.rowCount };
   }
 
-  /**
-   * Find DYE Base / STAIN Base inventory row by name.
-   */
-  async findMaterialBaseItem(baseKey) {
-    if (!baseKey) return null;
-    const pattern =
-      baseKey === "dye"
-        ? "^dye[[:space:]]*base$"
-        : baseKey === "stain"
-          ? "^stain[[:space:]]*base$"
-          : null;
-    if (!pattern) return null;
-    const result = await this.pool.query(
-      `SELECT * FROM items
-       WHERE LOWER(TRIM(COALESCE(name, ''))) ~ $1
-          OR LOWER(TRIM(COALESCE(id, ''))) ~ $1
-       ORDER BY id
-       LIMIT 1`,
-      [pattern],
-    );
-    return result.rows[0] ? normalizeItemPoFields(result.rows[0]) : null;
-  }
-
   async hasProcessedTransaction(transactionId) {
     const id = transactionId != null ? String(transactionId).trim() : "";
     if (!id) return false;
@@ -2428,133 +2330,6 @@ class Database {
       [id],
     );
     return result.rows.length > 0;
-  }
-
-  materialUsageBaseConsumeTxnId(muId) {
-    return `mu-base-consume-${muId}`;
-  }
-
-  /**
-   * Apply or reverse base-stock check-out for a material-usage row.
-   * @param {object} muRow - material_usage row fields
-   * @param {{ reverse?: boolean, qtyOverride?: number, transactionId?: string }} opts
-   */
-  async applyMaterialUsageBaseConsumption(muRow, opts = {}) {
-    const reverse = opts.reverse === true;
-    const baseKey = resolveMaterialBaseKey(
-      muRow.material_type,
-      muRow.color_name,
-      muRow.item_id,
-    );
-    if (!baseKey) return { applied: false, reason: "no_base_key" };
-
-    const qty =
-      opts.qtyOverride != null
-        ? Number(opts.qtyOverride)
-        : Number(muRow.qty_gallons) || 0;
-    if (!Number.isFinite(qty) || qty <= 0) {
-      return { applied: false, reason: "no_qty" };
-    }
-
-    const baseItem = await this.findMaterialBaseItem(baseKey);
-    if (!baseItem) {
-      console.warn(
-        `[MU base] No inventory item matching ${baseKey} base — skipped consumption`,
-      );
-      return { applied: false, reason: "base_item_missing", baseKey };
-    }
-
-    const muId = muRow.id != null ? String(muRow.id) : "unknown";
-    const transactionId =
-      opts.transactionId ||
-      (reverse
-        ? `mu-base-reverse-${muId}`
-        : this.materialUsageBaseConsumeTxnId(muId));
-
-    const claim = await this.claimTransactionId(
-      transactionId,
-      baseItem.id,
-      reverse ? "check_in" : "check_out",
-      muRow.user_name || "unknown",
-    );
-    if (!claim.claimed) {
-      return { applied: false, reason: "duplicate", transactionId, baseKey };
-    }
-
-    const oldQty = Number(baseItem.quantity) || 0;
-    const delta = reverse ? qty : -qty;
-    // Allow negative on base so overuse is visible
-    const newQty = Math.round((oldQty + delta) * 1000) / 1000;
-    const now = new Date().toISOString();
-    const userName =
-      muRow.user_name != null && String(muRow.user_name).trim() !== ""
-        ? String(muRow.user_name).trim()
-        : "unknown";
-
-    try {
-      await this.pool.query(
-        `UPDATE items SET
-           quantity = $2,
-           "lastScanned" = $3,
-           "lastScannedBy" = $4,
-           "updatedAt" = $3
-         WHERE id = $1`,
-        [baseItem.id, newQty, now, userName],
-      );
-
-      await this.addAuditLog(reverse ? "check_in" : "check_out", baseItem.id, userName, {
-        quantity: newQty,
-        oldQuantity: oldQty,
-        newQuantity: newQty,
-        quantityChange: qty,
-        material_usage_id: muRow.id || null,
-        material_type: muRow.material_type || null,
-        color_name: muRow.color_name || null,
-        job_name: muRow.job_name || null,
-        booth: muRow.booth || null,
-        base_key: baseKey,
-        source: "material_usage",
-        transactionId,
-        note: reverse
-          ? "Reversed material-usage base consumption"
-          : "Material-usage base consumption",
-      });
-
-      return {
-        applied: true,
-        baseKey,
-        itemId: baseItem.id,
-        oldQuantity: oldQty,
-        newQuantity: newQty,
-        quantityChange: qty,
-        reverse,
-      };
-    } catch (error) {
-      try {
-        await this.releaseTransactionId(transactionId);
-      } catch (_) {
-        // ignore
-      }
-      throw error;
-    }
-  }
-
-  /** Undo a prior MU base consume (if it was applied), then clear its claim. */
-  async reverseMaterialUsageBaseIfNeeded(muRow) {
-    if (!muRow?.id) return { applied: false };
-    const consumeId = this.materialUsageBaseConsumeTxnId(muRow.id);
-    const had = await this.hasProcessedTransaction(consumeId);
-    if (!had) return { applied: false, reason: "not_consumed" };
-    const result = await this.applyMaterialUsageBaseConsumption(muRow, {
-      reverse: true,
-      transactionId: `mu-base-reverse-${muRow.id}-${Date.now()}`,
-    });
-    try {
-      await this.releaseTransactionId(consumeId);
-    } catch (_) {
-      // ignore
-    }
-    return result;
   }
 
   async addMaterialUsage(entry) {
@@ -2591,18 +2366,11 @@ class Database {
       ],
     );
     const row = result.rows[0];
-    let baseConsumption = null;
-    try {
-      baseConsumption = await this.applyMaterialUsageBaseConsumption(row);
-    } catch (e) {
-      console.error("[MU base] consume after create failed:", e?.message || e);
-    }
     return {
       success: true,
       id: row.id,
       created_at: row.created_at,
       entry: row,
-      baseConsumption,
     };
   }
 
@@ -2779,40 +2547,13 @@ class Database {
     );
     if (result.rowCount === 0) return { success: false, error: "Not found" };
     const next = result.rows[0];
-
-    // Adjust base consumption: reverse previous (if applied), then apply new
-    try {
-      await this.reverseMaterialUsageBaseIfNeeded(prev);
-    } catch (e) {
-      console.error("[MU base] reverse before edit failed:", e?.message || e);
-    }
-    let baseConsumption = null;
-    try {
-      baseConsumption = await this.applyMaterialUsageBaseConsumption(next);
-    } catch (e) {
-      console.error("[MU base] consume after edit failed:", e?.message || e);
-    }
-
-    return { success: true, entry: next, baseConsumption };
+    return { success: true, entry: next };
   }
 
   async deleteMaterialUsage(id) {
     const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
     if (!Number.isInteger(entryId) || entryId < 1) {
       return { success: false, error: "Invalid entry ID" };
-    }
-    const existing = await this.pool.query(
-      `SELECT * FROM material_usage WHERE id = $1 LIMIT 1`,
-      [entryId],
-    );
-    const prev = existing.rows[0];
-    if (!prev) {
-      return { success: false, error: "Entry not found" };
-    }
-    try {
-      await this.reverseMaterialUsageBaseIfNeeded(prev);
-    } catch (e) {
-      console.error("[MU base] reverse on delete failed:", e?.message || e);
     }
     const result = await this.pool.query(
       `DELETE FROM material_usage WHERE id = $1`,
@@ -2844,7 +2585,7 @@ class Database {
 
   /** Actions that reset custom recycle due date (activity date + 9 months). */
   static recycleActivityActions() {
-    return ["check_out", "receiving"];
+    return ["check_out", "receiving", "recycled"];
   }
 
   static recycleDueDateFromActivityIso(isoTimestamp) {

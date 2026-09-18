@@ -50,6 +50,8 @@ import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
   findExactInventoryScanMatch,
   getScanRejectReason,
+  itemMatchesInventorySearch,
+  looksLikeColorNumber,
   looksLikeItemCode,
 } from "../utils/itemLookup";
 import {
@@ -265,6 +267,7 @@ export default function InventoryListScreen({
   const [galPeriodWeek, setGalPeriodWeek] = useState(true); // true = show week, false = show month (toggle one card)
   const [staleDays, setStaleDays] = useState(30);
   const [staleListOpen, setStaleListOpen] = useState(false);
+  const [staleListSearch, setStaleListSearch] = useState("");
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
   const [recycleDueOnly, setRecycleDueOnly] = useState(false);
   const [colorPreviewItem, setColorPreviewItem] = useState(null);
@@ -405,9 +408,7 @@ export default function InventoryListScreen({
 
   const searchPlaceholder = isSales
     ? "Search by name, color, or ID"
-    : viewMode === "colorBook"
-      ? "Search by name, color, or ID — Enter scans ID/barcode for check in/out"
-      : "Search or Scan";
+    : "Search or Scan";
 
   const onOrderHighlight = (isLate) =>
     isLate
@@ -438,9 +439,34 @@ export default function InventoryListScreen({
   };
 
   const handleSearchSubmit = () => {
-    if (!onScanCode) return;
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
+
+    // Name search: if exactly one item is visible, Enter acts like scanning it
+    // (opens check in/out) — works for one word / partial of a multi-word name.
+    const isNameQuery =
+      !looksLikeItemCode(trimmed) && !looksLikeColorNumber(trimmed);
+    if (isNameQuery && onScanCode && !isSales) {
+      const visible =
+        viewMode === "colorBook"
+          ? colorBookItems
+          : filteredAndSortedInventory;
+      if (visible.length === 1) {
+        const only = visible[0];
+        const code =
+          only?.id != null && String(only.id).trim() !== ""
+            ? String(only.id).trim()
+            : null;
+        if (code) {
+          onScanCode(code);
+          setSearchQuery("");
+          notifyViewState();
+          return;
+        }
+      }
+    }
+
+    if (!onScanCode) return;
     if (!shouldSubmitSearchAsScan(trimmed, inventory)) return;
     onScanCode(trimmed);
     setSearchQuery("");
@@ -760,12 +786,19 @@ export default function InventoryListScreen({
     const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
     return inventory
       .filter((item) => {
+        const t = String(item.type || "").toLowerCase();
+        const qty = Number(item.quantity) || 0;
+        // Empty custom colors are out of stock — don't count as "not scanned"
+        if (CUSTOM_TYPES.includes(t) && qty <= 0) return false;
         if (!item.lastScanned) return true;
         return new Date(item.lastScanned).getTime() < cutoff;
       })
       .map((item) => ({
         id: item.id,
         name: item.name,
+        color_label:
+          item.color_label != null ? String(item.color_label).trim() : "",
+        type: item.type,
         lastScanned: item.lastScanned || null,
         lastScannedMs: item.lastScanned
           ? new Date(item.lastScanned).getTime()
@@ -782,6 +815,23 @@ export default function InventoryListScreen({
   }, [inventory, staleDays]);
 
   const notScannedCount = notScannedItems.length;
+
+  const filteredNotScannedItems = useMemo(() => {
+    const q = staleListSearch.trim().toLowerCase();
+    if (!q) return notScannedItems;
+    return notScannedItems.filter((it) => {
+      const name = String(it.name || "").toLowerCase();
+      const id = String(it.id || "").toLowerCase();
+      const label = String(it.color_label || "").toLowerCase();
+      return name.includes(q) || id.includes(q) || label.includes(q);
+    });
+  }, [notScannedItems, staleListSearch]);
+
+  const closeStaleList = () => {
+    setStaleListOpen(false);
+    setStaleListSearch("");
+    setRevealedColorLabels(new Set());
+  };
 
   const effectiveRecycleDue = recycleDueFilter || recycleDueOnly;
 
@@ -1025,17 +1075,10 @@ export default function InventoryListScreen({
   const filteredAndSortedInventory = useMemo(() => {
     const min = minQuantity ?? 30;
     let filtered = inventory.filter((item) => {
-      const query = searchQuery.toLowerCase();
-      const locationDisplay = formatItemLocationDisplay(item).toLowerCase();
-      const matchesSearch =
-        item.name?.toLowerCase().includes(query) ||
-        item.id?.toString().toLowerCase().includes(query) ||
-        item.location?.toLowerCase().includes(query) ||
-        locationDisplay.includes(query) ||
-        item.type?.toLowerCase().includes(query) ||
-        String(item.color_label || "")
-          .toLowerCase()
-          .includes(query);
+      const locationDisplay = formatItemLocationDisplay(item);
+      const matchesSearch = itemMatchesInventorySearch(item, searchQuery, {
+        locationDisplay,
+      });
       if (!matchesSearch) return false;
       if (isAdmin && apOnly) {
         // AP-only: is_mixing=false
@@ -1159,7 +1202,6 @@ export default function InventoryListScreen({
 
   // Paint/custom items with valid hex for color book grid (filtered by bookFilter)
   const colorBookItems = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim();
     const typeLower = (t) => (t || "").toLowerCase();
     return inventory
       .filter((item) => {
@@ -1168,14 +1210,7 @@ export default function InventoryListScreen({
         if (bookFilter === "standard" && t !== "paint") return false;
         if (bookFilter === "custom" && !CUSTOM_TYPES.includes(t)) return false;
         if (effectiveRecycleDue && !isRecycleDue(item)) return false;
-        if (!query) return true;
-        return (
-          item.name?.toLowerCase().includes(query) ||
-          item.id?.toString().toLowerCase().includes(query) ||
-          String(item.color_label || "")
-            .toLowerCase()
-            .includes(query)
-        );
+        return itemMatchesInventorySearch(item, searchQuery);
       })
       .sort((a, b) =>
         (a.name || "")
@@ -1437,11 +1472,11 @@ export default function InventoryListScreen({
         visible={staleListOpen}
         transparent
         animationType="fade"
-        onRequestClose={() => setStaleListOpen(false)}
+        onRequestClose={closeStaleList}
       >
         <Pressable
           style={styles.invStatModalOverlay}
-          onPress={() => setStaleListOpen(false)}
+          onPress={closeStaleList}
         >
           <Pressable
             style={[
@@ -1462,20 +1497,33 @@ export default function InventoryListScreen({
               >
                 Not scanned in {staleDays} days
               </Text>
-              <AppButton compact onPress={() => setStaleListOpen(false)}>
+              <AppButton compact onPress={closeStaleList}>
                 Close
               </AppButton>
             </View>
+            <TextInput
+              mode="outlined"
+              dense
+              placeholder="Search by name or ID"
+              value={staleListSearch}
+              onChangeText={setStaleListSearch}
+              style={styles.invStatModalSearch}
+              autoCorrect={false}
+              autoCapitalize="none"
+              clearButtonMode="while-editing"
+            />
             <ScrollFrame
               maxHeight={420}
               contentContainerStyle={styles.invStatModalList}
             >
-              {notScannedItems.length === 0 ? (
+              {filteredNotScannedItems.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                  None.
+                  {notScannedItems.length === 0
+                    ? "None."
+                    : "No matches for that search."}
                 </Text>
               ) : (
-                notScannedItems.map((it) => {
+                filteredNotScannedItems.map((it) => {
                   const daysAgo = it.lastScanned
                     ? Math.max(
                         0,
@@ -1485,6 +1533,13 @@ export default function InventoryListScreen({
                         ),
                       )
                     : null;
+                  const itemKey = String(it.id || it.name || "");
+                  const colorLabel = String(it.color_label || "").trim();
+                  const showLabel =
+                    !!colorLabel && revealedColorLabels.has(itemKey);
+                  const titleText = showLabel
+                    ? colorLabel
+                    : it.name || it.id;
                   return (
                     <View
                       key={String(it.id)}
@@ -1497,15 +1552,30 @@ export default function InventoryListScreen({
                       ]}
                     >
                       <View style={styles.invStatModalItemHeader}>
-                        <Text
-                          style={[
-                            styles.invStatModalItemName,
-                            { color: theme.colors.onSurface },
-                          ]}
-                          numberOfLines={1}
+                        <Pressable
+                          onPress={() => {
+                            if (!colorLabel) return;
+                            setRevealedColorLabels((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(itemKey)) next.delete(itemKey);
+                              else next.add(itemKey);
+                              return next;
+                            });
+                          }}
+                          disabled={!colorLabel}
+                          style={{ flex: 1, minWidth: 0 }}
+                          hitSlop={4}
                         >
-                          {it.name || it.id}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.invStatModalItemName,
+                              { color: theme.colors.onSurface },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {titleText}
+                          </Text>
+                        </Pressable>
                         <Text
                           style={[
                             styles.invStatModalItemValue,
@@ -1648,11 +1718,18 @@ export default function InventoryListScreen({
     const stackLetter = isCustomInventoryView
       ? customStackGroupLetter(item)
       : null;
+    const isStackGrouped =
+      isCustomInventoryView && effectiveCustomOrderMode === "stack";
     const prevItem = filteredAndSortedInventory[index - 1];
+    const nextItem = filteredAndSortedInventory[index + 1];
     const showStackHeader =
-      isCustomInventoryView &&
-      effectiveCustomOrderMode === "stack" &&
+      isStackGrouped &&
       (!prevItem || customStackGroupLetter(prevItem) !== stackLetter);
+    const isLastInStack =
+      isStackGrouped &&
+      (!nextItem || customStackGroupLetter(nextItem) !== stackLetter);
+    const stackBorder = theme.colors.outlineVariant;
+    const stackBg = nestedSurfaceColor(theme);
 
     // Theme-aware low stock card style
     const lowStockCardStyle = isLowStock
@@ -1666,18 +1743,49 @@ export default function InventoryListScreen({
       : null;
 
     return (
-      <View>
+      <View
+        style={
+          isStackGrouped
+            ? [
+                styles.stackGroupItem,
+                showStackHeader && styles.stackGroupItemFirst,
+                isLastInStack && styles.stackGroupItemLast,
+                {
+                  backgroundColor: stackBg,
+                  borderColor: stackBorder,
+                  borderLeftWidth: 1,
+                  borderRightWidth: 1,
+                  borderTopWidth: showStackHeader ? 1 : 0,
+                  borderBottomWidth: isLastInStack ? 1 : 0,
+                },
+              ]
+            : undefined
+        }
+      >
         {showStackHeader ? (
-          <Text
+          <View
             style={[
-              styles.stackSectionHeader,
-              { color: theme.colors.onSurfaceVariant },
+              styles.stackSectionHeaderBar,
+              { borderBottomColor: stackBorder },
             ]}
           >
-            {stackLetter === "—" ? "No stack" : `Stack ${stackLetter}`}
-          </Text>
+            <Text
+              style={[
+                styles.stackSectionHeader,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              {stackLetter === "—" ? "No stack" : `Stack ${stackLetter}`}
+            </Text>
+          </View>
         ) : null}
-      <Card style={[styles.card, lowStockCardStyle]}>
+      <Card
+        style={[
+          styles.card,
+          isStackGrouped && styles.cardInStack,
+          lowStockCardStyle,
+        ]}
+      >
         <Card.Content style={styles.itemCardContent}>
           <Pressable
             style={styles.itemCardPressable}
@@ -1908,23 +2016,6 @@ export default function InventoryListScreen({
             embeddedInShell={embeddedInShell}
           />
 
-          {effectiveRecycleDue && (
-            <View style={styles.recycleDueBanner}>
-              <Text style={styles.recycleDueBannerText}>
-                Showing: Paint Needing Recycle
-              </Text>
-              <AppButton
-                mode="text"
-                compact
-                onPress={() => {
-                  setRecycleDueOnly(false);
-                  onClearRecycleDueFilter?.();
-                }}
-              >
-                Clear Filter
-              </AppButton>
-            </View>
-          )}
           {initialStockFilter === "lowStock" && stockFilter === "lowStock" && (
             <View style={styles.recycleDueBanner}>
               <Text style={styles.recycleDueBannerText}>
@@ -1996,192 +2087,59 @@ export default function InventoryListScreen({
                   styles.webContentCenteredFlex,
                 ]}
               >
-                {/* Analytics Cards */}
+                {/* Analytics Cards — even rows (prefer equal; bottom max 4) */}
                 {!isSales ? (
-                <View style={styles.analyticsRow}>
-                  {isAdmin ? (
-                    <Pressable
-                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
-                      onPress={() => setTotalValueListOpen(true)}
-                    >
-                      <Card
-                        style={[
-                          styles.analyticsCardInner,
-                          {
-                            backgroundColor:
-                              theme.colors.surfaceContainerHighest,
-                            borderColor: theme.colors.outlineVariant,
-                            borderWidth: 1,
-                          },
-                        ]}
-                        mode="outlined"
+                (() => {
+                  const cards = [];
+                  if (isAdmin) {
+                    cards.push(
+                      <Pressable
+                        key="total-value"
+                        style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                        onPress={() => setTotalValueListOpen(true)}
                       >
-                        <Card.Content style={styles.analyticsCardContent}>
-                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>Total value</Text>
-                          <Title
-                            style={[
-                              styles.analyticsValue,
-                              { color: theme.colors.primary },
-                            ]}
-                          >
-                            $
-                            {analytics.totalValue.toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </Title>
-                          <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                            Tap for breakdown
-                          </Text>
-                        </Card.Content>
-                      </Card>
-                    </Pressable>
-                  ) : null}
-                  <Card
-                    style={[
-                      styles.analyticsCard,
-                      {
-                        backgroundColor: theme.colors.surfaceContainerHighest,
-                        borderColor: theme.colors.outlineVariant,
-                        borderWidth: 1,
-                      },
-                    ]}
-                    mode="outlined"
-                  >
-                    <Card.Content style={styles.analyticsCardContent}>
-                      <Text style={[styles.analyticsLabel, { color: ink.muted }]}>Total Gallons</Text>
-                      <Title style={[styles.analyticsValue, { color: ink.primary }]}>
-                        {analytics.totalGallons.toLocaleString()}
-                      </Title>
-                    </Card.Content>
-                  </Card>
-                  {isAdmin && analytics.recycleDueCount > 0 ? (
-                    <Pressable
-                      style={[
-                        styles.analyticsCard,
-                        styles.analyticsCardFilter,
-                        effectiveRecycleDue &&
-                          styles.analyticsCardFilterActive,
-                        effectiveRecycleDue && {
-                          borderColor: theme.colors.primary,
-                        },
-                      ]}
-                      onPress={() => {
-                        setRecycleDueOnly((v) => {
-                          const next = !v;
-                          if (next) {
-                            changeBookFilter("custom");
-                          }
-                          return next;
-                        });
-                        if (effectiveRecycleDue) {
-                          onClearRecycleDueFilter?.();
-                        }
-                      }}
-                    >
-                      <Card
-                        style={[
-                          styles.analyticsCardInner,
-                          {
-                            backgroundColor:
-                              theme.colors.surfaceContainerHighest,
-                            borderColor: theme.colors.outlineVariant,
-                            borderWidth: 1,
-                          },
-                        ]}
-                        mode="outlined"
-                      >
-                        <Card.Content style={styles.analyticsCardContent}>
-                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                            Need to recycle
-                            {effectiveRecycleDue ? " (filtering)" : ""}
-                          </Text>
-                          <Title
-                            style={[
-                              styles.analyticsValue,
-                              {
-                                color: kitColors.semantic.recycleBannerText,
-                              },
-                            ]}
-                          >
-                            {analytics.recycleDueCount}
-                          </Title>
-                          <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                            Past due date
-                          </Text>
-                        </Card.Content>
-                      </Card>
-                    </Pressable>
-                  ) : null}
-                  {isAdmin ? (
-                    <Pressable
-                      style={[styles.analyticsCard, styles.analyticsCardFilter]}
-                      onPress={() =>
-                        setStaleDays((d) =>
-                          d === 30 ? 60 : d === 60 ? 90 : 30,
-                        )
-                      }
-                    >
-                      <Card
-                        style={[
-                          styles.analyticsCardInner,
-                          {
-                            backgroundColor:
-                              theme.colors.surfaceContainerHighest,
-                            borderColor: theme.colors.outlineVariant,
-                            borderWidth: 1,
-                          },
-                        ]}
-                        mode="outlined"
-                      >
-                        <Card.Content style={styles.analyticsCardContent}>
-                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                            Not scanned in {staleDays} days
-                          </Text>
-                          <Pressable
-                            onPress={(e) => {
-                              e?.stopPropagation?.();
-                              setStaleListOpen(true);
-                            }}
-                          >
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>Total value</Text>
                             <Title
                               style={[
                                 styles.analyticsValue,
                                 { color: theme.colors.primary },
                               ]}
                             >
-                              {notScannedCount}
+                              $
+                              {analytics.totalValue.toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
                             </Title>
-                          </Pressable>
-                          <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                            Tap card for 30/60/90 · number for list
-                          </Text>
-                        </Card.Content>
-                      </Card>
-                    </Pressable>
-                  ) : null}
-                  {analytics.lowStockCount > 0 && (
-                    <Pressable
-                      style={[
-                        styles.analyticsCard,
-                        styles.analyticsCardFilter,
-                        stockFilter === "lowStock" &&
-                          styles.analyticsCardFilterActive,
-                        stockFilter === "lowStock" && {
-                          borderColor: theme.colors.primary,
-                        },
-                      ]}
-                      onPress={() =>
-                        setStockFilter((f) =>
-                          f === "lowStock" ? null : "lowStock",
-                        )
-                      }
-                    >
+                            <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
+                              Tap for breakdown
+                            </Text>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+                  cards.push(
+                    <View key="total-gallons" style={styles.analyticsCard}>
                       <Card
                         style={[
                           styles.analyticsCardInner,
                           {
-                            backgroundColor: theme.colors.surfaceContainerHighest,
+                            backgroundColor:
+                              theme.colors.surfaceContainerHighest,
                             borderColor: theme.colors.outlineVariant,
                             borderWidth: 1,
                           },
@@ -2189,107 +2147,226 @@ export default function InventoryListScreen({
                         mode="outlined"
                       >
                         <Card.Content style={styles.analyticsCardContent}>
-                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                            Low Stock
-                            {stockFilter === "lowStock" ? " (filtering)" : ""}
-                          </Text>
-                          <Title
-                            style={[
-                              styles.analyticsValue,
-                              { color: kitColors.semantic.lowStockValue },
-                            ]}
-                          >
-                            {analytics.lowStockCount}
+                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>Total Gallons</Text>
+                          <Title style={[styles.analyticsValue, { color: ink.primary }]}>
+                            {analytics.totalGallons.toLocaleString()}
                           </Title>
                         </Card.Content>
                       </Card>
-                    </Pressable>
-                  )}
-                  {analytics.outOfStockCount > 0 && (
-                    <Pressable
-                      style={[
-                        styles.analyticsCard,
-                        styles.analyticsCardFilter,
-                        stockFilter === "outOfStock" &&
-                          styles.analyticsCardFilterActive,
-                        stockFilter === "outOfStock" && {
-                          borderColor: theme.colors.primary,
-                        },
-                      ]}
-                      onPress={() =>
-                        setStockFilter((f) =>
-                          f === "outOfStock" ? null : "outOfStock",
-                        )
-                      }
-                    >
-                      <Card
+                    </View>,
+                  );
+                  if (isAdmin && analytics.recycleDueCount > 0) {
+                    cards.push(
+                      <Pressable
+                        key="recycle-due"
                         style={[
-                          styles.analyticsCardInner,
-                          {
-                            backgroundColor: theme.colors.surfaceContainerHighest,
-                            borderColor: theme.colors.outlineVariant,
-                            borderWidth: 1,
+                          styles.analyticsCard,
+                          styles.analyticsCardFilter,
+                          effectiveRecycleDue &&
+                            styles.analyticsCardFilterActive,
+                          effectiveRecycleDue && {
+                            borderColor: theme.colors.primary,
                           },
                         ]}
-                        mode="outlined"
+                        onPress={() => {
+                          setRecycleDueOnly((v) => {
+                            const next = !v;
+                            if (next) {
+                              changeBookFilter("custom");
+                            }
+                            return next;
+                          });
+                          if (effectiveRecycleDue) {
+                            onClearRecycleDueFilter?.();
+                          }
+                        }}
                       >
-                        <Card.Content style={styles.analyticsCardContent}>
-                          <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                            Out of Stock
-                            {stockFilter === "outOfStock" ? " (filtering)" : ""}
-                          </Text>
-                          <Title
-                            style={[
-                              styles.analyticsValue,
-                              { color: kitColors.semantic.outOfStockValue },
-                            ]}
-                          >
-                            {analytics.outOfStockCount}
-                          </Title>
-                        </Card.Content>
-                      </Card>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    style={[styles.analyticsCard, styles.analyticsCardFilter]}
-                    onPress={() => setGalPeriodWeek((prev) => !prev)}
-                  >
-                    <Card
-                      style={[
-                        styles.analyticsCardInner,
-                        {
-                          backgroundColor: theme.colors.surfaceContainerHighest,
-                          borderColor: theme.colors.outlineVariant,
-                          borderWidth: 1,
-                        },
-                      ]}
-                      mode="outlined"
-                    >
-                      <Card.Content style={styles.analyticsCardContent}>
-                        <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                          Checked out this {galPeriodWeek ? "week" : "month"}
-                        </Text>
-                        <Title style={[styles.analyticsValue, { color: ink.primary }]}>
-                          {galPeriodWeek
-                            ? gallonsUsedThisWeek
-                            : gallonsUsedThisMonth}
-                          <Text style={[styles.analyticsValueUnit, { color: ink.muted }]}> gal</Text>
-                        </Title>
-                        <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                          {galPeriodWeek
-                            ? thisWeekRange.label
-                            : thisMonthRange.label}
-                        </Text>
-                        <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                          Tap for {galPeriodWeek ? "month" : "week"}
-                        </Text>
-                      </Card.Content>
-                    </Card>
-                  </Pressable>
-                  {mostUsedColor && (
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
+                              Need to recycle
+                              {effectiveRecycleDue ? " (filtering)" : ""}
+                            </Text>
+                            <Title
+                              style={[
+                                styles.analyticsValue,
+                                {
+                                  color: kitColors.semantic.recycleBannerText,
+                                },
+                              ]}
+                            >
+                              {analytics.recycleDueCount}
+                            </Title>
+                            <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
+                              Past due date
+                            </Text>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+                  if (isAdmin) {
+                    cards.push(
+                      <Pressable
+                        key="not-scanned"
+                        style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                        onPress={() =>
+                          setStaleDays((d) =>
+                            d === 30 ? 60 : d === 60 ? 90 : 30,
+                          )
+                        }
+                      >
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor:
+                                theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
+                              Not scanned in {staleDays} days
+                            </Text>
+                            <Pressable
+                              onPress={(e) => {
+                                e?.stopPropagation?.();
+                                setStaleListOpen(true);
+                              }}
+                            >
+                              <Title
+                                style={[
+                                  styles.analyticsValue,
+                                  { color: theme.colors.primary },
+                                ]}
+                              >
+                                {notScannedCount}
+                              </Title>
+                            </Pressable>
+                            <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
+                              Tap card for 30/60/90 · number for list
+                            </Text>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+                  if (analytics.lowStockCount > 0) {
+                    cards.push(
+                      <Pressable
+                        key="low-stock"
+                        style={[
+                          styles.analyticsCard,
+                          styles.analyticsCardFilter,
+                          stockFilter === "lowStock" &&
+                            styles.analyticsCardFilterActive,
+                          stockFilter === "lowStock" && {
+                            borderColor: theme.colors.primary,
+                          },
+                        ]}
+                        onPress={() =>
+                          setStockFilter((f) =>
+                            f === "lowStock" ? null : "lowStock",
+                          )
+                        }
+                      >
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor: theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
+                              Low Stock
+                              {stockFilter === "lowStock" ? " (filtering)" : ""}
+                            </Text>
+                            <Title
+                              style={[
+                                styles.analyticsValue,
+                                { color: kitColors.semantic.lowStockValue },
+                              ]}
+                            >
+                              {analytics.lowStockCount}
+                            </Title>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+                  if (analytics.outOfStockCount > 0) {
+                    cards.push(
+                      <Pressable
+                        key="out-of-stock"
+                        style={[
+                          styles.analyticsCard,
+                          styles.analyticsCardFilter,
+                          stockFilter === "outOfStock" &&
+                            styles.analyticsCardFilterActive,
+                          stockFilter === "outOfStock" && {
+                            borderColor: theme.colors.primary,
+                          },
+                        ]}
+                        onPress={() =>
+                          setStockFilter((f) =>
+                            f === "outOfStock" ? null : "outOfStock",
+                          )
+                        }
+                      >
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor: theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
+                              Out of Stock
+                              {stockFilter === "outOfStock" ? " (filtering)" : ""}
+                            </Text>
+                            <Title
+                              style={[
+                                styles.analyticsValue,
+                                { color: kitColors.semantic.outOfStockValue },
+                              ]}
+                            >
+                              {analytics.outOfStockCount}
+                            </Title>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+                  cards.push(
                     <Pressable
+                      key="checked-out-period"
                       style={[styles.analyticsCard, styles.analyticsCardFilter]}
-                      onPress={() => setMostUsedByWeek((prev) => !prev)}
+                      onPress={() => setGalPeriodWeek((prev) => !prev)}
                     >
                       <Card
                         style={[
@@ -2304,28 +2381,86 @@ export default function InventoryListScreen({
                       >
                         <Card.Content style={styles.analyticsCardContent}>
                           <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
-                            Most gallons checked out
+                            Checked out this {galPeriodWeek ? "week" : "month"}
                           </Text>
-                          <Title
-                            style={[styles.analyticsValue, { fontSize: 18, color: ink.primary }]}
-                            numberOfLines={1}
-                          >
-                            {mostUsedColor.name}
+                          <Title style={[styles.analyticsValue, { color: ink.primary }]}>
+                            {galPeriodWeek
+                              ? gallonsUsedThisWeek
+                              : gallonsUsedThisMonth}
+                            <Text style={[styles.analyticsValueUnit, { color: ink.muted }]}> gal</Text>
                           </Title>
                           <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                            {mostUsedColor.totalGal} gal —{" "}
-                            {mostUsedColor.isWeek
-                              ? `week of ${mostUsedColor.periodLabel}`
-                              : mostUsedColor.periodLabel}
+                            {galPeriodWeek
+                              ? thisWeekRange.label
+                              : thisMonthRange.label}
                           </Text>
                           <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                            Tap for {mostUsedByWeek ? "month" : "week"}
+                            Tap for {galPeriodWeek ? "month" : "week"}
                           </Text>
                         </Card.Content>
                       </Card>
-                    </Pressable>
-                  )}
-                </View>
+                    </Pressable>,
+                  );
+                  if (mostUsedColor) {
+                    cards.push(
+                      <Pressable
+                        key="most-used"
+                        style={[styles.analyticsCard, styles.analyticsCardFilter]}
+                        onPress={() => setMostUsedByWeek((prev) => !prev)}
+                      >
+                        <Card
+                          style={[
+                            styles.analyticsCardInner,
+                            {
+                              backgroundColor: theme.colors.surfaceContainerHighest,
+                              borderColor: theme.colors.outlineVariant,
+                              borderWidth: 1,
+                            },
+                          ]}
+                          mode="outlined"
+                        >
+                          <Card.Content style={styles.analyticsCardContent}>
+                            <Text style={[styles.analyticsLabel, { color: ink.muted }]}>
+                              Most gallons checked out
+                            </Text>
+                            <Title
+                              style={[styles.analyticsValue, { fontSize: 18, color: ink.primary }]}
+                              numberOfLines={1}
+                            >
+                              {mostUsedColor.name}
+                            </Title>
+                            <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
+                              {mostUsedColor.totalGal} gal —{" "}
+                              {mostUsedColor.isWeek
+                                ? `week of ${mostUsedColor.periodLabel}`
+                                : mostUsedColor.periodLabel}
+                            </Text>
+                            <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
+                              Tap for {mostUsedByWeek ? "month" : "week"}
+                            </Text>
+                          </Card.Content>
+                        </Card>
+                      </Pressable>,
+                    );
+                  }
+
+                  const n = cards.length;
+                  const maxBottom = 4;
+                  const bottomCount =
+                    n <= maxBottom ? 0 : Math.min(maxBottom, Math.floor(n / 2));
+                  const topCount = n - bottomCount;
+                  const topCards = cards.slice(0, topCount);
+                  const bottomCards = cards.slice(topCount);
+
+                  return (
+                    <View style={styles.analyticsRows}>
+                      <View style={styles.analyticsRow}>{topCards}</View>
+                      {bottomCards.length > 0 ? (
+                        <View style={styles.analyticsRow}>{bottomCards}</View>
+                      ) : null}
+                    </View>
+                  );
+                })()
                 ) : null}
 
                 {/* Search and Table - fills remaining height, scrolls internally */}
@@ -2466,13 +2601,12 @@ export default function InventoryListScreen({
                               style={styles.receivePoButtonWrap}
                             >
                               <AppButton
-                                mode="outlined"
+                                mode="contained"
                                 compact
-                                icon="truck-delivery"
                                 onPress={openReceivePoModal}
                                 style={styles.receivePoButton}
-                                contentStyle={invBtnContentStyle}
-                                labelStyle={invBtnLabelStyle}
+                                contentStyle={styles.receivePoButtonContent}
+                                labelStyle={styles.receivePoButtonLabel}
                               >
                                 Receive PO
                               </AppButton>
@@ -2649,19 +2783,31 @@ export default function InventoryListScreen({
                                   const stackLetter = isCustomInventoryView
                                     ? customStackGroupLetter(item)
                                     : null;
+                                  const isStackGrouped =
+                                    isCustomInventoryView &&
+                                    effectiveCustomOrderMode === "stack";
                                   const prevItem =
                                     filteredAndSortedInventory[index - 1];
-                                    const showStackHeader =
-                                      isCustomInventoryView &&
-                                      effectiveCustomOrderMode === "stack" &&
-                                      (!prevItem ||
-                                        customStackGroupLetter(prevItem) !==
-                                          stackLetter);
+                                  const showStackHeader =
+                                    isStackGrouped &&
+                                    (!prevItem ||
+                                      customStackGroupLetter(prevItem) !==
+                                        stackLetter);
+                                  const stackRowBg = isStackGrouped
+                                    ? nestedSurfaceColor(theme)
+                                    : undefined;
                                   return (
                                     <React.Fragment key={item.id}>
                                     {showStackHeader ? (
                                       <DataTable.Row
-                                        style={styles.stackHeaderTableRow}
+                                        style={[
+                                          styles.stackHeaderTableRow,
+                                          {
+                                            backgroundColor: stackRowBg,
+                                            borderTopColor:
+                                              theme.colors.outlineVariant,
+                                          },
+                                        ]}
                                       >
                                         <DataTable.Cell
                                           style={[
@@ -2696,7 +2842,9 @@ export default function InventoryListScreen({
                                               borderLeftWidth: 4,
                                               borderLeftColor: kitColors.semantic.lowStockText,
                                             }
-                                          : undefined
+                                          : stackRowBg
+                                            ? { backgroundColor: stackRowBg }
+                                            : undefined
                                       }
                                     >
                                       <DataTable.Cell
@@ -3234,36 +3382,18 @@ export default function InventoryListScreen({
                 style={styles.receivePoButtonWrap}
               >
                 <AppButton
-                  mode="outlined"
+                  mode="contained"
                   compact
-                  icon="truck-delivery"
                   onPress={openReceivePoModal}
                   style={styles.receivePoButton}
-                  contentStyle={invBtnContentStyle}
-                  labelStyle={invBtnLabelStyle}
+                  contentStyle={styles.receivePoButtonContent}
+                  labelStyle={styles.receivePoButtonLabel}
                 >
                   Receive PO
                 </AppButton>
               </View>
             ) : null}
           </View>
-          {effectiveRecycleDue && (
-            <View style={styles.recycleDueBanner}>
-              <Text style={styles.recycleDueBannerText}>
-                Showing: Paint Needing Recycle
-              </Text>
-              <AppButton
-                mode="text"
-                compact
-                onPress={() => {
-                  setRecycleDueOnly(false);
-                  onClearRecycleDueFilter?.();
-                }}
-              >
-                Clear Filter
-              </AppButton>
-            </View>
-          )}
           {viewMode === "inventory" && !isSales && (
             <View
               style={[
@@ -3570,9 +3700,9 @@ export default function InventoryListScreen({
               />
             ) : (
               <View style={[styles.list, styles.listLandscape]}>
-                {filteredAndSortedInventory.map((item) => (
+                {filteredAndSortedInventory.map((item, index) => (
                   <View key={item.id?.toString() || Math.random().toString()}>
-                    {renderItem({ item })}
+                    {renderItem({ item, index })}
                   </View>
                 ))}
               </View>
@@ -3728,13 +3858,12 @@ export default function InventoryListScreen({
               style={styles.receivePoButtonWrap}
             >
               <AppButton
-                mode="outlined"
+                mode="contained"
                 compact
-                icon="truck-delivery"
                 onPress={openReceivePoModal}
                 style={styles.receivePoButton}
-                contentStyle={invBtnContentStyle}
-                labelStyle={invBtnLabelStyle}
+                contentStyle={styles.receivePoButtonContent}
+                labelStyle={styles.receivePoButtonLabel}
               >
                 Receive PO
               </AppButton>
@@ -3742,23 +3871,6 @@ export default function InventoryListScreen({
           ) : null}
         </View>
       </View>
-      {effectiveRecycleDue && (
-        <View style={styles.recycleDueBanner}>
-          <Text style={styles.recycleDueBannerText}>
-            Showing: Paint Needing Recycle
-          </Text>
-          <AppButton
-            mode="text"
-            compact
-            onPress={() => {
-              setRecycleDueOnly(false);
-              onClearRecycleDueFilter?.();
-            }}
-          >
-            Clear Filter
-          </AppButton>
-        </View>
-      )}
       <View style={styles.listContent}>
         <PullToRefresh
           style={styles.listPullRefresh}
@@ -3983,12 +4095,28 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     margin: 0,
     height: 36,
+    minHeight: 36,
     borderRadius: radius.md,
     justifyContent: "center",
+  },
+  receivePoButtonContent: {
+    height: 36,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
+  },
+  receivePoButtonLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    marginVertical: 0,
+    marginHorizontal: 0,
+    lineHeight: 18,
+    letterSpacing: 0.2,
   },
   receivePoButtonWrap: {
     flexShrink: 0,
     alignSelf: "center",
+    justifyContent: "center",
   },
   receivePoKb: {
     flex: 1,
@@ -4109,16 +4237,45 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 2,
   },
+  cardInStack: {
+    marginBottom: 8,
+    elevation: 1,
+  },
+  stackGroupItem: {
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
+  stackGroupItemFirst: {
+    marginTop: 14,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    overflow: "hidden",
+  },
+  stackGroupItemLast: {
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+  stackSectionHeaderBar: {
+    paddingHorizontal: 4,
+    paddingTop: 2,
+    paddingBottom: 8,
+    marginBottom: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   stackSectionHeader: {
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.8,
     textTransform: "uppercase",
-    marginBottom: 6,
-    marginTop: 4,
+    marginBottom: 0,
+    marginTop: 0,
   },
   stackHeaderTableRow: {
-    minHeight: 36,
+    minHeight: 40,
+    marginTop: 10,
+    borderTopWidth: 2,
   },
   stackSectionHeaderTable: {
     fontSize: 12,
@@ -4502,11 +4659,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: kitColors.semantic.recycleBannerText,
   },
+  analyticsRows: {
+    gap: 8,
+    marginBottom: 10,
+  },
   analyticsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 16,
+    gap: 8,
+    alignItems: "stretch",
   },
   invStatModalOverlay: {
     flex: 1,
@@ -4534,6 +4694,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     flex: 1,
+  },
+  invStatModalSearch: {
+    marginBottom: 10,
+    backgroundColor: "transparent",
   },
   invStatModalHint: {
     fontSize: 16,
@@ -4568,16 +4732,18 @@ const styles = StyleSheet.create({
   },
   analyticsCard: {
     flex: 1,
-    minWidth: 180,
+    minWidth: 0,
     elevation: 2,
-    borderRadius: 12,
+    borderRadius: 10,
   },
   analyticsCardInner: {
     flex: 1,
+    borderRadius: 10,
+    overflow: "hidden",
   },
   analyticsCardContent: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
   analyticsCardFilter: {
     backgroundColor: "rgba(0,0,0,0.04)",
@@ -4585,77 +4751,77 @@ const styles = StyleSheet.create({
   analyticsCardFilterActive: {
     backgroundColor: "rgba(0,0,0,0.12)",
     borderWidth: 2,
-    borderRadius: 12,
+    borderRadius: 10,
   },
   analyticsRowMobile: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   analyticsRowMobileLandscape: {
-    gap: 4,
+    gap: 3,
     paddingHorizontal: 10,
   },
   analyticsCardMobile: {
-    minWidth: 72,
+    minWidth: 64,
     flex: 1,
     elevation: 2,
-    maxWidth: 120,
-    borderRadius: 12,
+    maxWidth: 104,
+    borderRadius: 10,
   },
   analyticsCardMobileLandscape: {
-    minWidth: 64,
-    maxWidth: 96,
+    minWidth: 56,
+    maxWidth: 88,
   },
   analyticsCardMobileContent: {
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
   },
   analyticsCardMobileContentLandscape: {
-    paddingVertical: 4,
-    paddingHorizontal: 6,
+    paddingVertical: 2,
+    paddingHorizontal: 4,
   },
   listLandscape: {
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   analyticsLabelMobile: {
-    fontSize: 10,
+    fontSize: 9,
     textTransform: "uppercase",
     letterSpacing: 0.3,
     marginBottom: 0,
   },
   analyticsValueMobile: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "bold",
   },
   analyticsSubtextMobile: {
-    fontSize: 9,
-    marginTop: 1,
+    fontSize: 8,
+    marginTop: 0,
   },
   analyticsLabel: {
-    fontSize: 11,
-    marginBottom: 4,
+    fontSize: 10,
+    marginBottom: 2,
     textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
   },
   analyticsValue: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: "bold",
   },
   analyticsValueUnit: {
-    fontSize: 14,
+    fontSize: 12,
   },
   analyticsSubtext: {
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 9,
+    marginTop: 1,
   },
   tableCardWrapper: {
     flex: 1,
     minHeight: 0,
-    marginTop: 8,
+    marginTop: 4,
   },
   tableCardFlex: {
     flex: 1,

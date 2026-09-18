@@ -3,7 +3,7 @@ import { View, StyleSheet, Pressable } from "react-native";
 import { Card, useTheme } from "react-native-paper";
 import BumpText from "./BumpText";
 import { AppText } from "./ui";
-import { space, layout, type } from "../theme/tokens";
+import { space, layout, type, radius } from "../theme/tokens";
 
 /**
  * @param {Array<{ id?: string, label: string, value: string|number, color?: string, onPress?: () => void, active?: boolean }>} items
@@ -16,9 +16,18 @@ export default function MetricStrip({ items = [], style }) {
   return (
     <View style={[styles.row, style]}>
       {items.map((item, index) => {
+        const accent = item.color || theme.colors.primary;
         const content = (
           <Card.Content style={styles.cardContent}>
-            <AppText variant="label" style={{ color: theme.colors.onSurfaceVariant }}>
+            <AppText
+              variant="label"
+              style={{
+                color: item.active
+                  ? accent
+                  : theme.colors.onSurfaceVariant,
+                fontWeight: item.active ? "700" : undefined,
+              }}
+            >
               {item.label}
             </AppText>
             <BumpText
@@ -30,7 +39,7 @@ export default function MetricStrip({ items = [], style }) {
                 tone="inherit"
                 style={[
                   styles.value,
-                  { color: item.color || theme.colors.primary },
+                  { color: accent },
                 ]}
               >
                 {item.value}
@@ -42,13 +51,19 @@ export default function MetricStrip({ items = [], style }) {
         const cardStyle = [
           styles.card,
           {
-            backgroundColor: theme.colors.surfaceContainerHighest,
-            borderColor: item.active
-              ? theme.colors.primary
-              : theme.colors.outlineVariant,
+            backgroundColor: item.active
+              ? theme.dark
+                ? `${accent}22`
+                : `${accent}14`
+              : theme.colors.surfaceContainerHighest,
+            borderColor: item.active ? accent : theme.colors.outlineVariant,
           },
           item.active && styles.cardActive,
         ];
+
+        const underline = item.active ? (
+          <View style={[styles.activeUnderline, { backgroundColor: accent }]} />
+        ) : null;
 
         if (item.onPress) {
           return (
@@ -59,6 +74,7 @@ export default function MetricStrip({ items = [], style }) {
             >
               <Card style={cardStyle} mode="outlined">
                 {content}
+                {underline}
               </Card>
             </Pressable>
           );
@@ -68,6 +84,7 @@ export default function MetricStrip({ items = [], style }) {
           <View key={item.id || item.label || index} style={styles.cardWrap}>
             <Card style={cardStyle} mode="outlined">
               {content}
+              {underline}
             </Card>
           </View>
         );
@@ -90,9 +107,15 @@ const styles = StyleSheet.create({
   },
   card: {
     borderWidth: 1,
+    overflow: "hidden",
+    borderRadius: radius.md,
   },
   cardActive: {
     borderWidth: 2,
+  },
+  activeUnderline: {
+    height: 3,
+    width: "100%",
   },
   cardContent: {
     paddingVertical: space[3],

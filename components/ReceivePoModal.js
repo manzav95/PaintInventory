@@ -25,9 +25,12 @@ import {
   isCustomType,
   stackLetterFromLocation,
 } from "../utils/customStacks";
+import {
+  getMaterialTypeColor,
+  getMaterialTypeLabel,
+} from "../utils/materialTypes";
 
-const PANEL_WIDTH = 460;
-const PANEL_MAX_HEIGHT = 520;
+const PANEL_VIEWPORT_RATIO = 0.7;
 
 function lineOrderedQty(line) {
   const q = line?.quantity ?? line?.qty;
@@ -103,6 +106,23 @@ function getOrderExpectedLabel(order) {
   });
 }
 
+function getOrderTypeChips(order, getItemTypeForOrder, theme) {
+  const seen = new Map();
+  for (const line of order?.lines || []) {
+    const itemId = String(line.itemId ?? line.item_id ?? "").trim();
+    const t = String(getItemTypeForOrder?.(itemId) || "")
+      .toLowerCase()
+      .trim();
+    if (!t || seen.has(t)) continue;
+    seen.set(t, {
+      key: t,
+      label: getMaterialTypeLabel(t),
+      color: getMaterialTypeColor(t, theme),
+    });
+  }
+  return Array.from(seen.values());
+}
+
 const ReceiveLineQtyInput = memo(function ReceiveLineQtyInput({
   itemId,
   initialQty,
@@ -159,6 +179,12 @@ const ReceiveLineStackPicker = memo(function ReceiveLineStackPicker({
 
   const letter = value ? stackLetterFromLocation(value) : "";
 
+  const pick = (next) => {
+    setValue(next);
+    onChange(itemId, next);
+    setOpen(false);
+  };
+
   return (
     <View style={styles.stackField}>
       <Text
@@ -169,80 +195,101 @@ const ReceiveLineStackPicker = memo(function ReceiveLineStackPicker({
       <AppButton
         mode="outlined"
         compact
-        onPress={() => setOpen((v) => !v)}
-        icon={open ? "chevron-up" : "chevron-down"}
+        onPress={() => setOpen(true)}
+        icon="chevron-down"
         contentStyle={styles.stackButtonContent}
       >
         {letter || "None"}
       </AppButton>
-      {open ? (
-        <View
-          style={[
-            styles.stackGrid,
-            {
-              borderColor: theme.colors.outlineVariant,
-              backgroundColor: nestedSurfaceColor(theme),
-            },
-          ]}
-        >
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setOpen(false)}
+      >
+        <View style={styles.stackModalRoot}>
           <Pressable
-            onPress={() => {
-              setValue("");
-              onChange(itemId, "");
-              setOpen(false);
-            }}
+            style={styles.stackModalBackdrop}
+            onPress={() => setOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close stack picker"
+          />
+          <View
             style={[
-              styles.stackNoneCell,
-              !value && { backgroundColor: theme.colors.primary },
+              styles.stackModalPanel,
+              {
+                borderColor: theme.colors.outlineVariant,
+                backgroundColor: theme.colors.surfaceContainerHighest,
+              },
             ]}
           >
             <Text
-              style={[
-                styles.stackCellText,
-                {
-                  color: !value
-                    ? theme.colors.onPrimary
-                    : theme.colors.onSurface,
-                },
-              ]}
+              style={[styles.stackModalTitle, { color: theme.colors.onSurface }]}
             >
-              None
+              Place in stack
             </Text>
-          </Pressable>
-          {CUSTOM_STACK_OPTIONS.map((o) => {
-            const selected = value === o.value;
-            return (
+            <View style={styles.stackGrid}>
               <Pressable
-                key={o.value}
-                onPress={() => {
-                  setValue(o.value);
-                  onChange(itemId, o.value);
-                  setOpen(false);
-                }}
+                onPress={() => pick("")}
                 style={[
-                  styles.stackCell,
-                  selected && {
-                    backgroundColor: theme.colors.primary,
-                  },
+                  styles.stackNoneCell,
+                  !value && { backgroundColor: theme.colors.primary },
                 ]}
               >
                 <Text
                   style={[
                     styles.stackCellText,
                     {
-                      color: selected
+                      color: !value
                         ? theme.colors.onPrimary
                         : theme.colors.onSurface,
                     },
                   ]}
                 >
-                  {o.label}
+                  None
                 </Text>
               </Pressable>
-            );
-          })}
+              {CUSTOM_STACK_OPTIONS.map((o) => {
+                const selected = value === o.value;
+                return (
+                  <Pressable
+                    key={o.value}
+                    onPress={() => pick(o.value)}
+                    style={[
+                      styles.stackCell,
+                      selected && {
+                        backgroundColor: theme.colors.primary,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stackCellText,
+                        {
+                          color: selected
+                            ? theme.colors.onPrimary
+                            : theme.colors.onSurface,
+                        },
+                      ]}
+                    >
+                      {o.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <AppButton
+              mode="outlined"
+              onPress={() => setOpen(false)}
+              style={styles.stackModalCancel}
+            >
+              Cancel
+            </AppButton>
+          </View>
         </View>
-      ) : null}
+      </Modal>
     </View>
   );
 });
@@ -272,38 +319,59 @@ export default function ReceivePoModal({
 }) {
   const theme = useTheme();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const margin = 8;
-  const panelWidth = Math.min(PANEL_WIDTH, Math.max(200, windowWidth - margin * 2));
+  const margin = 10;
+  const panelWidth = Math.max(
+    280,
+    Math.min(
+      Math.round(windowWidth * PANEL_VIEWPORT_RATIO),
+      windowWidth - margin * 2,
+    ),
+  );
+  const panelHeight = Math.max(
+    320,
+    Math.min(
+      Math.round(windowHeight * PANEL_VIEWPORT_RATIO),
+      windowHeight - margin * 2,
+    ),
+  );
   const [panelPos, setPanelPos] = useState({
-    top: 56,
-    right: margin,
-    caretLeft: panelWidth - 28,
+    top: margin,
+    left: margin,
+    caretTop: 24,
   });
 
   const placePanel = useCallback(
     (x, y, width, height) => {
-      const gap = 8;
-      const caretSize = 10;
-      const top = Math.max(
+      const gap = 10;
+      // Prefer opening to the LEFT of the Receive button.
+      let left = x - gap - panelWidth;
+      if (left < margin) {
+        // Not enough room on the left — try right of the button.
+        left = x + width + gap;
+        if (left + panelWidth > windowWidth - margin) {
+          left = Math.max(margin, Math.round((windowWidth - panelWidth) / 2));
+        }
+      }
+      left = Math.max(
         margin,
-        Math.min(y + height + gap, windowHeight - 160),
+        Math.min(left, windowWidth - panelWidth - margin),
       );
-      // Receive PO sits on the right — align panel to the button's right edge,
-      // then clamp so the panel never leaves the viewport.
-      const buttonRight = x + width;
-      let right = windowWidth - buttonRight;
-      const maxRight = Math.max(margin, windowWidth - panelWidth - margin);
-      right = Math.max(margin, Math.min(right, maxRight));
-      const left = windowWidth - right - panelWidth;
-      const anchorCenterX = x + width / 2;
-      const rawCaret = anchorCenterX - left - caretSize;
-      const caretLeft = Math.max(
-        14,
-        Math.min(rawCaret, panelWidth - caretSize * 2 - 14),
+
+      // Vertically center on the button, then clamp into the viewport.
+      let top = Math.round(y + height / 2 - panelHeight / 2);
+      top = Math.max(
+        margin,
+        Math.min(top, windowHeight - panelHeight - margin),
       );
-      setPanelPos({ top, right, caretLeft });
+
+      const buttonCenterY = y + height / 2;
+      const caretTop = Math.max(
+        18,
+        Math.min(buttonCenterY - top - 8, panelHeight - 36),
+      );
+      setPanelPos({ top, left, caretTop });
     },
-    [margin, panelWidth, windowHeight, windowWidth],
+    [margin, panelHeight, panelWidth, windowHeight, windowWidth],
   );
 
   useEffect(() => {
@@ -318,28 +386,37 @@ export default function ReceivePoModal({
             return;
           }
           setPanelPos({
-            top: 56,
-            right: margin,
-            caretLeft: panelWidth - 28,
+            top: Math.max(margin, Math.round((windowHeight - panelHeight) / 2)),
+            left: Math.max(margin, Math.round((windowWidth - panelWidth) / 2)),
+            caretTop: 24,
           });
         });
         return;
       }
       setPanelPos({
-        top: 56,
-        right: margin,
-        caretLeft: panelWidth - 28,
+        top: Math.max(margin, Math.round((windowHeight - panelHeight) / 2)),
+        left: Math.max(margin, Math.round((windowWidth - panelWidth) / 2)),
+        caretTop: 24,
       });
     };
 
     runMeasure();
-    // Web layouts (sidebar / centered shell) can settle a frame later.
     const t =
       Platform.OS === "web" ? requestAnimationFrame(runMeasure) : null;
     return () => {
       if (t != null) cancelAnimationFrame(t);
     };
-  }, [visible, step, placePanel, anchorRef, panelWidth, margin]);
+  }, [
+    visible,
+    step,
+    placePanel,
+    anchorRef,
+    panelWidth,
+    panelHeight,
+    margin,
+    windowHeight,
+    windowWidth,
+  ]);
 
   if (!actorName) return null;
 
@@ -362,12 +439,15 @@ export default function ReceivePoModal({
     }
   };
 
-  const panelMaxHeight = Math.min(
-    PANEL_MAX_HEIGHT,
-    Math.max(220, windowHeight - panelPos.top - 12),
-  );
-  const listScrollMax = Math.min(280, Math.max(140, panelMaxHeight - 160));
-  const detailScrollMax = Math.min(320, Math.max(140, panelMaxHeight - 140));
+  const panelMaxHeight = panelHeight;
+  const listScrollMax = Math.max(180, panelMaxHeight - 200);
+  const detailScrollMax = Math.max(200, panelMaxHeight - 220);
+
+  const selectedTypeChips = selectedReceiveOrder
+    ? getOrderTypeChips(selectedReceiveOrder, getItemTypeForOrder, theme)
+    : [];
+  const selectedPrimaryTypeColor =
+    selectedTypeChips[0]?.color || colors.action.materialUsage;
 
   return (
     <Modal
@@ -390,46 +470,58 @@ export default function ReceivePoModal({
             styles.panelAnchor,
             {
               top: panelPos.top,
-              right: panelPos.right,
+              left: panelPos.left,
               width: panelWidth,
+              height: panelHeight,
               pointerEvents: "box-none",
             },
           ]}
         >
           <View
             style={[
-              styles.caret,
-              {
-                left: panelPos.caretLeft,
-                borderBottomColor: theme.colors.outlineVariant,
-              },
-            ]}
-          />
-          <View
-            style={[
-              styles.caretInner,
-              {
-                left: panelPos.caretLeft + 1,
-                borderBottomColor: theme.colors.surfaceContainerHighest,
-              },
-            ]}
-          />
-          <View
-            style={[
               styles.panel,
               {
+                height: panelHeight,
                 maxHeight: panelMaxHeight,
                 backgroundColor: theme.colors.surfaceContainerHighest,
                 borderColor: theme.colors.outlineVariant,
               },
             ]}
           >
-            <View style={styles.panelHeader}>
-              <Text
-                style={[styles.panelTitle, { color: theme.colors.onSurface }]}
-              >
-                {step === "detail" ? "Receive lines" : "Receive from PO"}
-              </Text>
+            <View
+              style={[
+                styles.panelHeader,
+                {
+                  borderBottomColor: theme.colors.outlineVariant,
+                  backgroundColor: theme.dark
+                    ? "rgba(201, 151, 46, 0.12)"
+                    : "rgba(201, 151, 46, 0.1)",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.panelHeaderAccent,
+                  { backgroundColor: colors.brand.accent },
+                ]}
+              />
+              <View style={styles.panelHeaderText}>
+                <Text
+                  style={[styles.panelTitle, { color: theme.colors.onSurface }]}
+                >
+                  {step === "detail" ? "Receive lines" : "Receive from PO"}
+                </Text>
+                {step === "list" ? (
+                  <Text
+                    style={[
+                      styles.panelSubtitle,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Pick an open order to log delivery
+                  </Text>
+                ) : null}
+              </View>
               <IconButton
                 icon="close"
                 size={18}
@@ -442,24 +534,45 @@ export default function ReceivePoModal({
 
             {step === "list" && (
               <>
-                <Text
-                  style={[
-                    styles.help,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  Choose an open order, then enter how many gallons you are
-                  receiving on each line (defaults to full remaining).
-                </Text>
-                <Text
-                  style={{
-                    color: theme.colors.onSurfaceVariant,
-                    fontSize: 12,
-                    marginBottom: 8,
-                  }}
-                >
-                  Open POs: {openOrders.length}
-                </Text>
+                <View style={styles.listIntro}>
+                  <View
+                    style={[
+                      styles.openCountPill,
+                      {
+                        backgroundColor: theme.dark
+                          ? "rgba(201, 151, 46, 0.22)"
+                          : colors.brand.accentSoft,
+                        borderColor: colors.brand.accent,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.openCountValue,
+                        { color: colors.brand.accent },
+                      ]}
+                    >
+                      {openOrders.length}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.openCountLabel,
+                        { color: theme.colors.onSurface },
+                      ]}
+                    >
+                      open PO{openOrders.length === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.help,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Enter gallons per line (defaults to remaining). Custom colors
+                    can set stack A–Z.
+                  </Text>
+                </View>
                 {receiveOrdersLoading && !receiveOrdersLoaded ? (
                   <ActivityIndicator style={{ marginVertical: 24 }} />
                 ) : openOrders.length === 0 ? (
@@ -496,6 +609,14 @@ export default function ReceivePoModal({
                           )
                         : "";
                       const exp = getOrderExpectedLabel(order);
+                      const lineCount = (order.lines || []).length;
+                      const typeChips = getOrderTypeChips(
+                        order,
+                        getItemTypeForOrder,
+                        theme,
+                      );
+                      const primaryTypeColor =
+                        typeChips[0]?.color || colors.brand.accent;
                       return (
                         <Pressable
                           key={String(order.id)}
@@ -503,65 +624,141 @@ export default function ReceivePoModal({
                           style={({ pressed }) => [
                             styles.orderRow,
                             {
-                              borderColor: theme.colors.outlineVariant,
+                              borderColor: theme.dark
+                                ? `${primaryTypeColor}55`
+                                : `${primaryTypeColor}66`,
+                              borderBottomWidth: 3,
+                              borderBottomColor: primaryTypeColor,
                               backgroundColor: pressed
                                 ? theme.colors.surface
                                 : nestedSurfaceColor(theme),
                             },
                           ]}
                         >
-                          <Text
+                          <View
                             style={[
-                              styles.orderPo,
-                              { color: theme.colors.primary },
+                              styles.orderAccent,
+                              { backgroundColor: primaryTypeColor },
                             ]}
-                          >
-                            PO {order.po_number || order.id}
-                          </Text>
-                          {placed ? (
-                            <Text
-                              style={[
-                                styles.orderMeta,
-                                { color: theme.colors.onSurfaceVariant },
-                              ]}
-                            >
-                              Placed {placed}
-                              {exp ? ` · Expected ~${exp}` : ""}
-                            </Text>
-                          ) : null}
-                          <Text
-                            style={[
-                              styles.orderPreview,
-                              { color: theme.colors.onSurface },
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {formatOrderColorsPreview(order)}
-                          </Text>
-                          {(() => {
-                            const jobs = [
-                              ...new Set(
-                                (order.lines || [])
-                                  .map((l) => (l.job_name || "").trim())
-                                  .filter(Boolean),
-                              ),
-                            ];
-                            if (jobs.length === 0) return null;
-                            return (
+                          />
+                          <View style={styles.orderRowBody}>
+                            <View style={styles.orderPoRow}>
+                              <Text
+                                style={[
+                                  styles.orderPo,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                PO {order.po_number || order.id}
+                              </Text>
+                              {exp ? (
+                                <View
+                                  style={[
+                                    styles.expectedPill,
+                                    {
+                                      backgroundColor: theme.dark
+                                        ? "rgba(38,166,154,0.2)"
+                                        : "rgba(38,166,154,0.12)",
+                                      borderColor: colors.action.materialUsage,
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.expectedPillText,
+                                      {
+                                        color: theme.dark
+                                          ? "#80CBC4"
+                                          : "#00897B",
+                                      },
+                                    ]}
+                                  >
+                                    ~{exp}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                            {typeChips.length > 0 ? (
+                              <View style={styles.typeChipRow}>
+                                {typeChips.map((chip) => (
+                                  <View
+                                    key={chip.key}
+                                    style={[
+                                      styles.typeChip,
+                                      {
+                                        borderColor: chip.color,
+                                        backgroundColor: theme.dark
+                                          ? `${chip.color}33`
+                                          : `${chip.color}18`,
+                                      },
+                                    ]}
+                                  >
+                                    <View
+                                      style={[
+                                        styles.typeChipDot,
+                                        { backgroundColor: chip.color },
+                                      ]}
+                                    />
+                                    <Text
+                                      style={[
+                                        styles.typeChipText,
+                                        { color: chip.color },
+                                      ]}
+                                    >
+                                      {chip.label}
+                                    </Text>
+                                  </View>
+                                ))}
+                              </View>
+                            ) : null}
+                            {placed ? (
                               <Text
                                 style={[
                                   styles.orderMeta,
-                                  {
-                                    color: theme.colors.onSurfaceVariant,
-                                    marginTop: 4,
-                                  },
+                                  { color: theme.colors.onSurfaceVariant },
                                 ]}
-                                numberOfLines={2}
                               >
-                                Job{jobs.length > 1 ? "s" : ""}: {jobs.join(", ")}
+                                Placed {placed}
+                                {lineCount
+                                  ? ` · ${lineCount} line${lineCount === 1 ? "" : "s"}`
+                                  : ""}
                               </Text>
-                            );
-                          })()}
+                            ) : null}
+                            <Text
+                              style={[
+                                styles.orderPreview,
+                                { color: theme.colors.onSurface },
+                              ]}
+                              numberOfLines={2}
+                            >
+                              {formatOrderColorsPreview(order)}
+                            </Text>
+                            {(() => {
+                              const jobs = [
+                                ...new Set(
+                                  (order.lines || [])
+                                    .map((l) => (l.job_name || "").trim())
+                                    .filter(Boolean),
+                                ),
+                              ];
+                              if (jobs.length === 0) return null;
+                              return (
+                                <Text
+                                  style={[
+                                    styles.orderMeta,
+                                    {
+                                      color: theme.colors.onSurfaceVariant,
+                                      marginTop: 4,
+                                    },
+                                  ]}
+                                  numberOfLines={2}
+                                >
+                                  Job{jobs.length > 1 ? "s" : ""}:{" "}
+                                  {jobs.join(", ")}
+                                </Text>
+                              );
+                            })()}
+                          </View>
                         </Pressable>
                       );
                     })}
@@ -572,7 +769,19 @@ export default function ReceivePoModal({
 
             {step === "detail" && selectedReceiveOrder && (
               <>
-                <View style={styles.detailHeader}>
+                <View
+                  style={[
+                    styles.detailHeader,
+                    {
+                      backgroundColor: theme.dark
+                        ? `${selectedPrimaryTypeColor}22`
+                        : `${selectedPrimaryTypeColor}14`,
+                      borderColor: theme.dark
+                        ? `${selectedPrimaryTypeColor}55`
+                        : `${selectedPrimaryTypeColor}44`,
+                    },
+                  ]}
+                >
                   <IconButton
                     icon="arrow-left"
                     size={22}
@@ -595,7 +804,7 @@ export default function ReceivePoModal({
                       <Text
                         style={[
                           styles.detailExpected,
-                          { color: theme.colors.onSurfaceVariant },
+                          { color: selectedPrimaryTypeColor },
                         ]}
                         numberOfLines={1}
                       >
@@ -605,13 +814,80 @@ export default function ReceivePoModal({
                   </View>
                 </View>
 
-                <ScrollFrame
-                  bordered={false}
-                  key={String(detailResetKey)}
-                  maxHeight={detailScrollMax}
-                  contentContainerStyle={{ paddingBottom: 12 }}
-                  scrollProps={{ keyboardDismissMode: "on-drag" }}
-                >
+                {selectedTypeChips.length > 0 ? (
+                  <View style={styles.detailTypeChipRow}>
+                    {selectedTypeChips.map((chip) => (
+                      <View
+                        key={chip.key}
+                        style={[
+                          styles.typeChip,
+                          {
+                            borderColor: chip.color,
+                            backgroundColor: theme.dark
+                              ? `${chip.color}33`
+                              : `${chip.color}18`,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.typeChipDot,
+                            { backgroundColor: chip.color },
+                          ]}
+                        />
+                        <Text
+                          style={[styles.typeChipText, { color: chip.color }]}
+                        >
+                          {chip.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={styles.statusLegend}>
+                  {(
+                    [
+                      ["pending", "Open"],
+                      ["partial", "Partial"],
+                      ["complete", "Done"],
+                    ]
+                  ).map(([key, label]) => (
+                    <View
+                      key={key}
+                      style={[
+                        styles.statusLegendChip,
+                        {
+                          backgroundColor: STATUS_COLORS[key].soft,
+                          borderColor: STATUS_COLORS[key].accent,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.statusLegendDot,
+                          { backgroundColor: STATUS_COLORS[key].accent },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.statusLegendText,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                  <ScrollFrame
+                    bordered={false}
+                    key={String(detailResetKey)}
+                    maxHeight={detailScrollMax}
+                    contentContainerStyle={{ paddingBottom: 12 }}
+                    scrollProps={{ keyboardDismissMode: "on-drag" }}
+                  >
                   {sortLinesForReceive(selectedReceiveOrder.lines).map(
                     (line, idx) => {
                       const itemId = String(
@@ -626,16 +902,27 @@ export default function ReceivePoModal({
                       const code = getItemCodeForOrder
                         ? getItemCodeForOrder(itemId)
                         : itemId;
+                      const typeKey = String(
+                        getItemTypeForOrder?.(itemId) || "",
+                      )
+                        .toLowerCase()
+                        .trim();
+                      const typeColor = typeKey
+                        ? getMaterialTypeColor(typeKey, theme)
+                        : theme.colors.outlineVariant;
+                      const typeLabel = typeKey
+                        ? getMaterialTypeLabel(typeKey)
+                        : "";
                       return (
                         <View
                           key={`${detailResetKey}-${itemId}-${idx}`}
                           style={[
                             styles.lineCard,
                             {
-                              borderColor: statusColors.accent,
+                              borderColor: theme.colors.outlineVariant,
                               backgroundColor: nestedSurfaceColor(theme),
                               borderLeftWidth: 4,
-                              borderLeftColor: statusColors.accent,
+                              borderLeftColor: typeColor,
                             },
                           ]}
                         >
@@ -649,6 +936,17 @@ export default function ReceivePoModal({
                             >
                               {name}
                             </Text>
+                            {typeLabel ? (
+                              <Text
+                                style={[
+                                  styles.lineTypeLabel,
+                                  { color: typeColor },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {typeLabel}
+                              </Text>
+                            ) : null}
                             <AppBadge tone={statusColors.badgeTone}>
                               {statusColors.label}
                             </AppBadge>
@@ -750,38 +1048,15 @@ const styles = StyleSheet.create({
   panelAnchor: {
     position: "absolute",
   },
-  caret: {
-    position: "absolute",
-    top: -9,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 9,
-    borderRightWidth: 9,
-    borderBottomWidth: 9,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    zIndex: 2,
-  },
-  caretInner: {
-    position: "absolute",
-    top: -7,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 8,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    zIndex: 3,
-  },
   panel: {
     borderRadius: radius.md + 2,
     borderWidth: 1,
-    paddingHorizontal: space[5],
-    paddingTop: space[2],
+    paddingHorizontal: 0,
+    paddingTop: 0,
     paddingBottom: space[4],
     width: "100%",
     overflow: "hidden",
+    flexDirection: "column",
     ...(Platform.OS === "web"
       ? {
           boxSizing: "border-box",
@@ -799,36 +1074,103 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: space[1],
-    marginRight: -4,
-    minHeight: 36,
+    marginBottom: space[3],
+    minHeight: 52,
+    paddingLeft: space[4],
+    paddingRight: space[2],
+    paddingVertical: space[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: space[2],
+  },
+  panelHeaderAccent: {
+    width: 4,
+    alignSelf: "stretch",
+    borderRadius: 2,
+    marginVertical: 2,
+  },
+  panelHeaderText: {
+    flex: 1,
+    minWidth: 0,
   },
   panelTitle: {
     fontSize: 17,
-    fontWeight: "700",
-    flex: 1,
-    paddingRight: space[2],
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  panelSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: "500",
   },
   closeBtn: {
     margin: 0,
   },
+  listIntro: {
+    paddingHorizontal: space[5],
+    marginBottom: space[2],
+    gap: space[2],
+  },
+  openCountPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  openCountValue: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  openCountLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
   help: {
     fontSize: 13,
-    marginBottom: space[3],
     lineHeight: 18,
-    paddingRight: space[1],
   },
   orderRow: {
     borderWidth: 1,
     borderRadius: radius.md,
+    marginBottom: space[2],
+    marginHorizontal: space[5],
+    overflow: "hidden",
+    flexDirection: "row",
+  },
+  orderAccent: {
+    width: 4,
+  },
+  orderRowBody: {
+    flex: 1,
     paddingVertical: space[4],
     paddingHorizontal: space[4],
-    marginBottom: space[2],
+  },
+  orderPoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: space[1],
   },
   orderPo: {
     fontSize: 15,
-    fontWeight: "600",
-    marginBottom: space[1],
+    fontWeight: "800",
+    flex: 1,
+    minWidth: 0,
+  },
+  expectedPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    flexShrink: 0,
+  },
+  expectedPillText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
   orderMeta: {
     fontSize: 12,
@@ -838,6 +1180,44 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 2,
+    fontWeight: "500",
+  },
+  typeChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  detailTypeChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    paddingHorizontal: space[5],
+    marginBottom: space[2],
+  },
+  typeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  typeChipDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  typeChipText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  lineTypeLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    flexShrink: 0,
+    marginRight: 8,
   },
   actions: {
     flexDirection: "row",
@@ -845,13 +1225,18 @@ const styles = StyleSheet.create({
     gap: space[4],
     flexWrap: "wrap",
     marginTop: space[2],
+    paddingHorizontal: space[5],
   },
   detailHeader: {
     position: "relative",
     flexDirection: "row",
     alignItems: "center",
     marginBottom: space[3],
-    minHeight: 44,
+    marginHorizontal: space[5],
+    minHeight: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingRight: space[2],
   },
   backBtn: {
     margin: 0,
@@ -865,19 +1250,46 @@ const styles = StyleSheet.create({
   },
   detailPo: {
     fontSize: 15,
-    fontWeight: "600",
+    fontWeight: "800",
     textAlign: "center",
   },
   detailExpected: {
     fontSize: 12,
     marginTop: 2,
     textAlign: "center",
+    fontWeight: "600",
+  },
+  statusLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingHorizontal: space[5],
+    marginBottom: space[3],
+  },
+  statusLegendChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusLegendText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
   lineCard: {
     borderWidth: 1,
     borderRadius: radius.md,
     padding: space[4],
     marginBottom: space[3],
+    marginHorizontal: space[5],
     gap: space[1],
   },
   lineTitleRow: {
@@ -899,7 +1311,7 @@ const styles = StyleSheet.create({
   emptyOrders: {
     flex: 0,
     paddingVertical: space[4],
-    paddingHorizontal: 0,
+    paddingHorizontal: space[5],
   },
   lineJob: {
     fontSize: 12,
@@ -927,17 +1339,46 @@ const styles = StyleSheet.create({
     flexDirection: "row-reverse",
     justifyContent: "space-between",
   },
+  stackModalRoot: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: space[5],
+  },
+  stackModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  stackModalPanel: {
+    borderWidth: 1,
+    borderRadius: radius.md + 2,
+    padding: space[4],
+    zIndex: 1,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      : {
+          elevation: 12,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.25,
+          shadowRadius: 12,
+        }),
+  },
+  stackModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: space[3],
+  },
+  stackModalCancel: {
+    marginTop: space[3],
+  },
   stackGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    padding: 6,
     gap: 4,
   },
   stackCell: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
@@ -947,8 +1388,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   stackNoneCell: {
-    height: 32,
-    paddingHorizontal: 10,
+    height: 36,
+    paddingHorizontal: 12,
     borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",

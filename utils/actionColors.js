@@ -26,6 +26,10 @@ export function getActionColor(action, details) {
     return map.receive;
   }
   if (action === "recycled") return map.receive;
+  if (action === "location_change") return map.update;
+  if (action === "update" && details?._actionType === "location_change") {
+    return map.update;
+  }
   if (action === "add") return map.adjust;
   if (action === "delete") return map.delete;
   if (action === "change_id") return map.update;

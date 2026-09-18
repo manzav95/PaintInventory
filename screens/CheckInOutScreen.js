@@ -25,7 +25,6 @@ import showAlertUtil from "../utils/showAlert";
 import showToast from "../utils/showToast";
 import {
   CUSTOM_STACK_OPTIONS,
-  DEFAULT_CUSTOM_STACK,
   resolveCustomStackLocation,
   stackLetterFromLocation,
   formatCustomStackDisplay,
@@ -106,16 +105,16 @@ export default function CheckInOutScreen({
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [receiveQty, setReceiveQty] = useState("");
   const [receiveSubmitting, setReceiveSubmitting] = useState(false);
-  const [stackLocation, setStackLocation] = useState(() =>
-    resolveCustomStackLocation(item?.location || DEFAULT_CUSTOM_STACK),
-  );
+  const [stackLocation, setStackLocation] = useState(() => {
+    const loc = String(item?.location || "").trim();
+    return loc ? resolveCustomStackLocation(loc) : "";
+  });
   const [stackMenuOpen, setStackMenuOpen] = useState(false);
   const [receiveStackMenuOpen, setReceiveStackMenuOpen] = useState(false);
 
   useEffect(() => {
-    setStackLocation(
-      resolveCustomStackLocation(item?.location || DEFAULT_CUSTOM_STACK),
-    );
+    const loc = String(item?.location || "").trim();
+    setStackLocation(loc ? resolveCustomStackLocation(loc) : "");
   }, [item?.id, item?.location]);
 
   const quickQtyEnabledTypes = new Set([
@@ -186,7 +185,7 @@ export default function CheckInOutScreen({
     action && action !== "location" && quickQtyEnabledTypes.has(itemType);
   const halfGallonItem = allowsHalfGallon(itemType);
   const quickQtyOptions = isCustomColor
-    ? [1, 2, 3, 4, 5]
+    ? [0.5, 1, 2, 3, 4, 5]
     : halfGallonItem
       ? [0.5, 1, 5, 10]
       : [5, 10, 15, 20];
@@ -241,6 +240,10 @@ export default function CheckInOutScreen({
         showAlert("Unavailable", "Location change is not available.");
         return;
       }
+      if (!String(stackLocation || "").trim()) {
+        showAlert("Missing location", "Choose a stack location (A–Z).");
+        return;
+      }
       onChangeLocation(resolveCustomStackLocation(stackLocation));
       return;
     }
@@ -272,6 +275,10 @@ export default function CheckInOutScreen({
     }
 
     if (action === "in") {
+      if (isCustomColor && !String(stackLocation || "").trim()) {
+        showAlert("Missing location", "Choose a stack location (A–Z).");
+        return;
+      }
       onCheckIn(
         qty,
         isCustomColor
@@ -350,6 +357,10 @@ export default function CheckInOutScreen({
         "Invalid",
         `Remaining to receive for this line is ${remainingQty} gal.`,
       );
+      return;
+    }
+    if (isCustomColor && !String(stackLocation || "").trim()) {
+      showAlert("Missing location", "Choose a stack location (A–Z).");
       return;
     }
     setReceiveSubmitting(true);
@@ -709,7 +720,9 @@ export default function CheckInOutScreen({
                             contentStyle={styles.stackButtonContent}
                             style={styles.input}
                           >
-                            {stackLetterFromLocation(stackLocation)}
+                            {String(stackLocation || "").trim()
+                              ? stackLetterFromLocation(stackLocation)
+                              : "Select…"}
                           </AppButton>
                         }
                       >
@@ -755,6 +768,9 @@ export default function CheckInOutScreen({
                           ? !stackLocation
                           : !quantity ||
                             parseFloat(quantity) <= 0 ||
+                            (action === "in" &&
+                              isCustomColor &&
+                              !stackLocation) ||
                             ((action === "out" || action === "recycle") &&
                               currentStock <= 0)
                       }
@@ -882,7 +898,6 @@ export default function CheckInOutScreen({
               ]}
             >
               Select the PO # for {item.name || "this item"} (ID: {itemIdStr}).
-              Quantity defaults to remaining; change it for partial shipments.
             </Text>
             <ScrollFrame maxHeight={200}>
               {receiveOrdersLoading && openOrdersWithItem.length === 0 ? (
@@ -971,7 +986,9 @@ export default function CheckInOutScreen({
                           contentStyle={styles.stackButtonContent}
                           style={styles.receiveInput}
                         >
-                          {stackLetterFromLocation(stackLocation)}
+                          {String(stackLocation || "").trim()
+                            ? stackLetterFromLocation(stackLocation)
+                            : "Select…"}
                         </AppButton>
                       }
                     >

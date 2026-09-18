@@ -18,13 +18,10 @@ function isMaterialBaseItemName(name) {
 }
 
 /**
- * @returns {'dye'|'stain'|null}
+ * MU is intentionally not linked to inventory stock for now.
+ * @returns {null}
  */
-function resolveMaterialBaseKey(materialType, colorName, itemId) {
-  const type = String(materialType || "").toLowerCase().trim();
-
-  if (type === "dye") return "dye";
-  if (type === "custom_stain") return "stain";
+function resolveMaterialBaseKey(_materialType, _colorName, _itemId) {
   return null;
 }
 

@@ -1,5 +1,9 @@
 /** Material types that accept 0.5 gallon increments. */
-export const HALF_GALLON_TYPES = new Set(["custom_paint", "precat"]);
+export const HALF_GALLON_TYPES = new Set([
+  "custom_paint",
+  "custom_stain",
+  "precat",
+]);
 
 export function allowsHalfGallon(type) {
   return HALF_GALLON_TYPES.has(String(type || "").toLowerCase());

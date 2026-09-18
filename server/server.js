@@ -260,6 +260,16 @@ app.put('/api/items/:id', async (req, res) => {
     if (result.success) {
       quantityCommitted = true;
       // AP vs mixing is persisted via boolean is_mixing (default true).
+      const oldLocation = String(currentItem?.location || '').trim();
+      const locationProvided = Object.prototype.hasOwnProperty.call(
+        updates,
+        'location',
+      );
+      const newLocation = locationProvided
+        ? String(updates.location || '').trim()
+        : oldLocation;
+      const locationChanged = locationProvided && newLocation !== oldLocation;
+
       // Determine action type for audit log
       let auditActionType = 'update';
       
@@ -268,17 +278,20 @@ app.put('/api/items/:id', async (req, res) => {
         actionType === 'check_in' ||
         actionType === 'check_out' ||
         actionType === 'receiving' ||
-        actionType === 'recycled'
+        actionType === 'recycled' ||
+        actionType === 'location_change'
       ) {
         auditActionType = actionType;
         console.log('Setting audit action to:', auditActionType, 'for item:', id);
+      } else if (locationChanged && newQuantity === undefined) {
+        auditActionType = 'location_change';
       } else if (newQuantity !== undefined && oldQuantity !== undefined) {
         // Otherwise, check if this is a manual quantity adjustment
         // Manual adjustment: quantity changed but other fields might have changed too
         // (admin editing item details)
         const quantityChanged = newQuantity !== oldQuantity;
         const otherFieldsChanged = (updates.name && updates.name !== currentItem?.name) ||
-                                   (updates.location && updates.location !== currentItem?.location) ||
+                                   locationChanged ||
                                    (updates.description && updates.description !== currentItem?.description);
         
         if (quantityChanged && !otherFieldsChanged) {
@@ -310,6 +323,11 @@ app.put('/api/items/:id', async (req, res) => {
         auditDetails.newQuantity = newQuantity; // Store the total quantity after this transaction
       }
 
+      if (locationChanged) {
+        auditDetails.oldLocation = oldLocation;
+        auditDetails.newLocation = newLocation;
+      }
+
       if (transactionId) {
         auditDetails.transactionId = transactionId;
       }
@@ -327,7 +345,8 @@ app.put('/api/items/:id', async (req, res) => {
       if (
         lotDateProvided ||
         auditActionType === "check_out" ||
-        auditActionType === "receiving"
+        auditActionType === "receiving" ||
+        auditActionType === "recycled"
       ) {
         await db.updateRecycleDateFromLastActivity(id);
       }

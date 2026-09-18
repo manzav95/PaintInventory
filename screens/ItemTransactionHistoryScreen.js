@@ -19,8 +19,47 @@ import AuditService from "../services/auditService";
 import MaterialUsageService from "../services/materialUsageService";
 import { AppText, AppEmptyState } from "../components/ui";
 import { getActionColor } from "../utils/actionColors";
+import {
+  formatCustomStackDisplay,
+  isCustomStackLocation,
+} from "../utils/customStacks";
 
 const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000;
+
+function formatLocationLabel(loc) {
+  const s = String(loc || "").trim();
+  if (!s) return "No stack";
+  if (isCustomStackLocation(s)) return formatCustomStackDisplay(s);
+  return s;
+}
+
+function isLocationChange(action, details) {
+  if (action === "location_change") return true;
+  if (action === "update" && details?._actionType === "location_change")
+    return true;
+  if (
+    details &&
+    (details.oldLocation != null || details.newLocation != null) &&
+    String(details.oldLocation || "").trim() !==
+      String(details.newLocation || "").trim()
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function formatLocationChange(details) {
+  if (!details) return null;
+  if (details.oldLocation != null || details.newLocation != null) {
+    return `${formatLocationLabel(details.oldLocation)} → ${formatLocationLabel(
+      details.newLocation,
+    )}`;
+  }
+  if (details.location != null && String(details.location).trim()) {
+    return formatLocationLabel(details.location);
+  }
+  return null;
+}
 
 function getDayKey(ts) {
   if (!ts) return null;
@@ -41,11 +80,15 @@ function formatDayHeader(ts) {
 }
 
 function formatAction(action, details) {
+  if (isLocationChange(action, details) && action === "location_change") {
+    return "Location";
+  }
   if (action === "update" && details?._actionType) {
     if (details._actionType === "check_in") return "Checked In";
     if (details._actionType === "check_out") return "Checked Out";
     if (details._actionType === "receiving") return "Receiving";
     if (details._actionType === "recycled") return "Recycled";
+    if (details._actionType === "location_change") return "Location";
   }
   const map = {
     add: "New Entry",
@@ -53,6 +96,7 @@ function formatAction(action, details) {
     check_out: "Checked Out",
     receiving: "Receiving",
     recycled: "Recycled",
+    location_change: "Location",
     update: "Manual Adjustment",
     delete: "Deleted",
     change_id: "ID Changed",
@@ -63,6 +107,9 @@ function formatAction(action, details) {
 
 function getQuantity(action, details) {
   if (!details) return "-";
+  if (isLocationChange(action, details) && action === "location_change") {
+    return "-";
+  }
   const isCheckInOut =
     action === "check_in" ||
     action === "check_out" ||
@@ -87,6 +134,9 @@ function getQuantity(action, details) {
 
 function getTotalQuantity(action, details) {
   if (!details) return "-";
+  if (action === "location_change" || details?._actionType === "location_change") {
+    return "-";
+  }
   if (typeof details.newQuantity === "number") return details.newQuantity;
   const isCheckInOut =
     action === "check_in" ||
@@ -118,7 +168,8 @@ function getDisplayUserName(log) {
         log.details?._actionType === "check_in" ||
         log.details?._actionType === "check_out" ||
         log.details?._actionType === "receiving" ||
-        log.details?._actionType === "recycled"
+        log.details?._actionType === "recycled" ||
+        log.details?._actionType === "location_change"
       ));
   return adminOnly ? "Admin" : log.userName || "Unknown";
 }
@@ -132,7 +183,8 @@ function filterToStandardUserVisible(logs) {
       a === "check_out" ||
       a === "receiving" ||
       a === "recycled" ||
-      a === "delete"
+      a === "delete" ||
+      a === "location_change"
     )
       return true;
     if (
@@ -141,7 +193,8 @@ function filterToStandardUserVisible(logs) {
       (d._actionType === "check_in" ||
         d._actionType === "check_out" ||
         d._actionType === "receiving" ||
-        d._actionType === "recycled")
+        d._actionType === "recycled" ||
+        d._actionType === "location_change")
     )
       return true;
     return false;
@@ -246,12 +299,13 @@ export default function ItemTransactionHistoryScreen({
     return null;
   }
 
+  const checksEmpty = logs.length === 0;
+  const usageEmpty = usageLogs.length === 0;
+  const tabEmpty = activeTab === "checks" ? checksEmpty : usageEmpty;
+
   const checksContent =
-    logs.length === 0 ? (
-      <AppEmptyState
-        title="No check-in/out activity in the last 3 months"
-        style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
-      />
+    checksEmpty ? (
+      <AppEmptyState title="No check-in/out activity in the last 3 months" />
     ) : (
       logs.map((log, index) => {
         const showDayDividers = isAdmin && isDesktop;
@@ -265,6 +319,10 @@ export default function ItemTransactionHistoryScreen({
         const color = getActionColor(log.action, log.details);
         const qty = getQuantity(log.action, log.details);
         const total = getTotalQuantity(log.action, log.details);
+        const locationNote = formatLocationChange(log.details);
+        const isLocOnly =
+          log.action === "location_change" ||
+          log.details?._actionType === "location_change";
         const dateStr = log.timestamp
           ? new Date(log.timestamp).toLocaleString("en-US", {
               month: "short",
@@ -322,6 +380,17 @@ export default function ItemTransactionHistoryScreen({
                 >
                   {getDisplayUserName(log)}
                 </Text>
+                {locationNote ? (
+                  <Text
+                    style={[
+                      styles.locationNote,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {locationNote}
+                  </Text>
+                ) : null}
               </View>
               <View
                 style={[styles.actionChip, { backgroundColor: color + "22" }]}
@@ -329,10 +398,14 @@ export default function ItemTransactionHistoryScreen({
                 <Text style={[styles.actionText, { color }]}>{actionText}</Text>
               </View>
               <Text style={[styles.qty, { color: theme.colors.onSurface }]}>
-                {qty !== "-" ? `${qty}` : "-"}
+                {isLocOnly ? "-" : qty !== "-" ? `${qty}` : "-"}
               </Text>
               <Text style={[styles.total, { color: theme.colors.onSurface }]}>
-                {total !== "-" ? `${total} gal` : "-"}
+                {isLocOnly
+                  ? "-"
+                  : total !== "-"
+                    ? `${total} gal`
+                    : "-"}
               </Text>
             </View>
           </React.Fragment>
@@ -341,11 +414,8 @@ export default function ItemTransactionHistoryScreen({
     );
 
   const usageContent =
-    usageLogs.length === 0 ? (
-      <AppEmptyState
-        title="No mix / usage history in the last 3 months"
-        style={{ flex: 0, paddingVertical: 24, paddingHorizontal: 16 }}
-      />
+    usageEmpty ? (
+      <AppEmptyState title="No mix / usage history in the last 3 months" />
     ) : (
       usageLogs.map((row, index) => (
         <View
@@ -452,7 +522,10 @@ export default function ItemTransactionHistoryScreen({
       ) : (
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            tabEmpty && styles.scrollContentEmpty,
+          ]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -464,10 +537,13 @@ export default function ItemTransactionHistoryScreen({
           <Card
             style={[
               styles.card,
+              tabEmpty && styles.cardEmpty,
               { backgroundColor: theme.colors.surfaceContainerHighest },
             ]}
           >
-            <Card.Content style={styles.cardContent}>
+            <Card.Content
+              style={[styles.cardContent, tabEmpty && styles.cardContentEmpty]}
+            >
               {activeTab === "checks" ? checksContent : usageContent}
             </Card.Content>
           </Card>
@@ -541,11 +617,23 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
+  scrollContentEmpty: {
+    flexGrow: 1,
+  },
   card: {
     elevation: 2,
   },
+  cardEmpty: {
+    flex: 1,
+  },
   cardContent: {
     paddingVertical: 8,
+  },
+  cardContentEmpty: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    minHeight: 220,
   },
   row: {
     flexDirection: "row",
@@ -584,6 +672,11 @@ const styles = StyleSheet.create({
   user: {
     fontSize: 12,
     marginTop: 2,
+  },
+  locationNote: {
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: "600",
   },
   actionChip: {
     paddingHorizontal: 10,

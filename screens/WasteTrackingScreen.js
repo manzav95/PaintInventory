@@ -560,18 +560,36 @@ export default function WasteTrackingScreen({
           Conversion chart (5-gal bucket)
         </Text>
         <View style={styles.chartGrid}>
-          {chart.map((row) => (
-            <View key={row.inches} style={styles.chartCell}>
-              <Text
-                style={[
-                  styles.chartText,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                {row.inches}" = {formatGallonsTenths(row.gallons)} gal
-              </Text>
-            </View>
-          ))}
+          {Array.from(
+            { length: Math.ceil(chart.length / 4) },
+            (_, rowIndex) => {
+              const start = rowIndex * 4;
+              const rowItems = chart.slice(start, start + 4);
+              const pads = 4 - rowItems.length;
+              return (
+                <View key={`chart-row-${rowIndex}`} style={styles.chartRow}>
+                  {rowItems.map((row) => (
+                    <View key={row.inches} style={styles.chartCell}>
+                      <Text
+                        style={[
+                          styles.chartText,
+                          { color: theme.colors.onSurfaceVariant },
+                        ]}
+                      >
+                        {row.inches}" = {formatGallonsTenths(row.gallons)} gal
+                      </Text>
+                    </View>
+                  ))}
+                  {Array.from({ length: pads }, (_, i) => (
+                    <View
+                      key={`chart-pad-${rowIndex}-${i}`}
+                      style={styles.chartCell}
+                    />
+                  ))}
+                </View>
+              );
+            },
+          )}
         </View>
       </Card.Content>
     </Card>
@@ -1144,18 +1162,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   chartGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
     marginTop: 8,
     alignSelf: "stretch",
     maxWidth: "100%",
+    gap: 8,
+  },
+  chartRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
   },
   chartCell: {
-    flexGrow: 1,
-    flexBasis: 0,
-    minWidth: 120,
-    maxWidth: "100%",
+    flex: 1,
+    minWidth: 0,
   },
   chartText: { fontSize: 11 },
   fieldLabel: {

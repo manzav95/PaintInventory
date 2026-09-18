@@ -41,6 +41,10 @@ import {
 import ScrollFrame from "../components/ScrollFrame";
 import { colors, space, radius } from "../theme/tokens";
 import { AppBadge, AppEmptyState } from "../components/ui";
+import {
+  getMaterialTypeColor,
+  getMaterialTypeLabel,
+} from "../utils/materialTypes";
 
 const LINE_RECEIVE_HIGHLIGHT = {
   complete: {
@@ -735,6 +739,25 @@ export default function UpcomingOrdersScreen({
     const orderIsBackOrder = isBackOrder(order);
     const singleReceivedDate = getSingleReceivedDate(order);
     const categoryLabel = getOrderCategoryLabel(order, inventory);
+    const typeChips = (() => {
+      const seen = new Map();
+      for (const line of order.lines || []) {
+        const invItem = inventory.find(
+          (i) => String(i.id) === String(line.itemId),
+        );
+        const t = String(invItem?.type || "").toLowerCase().trim();
+        if (!t || seen.has(t)) continue;
+        seen.set(t, {
+          key: t,
+          label: getMaterialTypeLabel(t),
+          color: getMaterialTypeColor(t, theme),
+        });
+      }
+      return Array.from(seen.values());
+    })();
+    const primaryTypeColor =
+      typeChips[0]?.color ||
+      (isOpen ? colors.brand.accent : colors.semantic.success);
     const jobs = (() => {
       const set = new Set();
       for (const line of order.lines || []) {
@@ -752,6 +775,8 @@ export default function UpcomingOrdersScreen({
           {
             backgroundColor: theme.colors.surfaceContainerHighest,
             borderColor: theme.colors.outlineVariant,
+            borderBottomWidth: 3,
+            borderBottomColor: primaryTypeColor,
           },
         ]}
       >
@@ -772,6 +797,36 @@ export default function UpcomingOrdersScreen({
                   </AppBadge>
                 )}
               </View>
+              {typeChips.length > 0 ? (
+                <View style={styles.typeChipRow}>
+                  {typeChips.map((chip) => (
+                    <View
+                      key={chip.key}
+                      style={[
+                        styles.typeChip,
+                        {
+                          borderColor: chip.color,
+                          backgroundColor: theme.dark
+                            ? `${chip.color}33`
+                            : `${chip.color}18`,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.typeChipDot,
+                          { backgroundColor: chip.color },
+                        ]}
+                      />
+                      <Text
+                        style={[styles.typeChipText, { color: chip.color }]}
+                      >
+                        {chip.label}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.orderMetaBlock}>
                 <Text
                   style={[
@@ -828,6 +883,18 @@ export default function UpcomingOrdersScreen({
                 const highlight = lineReceiveHighlight(line);
                 const lineReceivedDate = formatReceivedDate(line);
                 const showLineDate = !singleReceivedDate && lineReceivedDate;
+                const invItem = inventory.find(
+                  (i) => String(i.id) === String(line.itemId),
+                );
+                const typeKey = String(invItem?.type || "")
+                  .toLowerCase()
+                  .trim();
+                const typeColor = typeKey
+                  ? getMaterialTypeColor(typeKey, theme)
+                  : theme.colors.outlineVariant;
+                const typeLabel = typeKey
+                  ? getMaterialTypeLabel(typeKey)
+                  : "";
                 return (
                   <View
                     key={idx}
@@ -840,23 +907,36 @@ export default function UpcomingOrdersScreen({
                         borderColor: highlight
                           ? highlight.accent
                           : theme.colors.outlineVariant,
-                        borderLeftWidth: highlight ? 3 : 1,
+                        borderLeftWidth: 4,
                         borderLeftColor: highlight
                           ? highlight.accent
-                          : theme.colors.outlineVariant,
+                          : typeColor,
                       },
                     ]}
                   >
                     <View style={styles.lineItemLeft}>
-                      <Text
-                        style={[
-                          styles.lineItemName,
-                          { color: theme.colors.onSurface },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {getItemName(line.itemId)}
-                      </Text>
+                      <View style={styles.lineItemNameRow}>
+                        <Text
+                          style={[
+                            styles.lineItemName,
+                            { color: theme.colors.onSurface, flex: 1 },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {getItemName(line.itemId)}
+                        </Text>
+                        {typeLabel ? (
+                          <Text
+                            style={[
+                              styles.lineTypeLabel,
+                              { color: typeColor },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {typeLabel}
+                          </Text>
+                        ) : null}
+                      </View>
                       {(line.job_name || "").trim() ? (
                         <Text
                           style={[
@@ -1204,39 +1284,91 @@ export default function UpcomingOrdersScreen({
               >
                 By date
               </Text>
-              <View style={styles.filterRow}>
-                <AppButton
-                  mode={dateViewMode === null ? "contained" : "outlined"}
-                  compact
-                  onPress={() => setDateViewMode(null)}
-                  style={styles.filterBtn}
-                >
-                  List
-                </AppButton>
-                <AppButton
-                  mode={dateViewMode === "week" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => {
-                    setDateViewMode("week");
-                    setOrderFilter("all");
-                    setExpandedGroupKeys([]);
-                  }}
-                  style={styles.filterBtn}
-                >
-                  Week
-                </AppButton>
-                <AppButton
-                  mode={dateViewMode === "month" ? "contained" : "outlined"}
-                  compact
-                  onPress={() => {
-                    setDateViewMode("month");
-                    setOrderFilter("all");
-                    setExpandedGroupKeys([]);
-                  }}
-                  style={styles.filterBtn}
-                >
-                  Month
-                </AppButton>
+              <View
+                style={[
+                  styles.dateTabBar,
+                  {
+                    borderColor: theme.colors.outlineVariant,
+                    backgroundColor: theme.dark
+                      ? theme.colors.surfaceContainerHighest
+                      : theme.colors.surfaceContainerHigh ??
+                        theme.colors.surface,
+                  },
+                ]}
+              >
+                {(
+                  [
+                    {
+                      key: null,
+                      label: "List",
+                      accent: theme.dark
+                        ? colors.brand.primaryOnDark
+                        : colors.brand.accent,
+                    },
+                    {
+                      key: "week",
+                      label: "Week",
+                      accent: colors.brand.accent,
+                    },
+                    {
+                      key: "month",
+                      label: "Month",
+                      accent: colors.action.materialUsage,
+                    },
+                  ]
+                ).map(({ key, label, accent }, i) => {
+                  const selected = dateViewMode === key;
+                  const selBg = selected
+                    ? theme.dark
+                      ? `${accent}33`
+                      : `${accent}18`
+                    : "transparent";
+                  return (
+                    <Pressable
+                      key={label}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected }}
+                      onPress={() => {
+                        if (key == null) {
+                          setDateViewMode(null);
+                          return;
+                        }
+                        setDateViewMode(key);
+                        setOrderFilter("all");
+                        setExpandedGroupKeys([]);
+                      }}
+                      style={({ pressed }) => [
+                        styles.dateTabCell,
+                        i > 0 && {
+                          borderLeftWidth: StyleSheet.hairlineWidth,
+                          borderLeftColor: theme.colors.outlineVariant,
+                        },
+                        {
+                          backgroundColor: selBg,
+                          borderBottomWidth: 3,
+                          borderBottomColor: selected
+                            ? accent
+                            : "transparent",
+                        },
+                        pressed && { opacity: 0.92 },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dateTabLabel,
+                          {
+                            color: selected
+                              ? accent
+                              : theme.colors.onSurfaceVariant,
+                            fontWeight: selected ? "800" : "600",
+                          },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </ToolbarCard>
           </>
@@ -1912,6 +2044,26 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 6,
   },
+  dateTabBar: {
+    flexDirection: "row",
+    width: "100%",
+    marginBottom: 4,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  dateTabCell: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  dateTabLabel: {
+    fontSize: 14,
+    letterSpacing: 0.2,
+  },
   searchInput: {
     marginBottom: 12,
     backgroundColor: "transparent",
@@ -1985,6 +2137,40 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
     marginBottom: 6,
+  },
+  typeChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 8,
+  },
+  typeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  typeChipDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  typeChipText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  lineItemNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  lineTypeLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    flexShrink: 0,
   },
   poNumber: {
     fontSize: 17,

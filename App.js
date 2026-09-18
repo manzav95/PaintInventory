@@ -1081,7 +1081,7 @@ export default function App() {
       try {
         const result = await InventoryService.updateItem(
           scannedItem.id,
-          { location: loc },
+          { location: loc, _actionType: 'location_change' },
           actorName,
         );
         if (result.success) {
@@ -1287,6 +1287,9 @@ export default function App() {
         }),
         ...(Object.prototype.hasOwnProperty.call(item, 'color_label') && {
           color_label: item.color_label,
+        }),
+        ...(Object.prototype.hasOwnProperty.call(item, 'hide_from_material_usage') && {
+          hide_from_material_usage: !!item.hide_from_material_usage,
         }),
       };
       result = await InventoryService.updateItem(idForApi, updates);
@@ -2002,7 +2005,6 @@ export default function App() {
           onBack={() => navigateTo('home')}
           onUsageDataChanged={() => {
             refreshAuditLogs(true);
-            loadInventory(false, { refreshCaches: true });
           }}
         />
       </KeepAlivePane>

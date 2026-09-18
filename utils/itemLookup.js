@@ -92,6 +92,37 @@ export function looksLikeItemCode(raw) {
   return false;
 }
 
+/** Pure numeric / #NNNN color-number style query. */
+export function looksLikeColorNumber(raw) {
+  const t = String(raw || "").trim();
+  return /^#?\d+$/.test(t);
+}
+
+function digitsOnly(s) {
+  return String(s || "").replace(/\D/g, "");
+}
+
+/** Candidate is a short numeric color label (#4420 / 4420), not a long H66 SKU. */
+function isNumericColorCandidate(s) {
+  const t = String(s || "").trim();
+  if (!t) return false;
+  if (/^#?\d{3,6}$/.test(t)) return true;
+  if (/^\d{3,6}$/.test(t)) return true;
+  return false;
+}
+
+function colorNumbersEqual(query, candidate) {
+  const qDigits = digitsOnly(query);
+  const cDigits = digitsOnly(candidate);
+  if (!qDigits || !cDigits) return false;
+  if (qDigits === cDigits) return true;
+  // Leading-zero tolerant (0442 vs 442) for short paint/custom numbers only
+  if (qDigits.length <= 6 && cDigits.length <= 6) {
+    return String(parseInt(qDigits, 10)) === String(parseInt(cDigits, 10));
+  }
+  return false;
+}
+
 /**
  * Exact ID / external_code match only (case-insensitive). No fuzzy, prefix, or includes.
  */
@@ -114,6 +145,20 @@ export function findExactInventoryScanMatch(inventory, query) {
     for (const v of variants) {
       if (id && id.toLowerCase() === v.toLowerCase()) return item;
       if (ext && ext.toLowerCase() === v.toLowerCase()) return item;
+    }
+    // Custom color number typed as 4420 / #4420 against name/color_label
+    if (looksLikeColorNumber(raw)) {
+      const name = String(item.name || "").trim();
+      const label = String(item.color_label || "").trim();
+      if (isNumericColorCandidate(name) && colorNumbersEqual(raw, name)) {
+        return item;
+      }
+      if (isNumericColorCandidate(label) && colorNumbersEqual(raw, label)) {
+        return item;
+      }
+      if (isNumericColorCandidate(id) && colorNumbersEqual(raw, id)) {
+        return item;
+      }
     }
   }
   return null;
@@ -162,16 +207,116 @@ function tokenOverlap(a, b) {
   return hit / Math.max(ta.size, tb.size);
 }
 
+/** Max edit distance allowed for name typo tolerance (scales with query length). */
+function maxNameTypoDistance(qLen) {
+  if (qLen <= 4) return 1;
+  if (qLen <= 8) return 2;
+  return 3;
+}
+
+/**
+ * Inventory list / color-book search rules:
+ * - Long item codes (H66… / SKUs): exact id or external_code only (or full-code prefix ≥ 6).
+ * - Color numbers (#4420 / 4420): exact number match on id/name/label — never substring of H66.
+ * - Color names: substring + light typo tolerance within range.
+ */
+export function itemMatchesInventorySearch(item, query, extras = {}) {
+  const raw = String(query || "").trim();
+  if (!raw) return true;
+
+  const id = item?.id != null ? String(item.id).trim() : "";
+  const ext =
+    item?.external_code != null ? String(item.external_code).trim() : "";
+  const name = String(item?.name || "").trim();
+  const label = String(item?.color_label || "").trim();
+  const location = String(item?.location || "").trim();
+  const locationDisplay = String(extras.locationDisplay || location).trim();
+  const type = String(item?.type || "").trim();
+
+  // --- Color numbers: exact only ---
+  if (looksLikeColorNumber(raw)) {
+    const qDigits = digitsOnly(raw);
+    if (qDigits.length < 3) return false;
+    if (
+      CONTAINER_SIZE_BARCODES.has(qDigits) ||
+      CONTAINER_SIZE_BARCODES.has(String(parseInt(qDigits, 10)))
+    ) {
+      return false;
+    }
+    if (isNumericColorCandidate(id) && colorNumbersEqual(raw, id)) return true;
+    if (isNumericColorCandidate(ext) && colorNumbersEqual(raw, ext)) return true;
+    if (isNumericColorCandidate(name) && colorNumbersEqual(raw, name)) {
+      return true;
+    }
+    if (isNumericColorCandidate(label) && colorNumbersEqual(raw, label)) {
+      return true;
+    }
+    return false;
+  }
+
+  // --- Long item codes / SKUs: exact (or long prefix), never mid-string includes ---
+  if (looksLikeItemCode(raw)) {
+    const q = raw.toLowerCase();
+    const idL = id.toLowerCase();
+    const extL = ext.toLowerCase();
+    if (idL && (idL === q || (q.length >= 6 && idL.startsWith(q)))) return true;
+    if (extL && (extL === q || (q.length >= 6 && extL.startsWith(q)))) {
+      return true;
+    }
+    return false;
+  }
+
+  // --- Names: includes + typo tolerance within range ---
+  const qNorm = normalizeText(raw);
+  const qCompact = compactText(raw);
+  if (qNorm.length < 2) return false;
+
+  const nameNorm = normalizeText(name);
+  const nameCompact = compactText(name);
+  const labelNorm = normalizeText(label);
+  const locNorm = normalizeText(locationDisplay || location);
+  const typeNorm = normalizeText(type);
+
+  if (nameNorm && (nameNorm.includes(qNorm) || nameNorm.startsWith(qNorm))) {
+    return true;
+  }
+  if (labelNorm && labelNorm.includes(qNorm)) return true;
+  if (locNorm && locNorm.includes(qNorm)) return true;
+  if (typeNorm && typeNorm.includes(qNorm)) return true;
+
+  // Typo tolerance on name (and color_label) only
+  if (qCompact.length >= 3) {
+    const fields = [nameCompact, compactText(label)].filter(Boolean);
+    const maxDist = maxNameTypoDistance(qCompact.length);
+    for (const field of fields) {
+      if (!field) continue;
+      const sim = similarityRatio(qCompact, field);
+      if (sim >= 0.78) return true;
+      if (Math.abs(field.length - qCompact.length) <= maxDist + 1) {
+        const dist = levenshtein(qCompact, field);
+        if (dist > 0 && dist <= maxDist) return true;
+      }
+      for (const tok of nameNorm.split(" ").filter((t) => t.length >= 3)) {
+        const tokC = tok.replace(/\s+/g, "");
+        if (Math.abs(tokC.length - qCompact.length) > maxDist + 1) continue;
+        const d = levenshtein(qCompact, tokC);
+        if (d > 0 && d <= Math.min(maxDist, 2) && qCompact.length >= 4) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * Score how well an inventory item matches a typed query.
  * Higher is better. Returns 0 when it should not be suggested.
- * Queries shorter than 3 characters never match (avoids "20" → 42007).
- * For pure numeric queries, require 4+ digits (same as scan gate).
  */
 export function scoreItemLookup(item, query) {
   const raw = String(query || "").trim();
   if (raw.length < 3) return 0;
-  if (/^\d+$/.test(raw) && raw.length < 4) return 0;
   if (getScanRejectReason(raw) === "size_barcode") return 0;
 
   const qNorm = normalizeText(raw);
@@ -183,16 +328,29 @@ export function scoreItemLookup(item, query) {
   const name = String(item?.name || "").trim();
   const nameNorm = normalizeText(name);
   const nameCompact = compactText(name);
+  const label = String(item?.color_label || "").trim();
 
   // Exact ID / code
   if (id && (id === qId || id === qNorm || id === qCompact)) return 1000;
   if (ext && (ext === qId || ext === qNorm || ext === qCompact)) return 980;
 
+  // Exact color number against numeric name/label
+  if (looksLikeColorNumber(raw)) {
+    if (isNumericColorCandidate(name) && colorNumbersEqual(raw, name)) return 970;
+    if (isNumericColorCandidate(label) && colorNumbersEqual(raw, label)) {
+      return 965;
+    }
+    if (isNumericColorCandidate(id) && colorNumbersEqual(raw, id)) return 960;
+    return 0;
+  }
+
   // Exact name
   if (nameNorm && nameNorm === qNorm) return 960;
 
-  // For item-code shaped queries, never soft-match (prefix / includes / fuzzy)
+  // Long item codes: exact / long prefix only — never soft-match
   if (looksLikeItemCode(raw)) {
+    if (id && raw.length >= 6 && id.startsWith(qId)) return 940;
+    if (ext && raw.length >= 6 && ext.startsWith(qId)) return 930;
     return 0;
   }
 
@@ -201,17 +359,19 @@ export function scoreItemLookup(item, query) {
   if (nameNorm && nameNorm.startsWith(qNorm)) score = Math.max(score, 780);
   if (nameNorm && nameNorm.includes(qNorm)) score = Math.max(score, 680);
 
-  // Fuzzy name (typos) — name search only
+  // Fuzzy name (typos) — name search only, within range
   if (qCompact.length >= 3) {
     const nameSim = similarityRatio(qCompact, nameCompact);
     const tok = tokenOverlap(qNorm, nameNorm);
-    if (nameSim >= 0.72) score = Math.max(score, Math.round(520 + nameSim * 200));
+    const maxDist = maxNameTypoDistance(qCompact.length);
+    if (nameSim >= 0.78) {
+      score = Math.max(score, Math.round(520 + nameSim * 200));
+    }
     if (tok >= 0.5 && qNorm.length >= 4) {
       score = Math.max(score, Math.round(480 + tok * 180));
     }
     if (nameCompact.length >= 4) {
       const dist = levenshtein(qCompact, nameCompact);
-      const maxDist = qCompact.length <= 5 ? 1 : qCompact.length <= 9 ? 2 : 3;
       if (dist > 0 && dist <= maxDist) {
         score = Math.max(score, 560 - dist * 40);
       }
@@ -228,7 +388,8 @@ export function scoreItemLookup(item, query) {
 export function findInventoryLookupMatches(inventory, query, { limit = 8 } = {}) {
   const q = String(query || "").trim();
   if (q.length < 3) return [];
-  if (getScanRejectReason(q)) return [];
+  if (getScanRejectReason(q) === "size_barcode") return [];
+  if (looksLikeColorNumber(q) && digitsOnly(q).length < 3) return [];
   const scored = [];
   for (const item of inventory || []) {
     if (!item) continue;

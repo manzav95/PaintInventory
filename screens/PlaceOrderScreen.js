@@ -1221,11 +1221,11 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderRadius: 12,
     overflow: "hidden",
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
   tabCell: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 54,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 14,
@@ -1236,7 +1236,7 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontSize: 15,
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
   emptyList: {
     flex: 0,

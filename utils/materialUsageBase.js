@@ -19,13 +19,9 @@ export function isMaterialBaseItemName(name) {
 }
 
 /**
- * Which base key (if any) should be consumed for this MU entry.
- * @returns {'dye'|'stain'|null}
+ * MU is intentionally not linked to inventory stock for now.
+ * @returns {null}
  */
-export function resolveMaterialBaseKey(materialType, colorName, itemId) {
-  const type = String(materialType || "").toLowerCase().trim();
-
-  if (type === "dye") return "dye";
-  if (type === "custom_stain") return "stain";
+export function resolveMaterialBaseKey(_materialType, _colorName, _itemId) {
   return null;
 }
