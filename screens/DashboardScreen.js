@@ -1844,7 +1844,7 @@ export default function DashboardScreen({
         </View>
       )}
 
-      {!isAdmin && (lowStockCount > 0 || recycleDueCount > 0) ? (
+      {isAdmin && (lowStockCount > 0 || recycleDueCount > 0) ? (
         <View style={styles.attentionBlock}>
           <Text
             style={[

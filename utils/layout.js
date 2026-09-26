@@ -15,6 +15,7 @@ export const SCREEN_TITLES = {
   list: "Inventory",
   orders: "Purchase Orders",
   placeOrder: "Place Order",
+  stockPlanning: "Stock & week order",
   materialUsage: "Material Usage",
   wasteTracking: "Waste Tracking",
   lineup: "Lineup",

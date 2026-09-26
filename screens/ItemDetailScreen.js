@@ -45,6 +45,7 @@ import {
   CUSTOM_STACK_OPTIONS,
   resolveCustomStackLocation,
 } from "../utils/customStacks";
+import MaterialUsageService from "../services/materialUsageService";
 
 function textMentionsFlorenza(...parts) {
   return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
@@ -186,6 +187,7 @@ export default function ItemDetailScreen({
   const [colorLabelInput, setColorLabelInput] = useState(
     item?.color_label != null ? String(item.color_label) : "",
   );
+  const [usageCulprits, setUsageCulprits] = useState([]);
   const isCustomType = CUSTOM_TYPES.includes(type);
   const recycleDueDisplay =
     formatDateDisplay(item?.recycle_date) ||
@@ -280,6 +282,61 @@ export default function ItemDetailScreen({
         item?.hide_from_material_usage === 1,
     );
   }, [item?.id, item?.hide_from_material_usage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAdmin || !item?.id) {
+      setUsageCulprits([]);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const rows = await MaterialUsageService.list(null, 80, {
+          item_id: String(item.id),
+          color_name: String(item.name || item.color_label || "").trim() || undefined,
+        });
+        if (cancelled) return;
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const byUser = new Map();
+        for (const row of Array.isArray(rows) ? rows : []) {
+          const dateStr = String(row.entry_date || "").slice(0, 10);
+          const ts = dateStr ? new Date(`${dateStr}T12:00:00`).getTime() : 0;
+          if (ts && ts < cutoff) continue;
+          const user = String(row.user_name || "Unknown").trim() || "Unknown";
+          const gal = Number(row.qty_gallons) || 0;
+          if (gal <= 0) continue;
+          const prev = byUser.get(user) || {
+            user,
+            gallons: 0,
+            booth: "",
+            lastDate: "",
+          };
+          prev.gallons += gal;
+          const booth = String(row.booth || "").trim();
+          if (booth && (!prev.booth || dateStr >= prev.lastDate)) {
+            prev.booth = booth;
+          }
+          if (!prev.lastDate || dateStr > prev.lastDate) {
+            prev.lastDate = dateStr;
+          }
+          byUser.set(user, prev);
+        }
+        const ranked = Array.from(byUser.values())
+          .sort((a, b) => b.gallons - a.gallons)
+          .slice(0, 3)
+          .map((u) => ({
+            ...u,
+            gallons: Math.round(u.gallons * 100) / 100,
+          }));
+        setUsageCulprits(ranked);
+      } catch (e) {
+        if (!cancelled) setUsageCulprits([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, item?.id, item?.name, item?.color_label]);
 
   useEffect(() => {
     if (CUSTOM_TYPES.includes(type)) {
@@ -521,18 +578,56 @@ export default function ItemDetailScreen({
     : "—";
 
   const quantityField = isAdmin ? (
-    <TextInput
-      label={isWideDesktop ? "Quantity" : "Quantity (Gallons)"}
-      value={quantity}
-      onChangeText={(t) =>
-        setQuantity(sanitizeGallonInput(t, allowsHalfGallon(type)))
-      }
-      mode="outlined"
-      keyboardType={allowsHalfGallon(type) ? "decimal-pad" : "number-pad"}
-      style={inputStyle}
-      dense={isWideDesktop}
-      right={<TextInput.Affix text="gal" />}
-    />
+    <View>
+      <TextInput
+        label={isWideDesktop ? "Quantity" : "Quantity (Gallons)"}
+        value={quantity}
+        onChangeText={(t) =>
+          setQuantity(sanitizeGallonInput(t, allowsHalfGallon(type)))
+        }
+        mode="outlined"
+        keyboardType={allowsHalfGallon(type) ? "decimal-pad" : "number-pad"}
+        style={inputStyle}
+        dense={isWideDesktop}
+        right={<TextInput.Affix text="gal" />}
+      />
+      {usageCulprits.length > 0 ? (
+        <View
+          style={[
+            styles.usageCulpritBox,
+            isWideDesktop && styles.usageCulpritBoxDesktop,
+            {
+              borderColor: theme.colors.outlineVariant,
+              backgroundColor: theme.dark
+                ? "rgba(201,151,46,0.12)"
+                : "rgba(201,151,46,0.08)",
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.usageCulpritTitle,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          >
+            If stock is short (7d material usage)
+          </Text>
+          {usageCulprits.map((u) => (
+            <Text
+              key={u.user}
+              style={[
+                styles.usageCulpritLine,
+                { color: theme.colors.onSurface },
+              ]}
+              numberOfLines={1}
+            >
+              {u.user}
+              {u.booth ? ` · ${u.booth}` : ""} — {u.gallons} gal
+            </Text>
+          ))}
+        </View>
+      ) : null}
+    </View>
   ) : (
     <ReadOnlyValue>
       {formatGallonQuantity(quantity)} gal
@@ -1462,6 +1557,30 @@ const styles = StyleSheet.create({
   },
   inputDesktop: {
     marginBottom: 0,
+  },
+  usageCulpritBox: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: -6,
+    marginBottom: 12,
+    gap: 2,
+  },
+  usageCulpritBoxDesktop: {
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  usageCulpritTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: 4,
+  },
+  usageCulpritLine: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   typeLabel: {
     fontSize: 12,

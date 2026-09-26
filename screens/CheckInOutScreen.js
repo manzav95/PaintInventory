@@ -975,34 +975,17 @@ export default function CheckInOutScreen({
                     >
                       Stack location (A–Z)
                     </Text>
-                    <Menu
-                      visible={receiveStackMenuOpen}
-                      onDismiss={() => setReceiveStackMenuOpen(false)}
-                      anchor={
-                        <AppButton
-                          mode="outlined"
-                          onPress={() => setReceiveStackMenuOpen(true)}
-                          icon="chevron-down"
-                          contentStyle={styles.stackButtonContent}
-                          style={styles.receiveInput}
-                        >
-                          {String(stackLocation || "").trim()
-                            ? stackLetterFromLocation(stackLocation)
-                            : "Select…"}
-                        </AppButton>
-                      }
+                    <AppButton
+                      mode="outlined"
+                      onPress={() => setReceiveStackMenuOpen(true)}
+                      icon="chevron-down"
+                      contentStyle={styles.stackButtonContent}
+                      style={styles.receiveInput}
                     >
-                      {CUSTOM_STACK_OPTIONS.map((o) => (
-                        <Menu.Item
-                          key={o.value}
-                          onPress={() => {
-                            setStackLocation(o.value);
-                            setReceiveStackMenuOpen(false);
-                          }}
-                          title={o.label}
-                        />
-                      ))}
-                    </Menu>
+                      {String(stackLocation || "").trim()
+                        ? stackLetterFromLocation(stackLocation)
+                        : "Select…"}
+                    </AppButton>
                   </View>
                 ) : null}
                 <View style={styles.modalActions}>
@@ -1029,6 +1012,79 @@ export default function CheckInOutScreen({
             )}
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={receiveStackMenuOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setReceiveStackMenuOpen(false)}
+      >
+        <View style={styles.stackModalRoot}>
+          <Pressable
+            style={styles.stackModalBackdrop}
+            onPress={() => setReceiveStackMenuOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close stack picker"
+          />
+          <View
+            style={[
+              styles.stackModalPanel,
+              {
+                borderColor: theme.colors.outlineVariant,
+                backgroundColor: theme.colors.surfaceContainerHighest,
+              },
+            ]}
+          >
+            <Text
+              style={[styles.stackModalTitle, { color: theme.colors.onSurface }]}
+            >
+              Stack location
+            </Text>
+            <View style={styles.stackGrid}>
+              {CUSTOM_STACK_OPTIONS.map((o) => {
+                const selected = stackLocation === o.value;
+                return (
+                  <Pressable
+                    key={o.value}
+                    onPress={() => {
+                      setStackLocation(o.value);
+                      setReceiveStackMenuOpen(false);
+                    }}
+                    style={[
+                      styles.stackCell,
+                      selected && {
+                        backgroundColor: theme.colors.primary,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stackCellText,
+                        {
+                          color: selected
+                            ? theme.colors.onPrimary
+                            : theme.colors.onSurface,
+                        },
+                      ]}
+                    >
+                      {o.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <AppButton
+              mode="outlined"
+              onPress={() => setReceiveStackMenuOpen(false)}
+              style={styles.stackModalCancel}
+            >
+              Cancel
+            </AppButton>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -1278,5 +1334,53 @@ const styles = StyleSheet.create({
   stackButtonContent: {
     flexDirection: "row-reverse",
     justifyContent: "space-between",
+  },
+  stackModalRoot: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  stackModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  stackModalPanel: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 14,
+    zIndex: 1,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 8px 24px rgba(0,0,0,0.28)" }
+      : {
+          elevation: 12,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.25,
+          shadowRadius: 12,
+        }),
+  },
+  stackModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+  stackModalCancel: {
+    marginTop: 12,
+  },
+  stackGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+  },
+  stackCell: {
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stackCellText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

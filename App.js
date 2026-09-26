@@ -35,6 +35,14 @@ import {
   buildColorLookupQueries,
   lookupColorHex,
 } from './utils/colorHexLookup';
+
+/** Stack label for toasts — no external helper (Hermes-safe). */
+function stackToastLabel(location) {
+  const loc = String(location || '').trim();
+  if (!loc) return '';
+  const m = loc.toUpperCase().match(/(?:^C-|^CUSTOM-)?([A-Z])$/);
+  return m?.[1] ? `Custom-${m[1]}` : loc;
+}
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
 import QRScanScreen from './screens/QRScanScreen';
@@ -46,6 +54,7 @@ import InventoryListScreen from './screens/InventoryListScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import PlaceOrderScreen from './screens/PlaceOrderScreen';
+import StockPlanningScreen from './screens/StockPlanningScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
@@ -329,6 +338,7 @@ export default function App() {
         lineup: 'Lineup',
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
+        stockPlanning: 'Stock & week order',
         list: 'Inventory',
         reports: 'Reports',
         settings: 'Settings',
@@ -870,7 +880,7 @@ export default function App() {
       );
       if (result.success) {
         const stackNote = extras.location
-          ? ` · ${formatCustomStackDisplay(extras.location)}`
+          ? ` · ${stackToastLabel(extras.location)}`
           : '';
         showToast({
           title: 'Checked in',
@@ -943,7 +953,7 @@ export default function App() {
         );
         if (result.success) {
           const stackNote = extras.location
-            ? ` · ${formatCustomStackDisplay(extras.location)}`
+            ? ` · ${stackToastLabel(extras.location)}`
             : '';
           showToast({
             title: 'Received',
@@ -1087,7 +1097,7 @@ export default function App() {
         if (result.success) {
           showToast({
             title: 'Location updated',
-            message: `${scannedItem.name || scannedItem.id} → ${formatCustomStackDisplay(loc)}`,
+            message: `${scannedItem.name || scannedItem.id} → ${stackToastLabel(loc)}`,
           });
           await loadInventory(false, { refreshCaches: true });
         } else {
@@ -1893,6 +1903,18 @@ export default function App() {
               refreshReceiveOrders(true);
               refreshAuditLogs(true);
             }}
+          />
+        );
+      case 'stockPlanning':
+        if (!isAdmin) {
+          return null;
+        }
+        return (
+          <StockPlanningScreen
+            inventory={inventory}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+            onOpenPlaceOrder={() => navigateTo('placeOrder')}
           />
         );
       case 'materialUsage':

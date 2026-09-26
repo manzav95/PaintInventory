@@ -3695,6 +3695,125 @@ class Database {
       );
   }
 
+  /**
+   * Suggested on-hand stock for standard colors + AP materials
+   * (primer / clear / catalyst): 2 weeks of consumption based on the
+   * last ~6 months of inventory check-outs. Customs excluded.
+   */
+  async getStockEstimates({ itemId = null, lookbackDays = 182, targetWeeks = 2 } = {}) {
+    const days = Math.max(1, Math.round(Number(lookbackDays) || 182));
+    const weeks = Math.max(0.1, Number(targetWeeks) || 2);
+    const eligibleTypes = [
+      "paint",
+      "precat",
+      "stain",
+      "dye",
+      "primer",
+      "clear",
+      "catalyst",
+    ];
+    const fromIso = todayReportIso(
+      new Date(Date.now() - days * 86400000),
+    );
+    const toIso = todayReportIso();
+    const qtyExpr = `ABS(COALESCE(
+      NULLIF(TRIM(COALESCE(details::jsonb->>'quantityChange', '')), '')::double precision,
+      0
+    ))`;
+    const actionTypeExpr = `COALESCE(details::jsonb->>'_actionType', '')`;
+
+    const params = [fromIso, toIso];
+    let itemFilter = "";
+    if (itemId != null && String(itemId).trim() !== "") {
+      params.push(String(itemId).trim());
+      itemFilter = ` AND TRIM("itemId") = $${params.length}`;
+    }
+
+    const [checkoutResult, items] = await Promise.all([
+      this.pool.query(
+        `SELECT
+           TRIM("itemId") AS item_id,
+           SUM(${qtyExpr})::float AS consumed_gal
+         FROM audit_log
+         WHERE (timezone('${REPORT_TZ}', timestamp::timestamptz))::date >= $1::date
+           AND (timezone('${REPORT_TZ}', timestamp::timestamptz))::date <= $2::date
+           AND TRIM(COALESCE("itemId", '')) <> ''
+           AND (
+             action = 'check_out'
+             OR (
+               action = 'update'
+               AND ${actionTypeExpr} = 'check_out'
+             )
+           )
+           ${itemFilter}
+         GROUP BY TRIM("itemId")`,
+        params,
+      ),
+      this.getAllItems(),
+    ]);
+
+    const consumedById = new Map();
+    for (const row of checkoutResult.rows) {
+      const id = String(row.item_id || "").trim();
+      if (!id) continue;
+      consumedById.set(id, parseFloat(row.consumed_gal) || 0);
+    }
+
+    const eligible = (items || []).filter((it) => {
+      const t = String(it.type || "").toLowerCase().trim();
+      if (!eligibleTypes.includes(t)) return false;
+      if (itemId != null && String(itemId).trim() !== "") {
+        return String(it.id).trim() === String(itemId).trim();
+      }
+      return true;
+    });
+
+    const suggestedFrom = (consumed) => {
+      const total = Number(consumed);
+      if (!Number.isFinite(total) || total <= 0) return 0;
+      return Math.round((total / days) * weeks * 7 * 10) / 10;
+    };
+
+    const weeksInWindow = days / 7;
+    const monthsInWindow = days / 30.44;
+
+    return eligible
+      .map((it) => {
+        const id = String(it.id).trim();
+        const consumed = consumedById.get(id) || 0;
+        const suggested = suggestedFrom(consumed);
+        const avgPerWeek =
+          consumed > 0 && weeksInWindow > 0
+            ? Math.round((consumed / weeksInWindow) * 10) / 10
+            : 0;
+        const avgPerMonth =
+          consumed > 0 && monthsInWindow > 0
+            ? Math.round((consumed / monthsInWindow) * 10) / 10
+            : 0;
+        const current = Number(it.quantity) || 0;
+        return {
+          itemId: id,
+          name: it.name || id,
+          type: it.type || "",
+          currentQuantity: current,
+          minQuantity:
+            it.minQuantity != null && it.minQuantity !== ""
+              ? Number(it.minQuantity)
+              : null,
+          consumedGallons: Math.round(consumed * 10) / 10,
+          avgPerWeek,
+          avgPerMonth,
+          suggestedStock: suggested,
+          shortfall: Math.max(0, Math.round((suggested - current) * 10) / 10),
+          lookbackDays: days,
+          targetWeeks: weeks,
+        };
+      })
+      .sort((a, b) =>
+        String(a.name || a.itemId).localeCompare(String(b.name || b.itemId)),
+      );
+  }
+
   close() {
     return this.pool.end();
   }

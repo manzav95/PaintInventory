@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '12mb' }));
 
 // Initialize database
 db.connect().catch(err => {
@@ -51,6 +51,70 @@ app.post('/api/items/sync-recycle-dates', async (req, res) => {
   } catch (error) {
     console.error('Error syncing recycle dates:', error);
     res.status(500).json({ error: 'Failed to sync recycle dates' });
+  }
+});
+
+// Suggested on-hand stock (2 weeks) from ~6 months of check-outs.
+// Eligible: standard colors (paint/precat/stain/dye) + primer/clear/catalyst.
+app.get('/api/items/stock-estimates', async (req, res) => {
+  try {
+    const itemId =
+      req.query.itemId != null ? String(req.query.itemId).trim() : null;
+    const lookbackDays =
+      req.query.lookbackDays != null ? Number(req.query.lookbackDays) : 182;
+    const targetWeeks =
+      req.query.targetWeeks != null ? Number(req.query.targetWeeks) : 2;
+    const estimates = await db.getStockEstimates({
+      itemId: itemId || null,
+      lookbackDays,
+      targetWeeks,
+    });
+    res.json({ estimates });
+  } catch (error) {
+    console.error('Error fetching stock estimates:', error);
+    res.status(500).json({ error: 'Failed to fetch stock estimates' });
+  }
+});
+
+// OCR Finish Quantities Report screenshot → color + Cab LF (+ gallons = LF/6).
+app.post('/api/finish-quantities/ocr', async (req, res) => {
+  try {
+    const image =
+      (req.body && (req.body.image || req.body.imageBase64 || req.body.data)) ||
+      null;
+    if (!image) {
+      return res.status(400).json({ error: 'Missing image (base64 or data URL)' });
+    }
+    const {
+      ocrFinishQuantitiesImage,
+    } = require('./finishQuantitiesOcr');
+    const result = await ocrFinishQuantitiesImage(image);
+    res.json({
+      success: true,
+      rows: result.rows || [],
+      textPreview: String(result.text || '').slice(0, 2000),
+    });
+  } catch (error) {
+    console.error('Error OCR finish quantities:', error);
+    res.status(500).json({
+      error: error.message || 'Failed to read screenshot',
+    });
+  }
+});
+
+// Parse pasted Finish Quantities text (no OCR).
+app.post('/api/finish-quantities/parse', async (req, res) => {
+  try {
+    const text = req.body && req.body.text != null ? String(req.body.text) : '';
+    if (!text.trim()) {
+      return res.status(400).json({ error: 'Missing text' });
+    }
+    const { parseFinishQuantitiesText } = require('./finishQuantitiesOcr');
+    const rows = parseFinishQuantitiesText(text);
+    res.json({ success: true, rows });
+  } catch (error) {
+    console.error('Error parsing finish quantities:', error);
+    res.status(500).json({ error: 'Failed to parse text' });
   }
 });
 

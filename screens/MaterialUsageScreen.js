@@ -1008,6 +1008,7 @@ export default function MaterialUsageScreen({
       materialType: payload?.material_type || editRow.material_type,
       booth: payload?.booth || editRow.booth,
       colorName: payload?.color_name || editRow.color_name,
+      itemId: payload?.item_id || editRow.item_id,
       logs,
     });
     if (anomaly) {
@@ -1187,6 +1188,7 @@ export default function MaterialUsageScreen({
       materialType,
       booth,
       colorName,
+      itemId,
       cupGun,
       rawInput: qty,
       logs,

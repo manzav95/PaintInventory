@@ -140,6 +140,12 @@ export default function AppSidebar({
             onPress={() => onNavigate("placeOrder")}
           />
           <NavButton
+            label="Stock & week order"
+            icon="clipboard-text-outline"
+            active={currentScreen === "stockPlanning"}
+            onPress={() => onNavigate("stockPlanning")}
+          />
+          <NavButton
             label="Purchase Orders"
             icon="truck-delivery"
             active={currentScreen === "orders" && ordersInitialFilter == null}

@@ -174,6 +174,66 @@ class InventoryService {
     }
   }
 
+  /**
+   * Suggested stock (2 weeks) from ~6 months check-outs.
+   * Pass itemId for a single item; omit for all eligible items.
+   */
+  async getStockEstimates({ itemId = null } = {}) {
+    try {
+      const qs = itemId
+        ? `?itemId=${encodeURIComponent(String(itemId).trim())}`
+        : '';
+      const result = await _fetch(`/api/items/stock-estimates${qs}`);
+      return Array.isArray(result?.estimates) ? result.estimates : [];
+    } catch (error) {
+      console.error('Error fetching stock estimates:', error);
+      return [];
+    }
+  }
+
+  async getStockEstimateForItem(itemId) {
+    if (!itemId) return null;
+    const list = await this.getStockEstimates({ itemId });
+    return list[0] || null;
+  }
+
+  /**
+   * OCR a Finish Quantities Report screenshot (color + Cab LF).
+   * Gallons = Cab LF / 6.
+   */
+  async ocrFinishQuantities(imageBase64OrDataUrl) {
+    try {
+      const result = await _fetch('/api/finish-quantities/ocr', {
+        method: 'POST',
+        body: JSON.stringify({ image: imageBase64OrDataUrl }),
+      });
+      return {
+        success: true,
+        rows: Array.isArray(result?.rows) ? result.rows : [],
+        textPreview: result?.textPreview || '',
+      };
+    } catch (error) {
+      console.error('Error OCR finish quantities:', error);
+      return { success: false, error: error.message, rows: [] };
+    }
+  }
+
+  async parseFinishQuantitiesText(text) {
+    try {
+      const result = await _fetch('/api/finish-quantities/parse', {
+        method: 'POST',
+        body: JSON.stringify({ text: String(text || '') }),
+      });
+      return {
+        success: true,
+        rows: Array.isArray(result?.rows) ? result.rows : [],
+      };
+    } catch (error) {
+      console.error('Error parsing finish quantities:', error);
+      return { success: false, error: error.message, rows: [] };
+    }
+  }
+
   async setMinQuantity(value, userName) {
     try {
       const num = typeof value === 'number' ? value : parseInt(String(value), 10);
