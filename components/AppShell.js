@@ -44,6 +44,7 @@ export default function AppShell({
   lockMainScroll = false,
   onOpenSettings,
   onSignOut,
+  onFeedback,
   notifications,
   /** Optional controls rendered in the top bar immediately before Refresh (desktop). */
   topBarExtras = null,
@@ -202,6 +203,7 @@ export default function AppShell({
           onTogglePreviewStandardView={onTogglePreviewStandardView}
           onOpenSettings={onOpenSettings}
           onSignOut={onSignOut}
+          onFeedback={onFeedback}
         />
       </View>
     </View>

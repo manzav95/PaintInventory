@@ -70,6 +70,21 @@ class UserService {
       method: "DELETE",
     });
   }
+
+  /**
+   * @param {string} userName
+   * @param {{ range?: 'day'|'week'|'month'|'all', q?: string, limit?: number }} [opts]
+   */
+  async getActivity(userName, { range = "week", q = "", limit = 400 } = {}) {
+    const params = new URLSearchParams({
+      range: String(range || "week"),
+      limit: String(limit),
+    });
+    if (q && String(q).trim()) params.set("q", String(q).trim());
+    return _fetch(
+      `/api/users/${encodeURIComponent(userName)}/activity?${params.toString()}`,
+    );
+  }
 }
 
 export default new UserService();

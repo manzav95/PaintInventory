@@ -73,7 +73,17 @@ const ACCOUNTING_EMAIL =
   (typeof process !== "undefined" && process.env?.REACT_APP_ACCOUNTING_EMAIL) ||
   "";
 
+const FEEDBACK_EMAIL =
+  (typeof process !== "undefined" && process.env?.REACT_APP_FEEDBACK_EMAIL) ||
+  "manuelzavala@precisioncabinets.com";
+
+const FEEDBACK_PHONE =
+  (typeof process !== "undefined" && process.env?.REACT_APP_FEEDBACK_PHONE) ||
+  "";
+
 export default {
   API_URL,
   ACCOUNTING_EMAIL,
+  FEEDBACK_EMAIL,
+  FEEDBACK_PHONE,
 };

@@ -31,6 +31,7 @@ export default function UserMenuAvatar({
   userName,
   onOpenSettings,
   onSignOut,
+  onFeedback,
   isAdmin = false,
   previewStandardView = false,
   onTogglePreviewStandardView,
@@ -184,6 +185,28 @@ export default function UserMenuAvatar({
                 Settings
               </Text>
             </Pressable>
+            {typeof onFeedback === "function" ? (
+              <Pressable
+                style={({ hovered, pressed }) => [
+                  styles.item,
+                  (hovered || pressed) && {
+                    backgroundColor: theme.dark
+                      ? colors.semantic.activeTintDark
+                      : colors.semantic.activeTintLight,
+                  },
+                ]}
+                onPress={() => {
+                  setOpen(false);
+                  onFeedback();
+                }}
+              >
+                <Text
+                  style={[styles.itemText, { color: theme.colors.onSurface }]}
+                >
+                  Feedback
+                </Text>
+              </Pressable>
+            ) : null}
             {isAdmin && onTogglePreviewStandardView ? (
               <Pressable
                 style={({ hovered, pressed }) => [

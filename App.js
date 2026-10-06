@@ -20,6 +20,8 @@ import FadeOverlay from './components/FadeOverlay';
 import FadeIn from './components/FadeIn';
 import ToastHost from './components/ToastHost';
 import ConfirmHost from './components/ConfirmHost';
+import FeedbackHost from './components/FeedbackHost';
+import { promptFeedback, getUnreadFeedbackCount, markFeedbackSeen, subscribeFeedbackChanged } from './utils/feedback';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
 import InventoryService from './services/inventoryService';
@@ -55,6 +57,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import StockPlanningScreen from './screens/StockPlanningScreen';
+import MessagesScreen from './screens/MessagesScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
@@ -110,6 +113,8 @@ export default function App() {
   const [previewStandardView, setPreviewStandardView] = useState(false);
   const isAdmin = isAdminUser && !previewStandardView;
   const actorName = isAdminUser ? 'Admin' : (userName || 'unknown');
+  const [pendingFeedbackCount, setPendingFeedbackCount] = useState(0);
+  const prevPendingFeedbackRef = useRef(null);
   const idleLogoutTriggeredRef = useRef(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -223,16 +228,62 @@ export default function App() {
     };
   }, [userName, isSales, actorName]);
 
+  // Admin: unseen feedback badge + toast when new messages arrive
+  useEffect(() => {
+    if (!isAdmin || !userName) {
+      setPendingFeedbackCount(0);
+      prevPendingFeedbackRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const n = Math.max(0, Number(await getUnreadFeedbackCount()) || 0);
+        if (cancelled) return;
+        const prev = prevPendingFeedbackRef.current;
+        prevPendingFeedbackRef.current = n;
+        setPendingFeedbackCount(n);
+        if (prev != null && n > prev) {
+          const added = n - prev;
+          showToast({
+            title: added === 1 ? "New message" : "New messages",
+            message:
+              added === 1
+                ? "Someone sent feedback — open Messages to review."
+                : `${added} new feedback messages waiting.`,
+            duration: 4500,
+          });
+        }
+      } catch {
+        /* ignore — badge is best-effort */
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 20000);
+    const unsub = subscribeFeedbackChanged(refresh);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      unsub();
+    };
+  }, [isAdmin, userName]);
+
   const navigateTo = (screen, options = {}) => {
     setNavDrawerOpen(false);
     if (isSales && screen !== 'list' && screen !== 'settings' && screen !== 'login') {
       return;
     }
-    if (screen === 'reports' && !isAdmin) {
+    if ((screen === 'reports' || screen === 'messages') && !isAdmin) {
       return;
     }
     if (screen === 'materialUsage') {
       setMaterialUsageVisited(true);
+    }
+    if (screen === 'messages' && isAdmin) {
+      // Clear Messages highlight as soon as admin opens the inbox
+      setPendingFeedbackCount(0);
+      prevPendingFeedbackRef.current = 0;
+      markFeedbackSeen().catch(() => {});
     }
     if (Object.prototype.hasOwnProperty.call(options, 'ordersInitialFilter')) {
       setOrdersInitialFilter(options.ordersInitialFilter);
@@ -339,6 +390,7 @@ export default function App() {
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         stockPlanning: 'Stock & week order',
+        messages: 'Messages',
         list: 'Inventory',
         reports: 'Reports',
         settings: 'Settings',
@@ -1917,6 +1969,17 @@ export default function App() {
             onOpenPlaceOrder={() => navigateTo('placeOrder')}
           />
         );
+      case 'messages':
+        if (!isAdmin) {
+          return null;
+        }
+        return (
+          <MessagesScreen
+            userName={actorName}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+          />
+        );
       case 'materialUsage':
         // Kept mounted separately for instant navigation.
         return null;
@@ -2124,6 +2187,7 @@ export default function App() {
         }
         onOpenSettings={() => navigateTo('settings')}
         onSignOut={handleSwitchUser}
+        onFeedback={() => promptFeedback({ userName: actorName })}
         isAdmin={isAdminUser}
         previewStandardView={previewStandardView}
         onTogglePreviewStandardView={() => {
@@ -2171,6 +2235,10 @@ export default function App() {
               navigateTo('list');
             }}
             onOpenWasteTracking={() => navigateTo('wasteTracking')}
+            onOpenMessages={
+              isAdmin ? () => navigateTo('messages') : undefined
+            }
+            pendingFeedbackCount={pendingFeedbackCount}
           />
           )
         }
@@ -2182,6 +2250,7 @@ export default function App() {
             isSales={isSales}
             inDrawer={!showPersistentSidebar}
             onNavigate={navigateTo}
+            pendingFeedbackCount={pendingFeedbackCount}
             onAddManual={
               isAdmin
                 ? () => {
@@ -2225,6 +2294,7 @@ export default function App() {
         </FadeOverlay>
         <ToastHost />
         <ConfirmHost />
+        <FeedbackHost />
         <UpdateRequiredModal visible={updateRequired} />
         <Portal>
           <Dialog

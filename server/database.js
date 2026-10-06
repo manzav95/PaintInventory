@@ -623,6 +623,27 @@ class Database {
       )
     `);
     console.log("Lineup table ready");
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_feedback (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        user_name TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'feedback',
+        status TEXT NOT NULL DEFAULT 'pending',
+        platform TEXT DEFAULT '',
+        closed_at TIMESTAMPTZ DEFAULT NULL,
+        closed_by TEXT DEFAULT NULL
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_app_feedback_status ON app_feedback (status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_app_feedback_user ON app_feedback (user_name)
+    `);
+    console.log("App feedback table ready");
   }
 
   async getAllItems() {
@@ -1154,6 +1175,333 @@ class Database {
       [limit],
     );
     return result.rows;
+  }
+
+  /**
+   * Combined activity for one app user: logins, inventory audits, material usage.
+   * @param {{ userName: string, range?: 'day'|'week'|'month'|'all', q?: string, limit?: number }}
+   */
+  async getUserActivity({
+    userName,
+    range = "week",
+    q = "",
+    limit = 400,
+  } = {}) {
+    const name = String(userName || "").trim();
+    if (!name) return { activities: [], range: "all", userName: "" };
+
+    const lower = name.toLowerCase();
+    const aliases = new Set([lower]);
+    if (lower === "admin123" || lower === "admin") {
+      aliases.add("admin");
+      aliases.add("admin123");
+    }
+    const aliasList = [...aliases];
+
+    const rangeKey = String(range || "week").toLowerCase();
+    let sinceIso = null;
+    const now = Date.now();
+    if (rangeKey === "day") sinceIso = new Date(now - 1 * 86400000).toISOString();
+    else if (rangeKey === "week")
+      sinceIso = new Date(now - 7 * 86400000).toISOString();
+    else if (rangeKey === "month")
+      sinceIso = new Date(now - 30 * 86400000).toISOString();
+    // all → no since filter
+
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 400, 1), 1000);
+    const query = String(q || "").trim().toLowerCase();
+
+    const nameMatchSql = (col) =>
+      `LOWER(TRIM(COALESCE(${col}, ''))) = ANY($1::text[])`;
+
+    const auditParams = [aliasList];
+    let auditSince = "";
+    if (sinceIso) {
+      auditParams.push(sinceIso);
+      auditSince = ` AND timestamp >= $${auditParams.length}`;
+    }
+    auditParams.push(lim);
+
+    const loginParams = [aliasList];
+    let loginSince = "";
+    if (sinceIso) {
+      loginParams.push(sinceIso);
+      loginSince = ` AND logged_in_at >= $${loginParams.length}`;
+    }
+    loginParams.push(lim);
+
+    const muParams = [aliasList];
+    let muSince = "";
+    if (sinceIso) {
+      const sinceDate = sinceIso.slice(0, 10);
+      muParams.push(sinceDate);
+      muSince = ` AND entry_date IS NOT NULL AND TRIM(entry_date) >= $${muParams.length}`;
+    }
+    muParams.push(lim);
+
+    const [auditRes, loginRes, muRes] = await Promise.all([
+      this.pool.query(
+        `SELECT id, action, "itemId" AS item_id, "userName" AS user_name,
+                details, timestamp
+         FROM audit_log
+         WHERE ${nameMatchSql('"userName"')}
+           ${auditSince}
+         ORDER BY timestamp DESC
+         LIMIT $${auditParams.length}`,
+        auditParams,
+      ),
+      this.pool.query(
+        `SELECT id, user_name, logged_in_at
+         FROM login_log
+         WHERE ${nameMatchSql("user_name")}
+           ${loginSince}
+         ORDER BY logged_in_at DESC
+         LIMIT $${loginParams.length}`,
+        loginParams,
+      ),
+      this.pool.query(
+        `SELECT id, user_name, entry_date, entry_time, job_name, item_id,
+                color_name, material_type, qty_gallons, booth
+         FROM material_usage
+         WHERE ${nameMatchSql("user_name")}
+           ${muSince}
+         ORDER BY entry_date DESC NULLS LAST, entry_time DESC NULLS LAST, id DESC
+         LIMIT $${muParams.length}`,
+        muParams,
+      ),
+    ]);
+
+    const activities = [];
+
+    for (const row of auditRes.rows) {
+      let details = row.details;
+      if (typeof details === "string") {
+        try {
+          details = JSON.parse(details || "{}");
+        } catch {
+          details = {};
+        }
+      }
+      details = details || {};
+      const actionType = details._actionType || row.action || "";
+      const qty =
+        details.quantityChange != null
+          ? Number(details.quantityChange)
+          : details.quantity != null
+            ? Number(details.quantity)
+            : null;
+      const bits = [];
+      if (row.item_id) bits.push(`Item ${row.item_id}`);
+      if (Number.isFinite(qty) && qty !== 0) {
+        bits.push(`${Math.abs(qty)} gal`);
+      }
+      if (details.oldLocation || details.newLocation) {
+        bits.push(
+          `${details.oldLocation || "—"} → ${details.newLocation || "—"}`,
+        );
+      } else if (details.location) {
+        bits.push(String(details.location));
+      }
+      if (details.job_name || details.jobName) {
+        bits.push(`Job ${details.job_name || details.jobName}`);
+      }
+      activities.push({
+        id: `audit-${row.id}`,
+        kind: "audit",
+        timestamp: row.timestamp,
+        action: row.action,
+        actionType,
+        title: String(actionType || row.action || "Update")
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (c) => c.toUpperCase()),
+        detail: bits.join(" · "),
+        itemId: row.item_id || null,
+        searchText: [
+          row.action,
+          actionType,
+          row.item_id,
+          bits.join(" "),
+          JSON.stringify(details),
+        ]
+          .join(" ")
+          .toLowerCase(),
+      });
+    }
+
+    for (const row of loginRes.rows) {
+      activities.push({
+        id: `login-${row.id}`,
+        kind: "login",
+        timestamp: row.logged_in_at,
+        action: "login",
+        actionType: "login",
+        title: "Signed in",
+        detail: "",
+        itemId: null,
+        searchText: "signed in login",
+      });
+    }
+
+    for (const row of muRes.rows) {
+      const ts =
+        row.entry_date && String(row.entry_date).trim()
+          ? `${String(row.entry_date).trim()}T${String(row.entry_time || "12:00").trim()}`
+          : row.created_at || null;
+      const gal = Number(row.qty_gallons) || 0;
+      const bits = [
+        row.color_name || row.item_id || "Material",
+        gal ? `${gal} gal` : null,
+        row.booth || null,
+        row.job_name ? `Job ${row.job_name}` : null,
+      ].filter(Boolean);
+      activities.push({
+        id: `mu-${row.id}`,
+        kind: "material_usage",
+        timestamp: ts,
+        action: "material_usage",
+        actionType: "material_usage",
+        title: "Material usage",
+        detail: bits.join(" · "),
+        itemId: row.item_id || null,
+        searchText: bits.join(" ").toLowerCase(),
+      });
+    }
+
+    activities.sort((a, b) => {
+      const ta = new Date(a.timestamp).getTime() || 0;
+      const tb = new Date(b.timestamp).getTime() || 0;
+      return tb - ta;
+    });
+
+    const filtered = query
+      ? activities.filter((a) =>
+          String(a.searchText || `${a.title} ${a.detail}`).includes(query),
+        )
+      : activities;
+
+    return {
+      userName: name,
+      range: rangeKey === "day" || rangeKey === "week" || rangeKey === "month"
+        ? rangeKey
+        : "all",
+      since: sinceIso,
+      count: filtered.length,
+      activities: filtered.slice(0, lim).map(({ searchText, ...rest }) => rest),
+    };
+  }
+
+  _mapFeedbackRow(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      userName: row.user_name,
+      message: row.message,
+      category: row.category || "feedback",
+      status: row.status || "pending",
+      platform: row.platform || "",
+      closedAt: row.closed_at,
+      closedBy: row.closed_by,
+    };
+  }
+
+  async createAppFeedback({
+    userName,
+    message,
+    category = "feedback",
+    platform = "",
+  } = {}) {
+    const body = String(message || "").trim();
+    if (!body) return { success: false, error: "Message is required" };
+    if (body.length > 5000) {
+      return { success: false, error: "Message is too long (max 5000 characters)" };
+    }
+    const who = String(userName || "").trim() || "Anonymous";
+    const cat = String(category || "feedback")
+      .trim()
+      .toLowerCase();
+    const allowed = new Set(["feedback", "bug", "issue", "tip"]);
+    const categoryVal = allowed.has(cat) ? cat : "feedback";
+    const result = await this.pool.query(
+      `INSERT INTO app_feedback (user_name, message, category, status, platform)
+       VALUES ($1, $2, $3, 'pending', $4)
+       RETURNING *`,
+      [who, body, categoryVal, String(platform || "").trim()],
+    );
+    return { success: true, entry: this._mapFeedbackRow(result.rows[0]) };
+  }
+
+  async listAppFeedback({
+    userName = null,
+    status = null,
+    limit = 200,
+    forAdmin = false,
+  } = {}) {
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+    const params = [];
+    const where = [];
+
+    if (!forAdmin) {
+      const who = String(userName || "").trim();
+      if (!who) return [];
+      params.push(who);
+      where.push(`LOWER(TRIM(user_name)) = LOWER(TRIM($${params.length}))`);
+    }
+
+    const st = status != null ? String(status).trim().toLowerCase() : "";
+    if (st === "pending" || st === "closed") {
+      params.push(st);
+      where.push(`status = $${params.length}`);
+    }
+
+    params.push(lim);
+    const sql = `
+      SELECT * FROM app_feedback
+      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+      ORDER BY
+        CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+        created_at DESC
+      LIMIT $${params.length}
+    `;
+    const result = await this.pool.query(sql, params);
+    return result.rows.map((r) => this._mapFeedbackRow(r));
+  }
+
+  async countPendingAppFeedback() {
+    const result = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM app_feedback WHERE status = 'pending'`,
+    );
+    return result.rows[0]?.n || 0;
+  }
+
+  async updateAppFeedbackStatus(id, { status, closedBy } = {}) {
+    const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
+    if (!Number.isInteger(entryId) || entryId < 1) {
+      return { success: false, error: "Invalid id" };
+    }
+    const next = String(status || "").trim().toLowerCase();
+    if (next !== "pending" && next !== "closed") {
+      return { success: false, error: "Status must be pending or closed" };
+    }
+    const closer = String(closedBy || "").trim() || null;
+    const result = await this.pool.query(
+      next === "closed"
+        ? `UPDATE app_feedback
+           SET status = 'closed',
+               closed_at = NOW(),
+               closed_by = $2
+           WHERE id = $1
+           RETURNING *`
+        : `UPDATE app_feedback
+           SET status = 'pending',
+               closed_at = NULL,
+               closed_by = NULL
+           WHERE id = $1
+           RETURNING *`,
+      next === "closed" ? [entryId, closer] : [entryId],
+    );
+    if (result.rowCount === 0) return { success: false, error: "Not found" };
+    return { success: true, entry: this._mapFeedbackRow(result.rows[0]) };
   }
 
   _isBcryptHash(stored) {
@@ -2485,7 +2833,7 @@ class Database {
     return { success: true };
   }
 
-  async updateMaterialUsage(id, entry) {
+  async updateMaterialUsage(id, entry, auth = {}) {
     const entryId = typeof id === "string" ? parseInt(id, 10) : Number(id);
     if (!Number.isInteger(entryId) || entryId < 1) {
       return { success: false, error: "Invalid entry ID" };
@@ -2496,6 +2844,29 @@ class Database {
     );
     const prev = existing.rows[0];
     if (!prev) return { success: false, error: "Not found" };
+
+    const requesterIsAdmin = auth.isAdmin === true;
+    const requestingUser = String(auth.requestingUser || "")
+      .trim()
+      .toLowerCase();
+    if (!requesterIsAdmin) {
+      const owner = String(prev.user_name || "")
+        .trim()
+        .toLowerCase();
+      if (
+        !requestingUser ||
+        requestingUser === "unknown" ||
+        owner !== requestingUser
+      ) {
+        return {
+          success: false,
+          error: "You can only edit your own material usage entries",
+          status: 403,
+        };
+      }
+      // Non-admins cannot reassign the entry to another user
+      entry.user_name = prev.user_name;
+    }
 
     const qtyGallons = Number(entry.qty_gallons) || 0;
     const catalystOz =

@@ -715,6 +715,24 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
+app.get('/api/users/:userName/activity', async (req, res) => {
+  try {
+    const userName = decodeURIComponent(req.params.userName || '').trim();
+    if (!userName) {
+      return res.status(400).json({ error: 'userName required' });
+    }
+    const range = req.query.range != null ? String(req.query.range) : 'week';
+    const q = req.query.q != null ? String(req.query.q) : '';
+    const limit =
+      req.query.limit != null ? parseInt(req.query.limit, 10) : 400;
+    const result = await db.getUserActivity({ userName, range, q, limit });
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching user activity:', error);
+    res.status(500).json({ error: 'Failed to fetch user activity' });
+  }
+});
+
 app.post('/api/users', async (req, res) => {
   try {
     const userName = req.body?.userName ?? req.body?.user_name;
@@ -1116,23 +1134,33 @@ app.put('/api/material-usage/:id', async (req, res) => {
       return res.status(400).json({ error: 'Invalid id' });
     }
     const body = req.body || {};
-    const result = await db.updateMaterialUsage(id, {
-      entry_date: body.entry_date,
-      entry_time: body.entry_time,
-      job_name: body.job_name,
-      item_id: body.item_id,
-      color_name: body.color_name,
-      material_type: body.material_type,
-      qty_gallons: body.qty_gallons,
-      catalyst_gallons: body.catalyst_gallons,
-      catalyst_oz: body.catalyst_oz,
-      catalyzed_confirmed: body.catalyzed_confirmed === true,
-      booth: body.booth,
-      user_name: body.user_name || 'unknown',
-      cup_gun: body.cup_gun === true,
-    });
+    const result = await db.updateMaterialUsage(
+      id,
+      {
+        entry_date: body.entry_date,
+        entry_time: body.entry_time,
+        job_name: body.job_name,
+        item_id: body.item_id,
+        color_name: body.color_name,
+        material_type: body.material_type,
+        qty_gallons: body.qty_gallons,
+        catalyst_gallons: body.catalyst_gallons,
+        catalyst_oz: body.catalyst_oz,
+        catalyzed_confirmed: body.catalyzed_confirmed === true,
+        booth: body.booth,
+        user_name: body.user_name || 'unknown',
+        cup_gun: body.cup_gun === true,
+      },
+      {
+        requestingUser: body.requesting_user || body.requestingUser || '',
+        isAdmin: body.is_admin === true || body.isAdmin === true,
+      },
+    );
     if (!result.success) {
-      return res.status(result.error === 'Not found' ? 404 : 400).json(result);
+      const status =
+        result.status ||
+        (result.error === 'Not found' ? 404 : 400);
+      return res.status(status).json(result);
     }
     res.json(result);
   } catch (error) {
@@ -1525,6 +1553,102 @@ app.post('/api/notifications/low-stock-alert', async (req, res) => {
   } catch (error) {
     console.error('Low-stock alert email error:', error);
     res.status(500).json({ error: error.message || 'Failed to send alert' });
+  }
+});
+
+// In-app feedback messages (stored for admin; optional SMTP attempt)
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const message = req.body?.message;
+    const userName = req.body?.userName || req.body?.user_name || '';
+    const platform = req.body?.platform || '';
+    const category = req.body?.category || 'feedback';
+    const result = await db.createAppFeedback({
+      userName,
+      message,
+      category,
+      platform,
+    });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    // Best-effort email if SMTP is configured (does not block in-app delivery)
+    let email = null;
+    try {
+      const { sendFeedbackEmail, isSmtpConfigured } = require('./feedbackEmail');
+      if (isSmtpConfigured()) {
+        email = await sendFeedbackEmail({ message, userName, platform });
+      }
+    } catch (e) {
+      console.warn('Optional feedback email skipped:', e?.message || e);
+    }
+
+    res.json({
+      success: true,
+      entry: result.entry,
+      message: 'Message sent to admin.',
+      emailSent: !!(email && email.success),
+    });
+  } catch (error) {
+    console.error('Feedback create error:', error);
+    res.status(500).json({ error: error.message || 'Failed to save feedback' });
+  }
+});
+
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const isAdmin =
+      req.query.isAdmin === 'true' || req.query.is_admin === 'true';
+    const userName = req.query.userName || req.query.user_name || '';
+    const status = req.query.status || null;
+    const limit = req.query.limit != null ? parseInt(req.query.limit, 10) : 200;
+    if (!isAdmin && !String(userName).trim()) {
+      return res.status(400).json({ error: 'userName required' });
+    }
+    const rows = await db.listAppFeedback({
+      userName,
+      status,
+      limit,
+      forAdmin: !!isAdmin,
+    });
+    const pendingCount = isAdmin ? await db.countPendingAppFeedback() : undefined;
+    res.json({
+      messages: rows,
+      pendingCount,
+    });
+  } catch (error) {
+    console.error('Feedback list error:', error);
+    res.status(500).json({ error: 'Failed to list feedback' });
+  }
+});
+
+app.patch('/api/feedback/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const status = req.body?.status;
+    const closedBy = req.body?.closedBy || req.body?.closed_by || '';
+    const result = await db.updateAppFeedbackStatus(id, { status, closedBy });
+    if (!result.success) {
+      const code = result.error === 'Not found' ? 404 : 400;
+      return res.status(code).json(result);
+    }
+    res.json(result);
+  } catch (error) {
+    console.error('Feedback update error:', error);
+    res.status(500).json({ error: 'Failed to update feedback' });
+  }
+});
+
+app.get('/api/feedback/status', async (req, res) => {
+  try {
+    const pendingCount = await db.countPendingAppFeedback();
+    res.json({
+      pendingCount,
+      inApp: true,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check feedback status' });
   }
 });
 

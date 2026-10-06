@@ -100,6 +100,8 @@ export default function HomeScreen({
   onOpenLowStock,
   onOpenMaterialUsage,
   onOpenWasteTracking,
+  onOpenMessages,
+  pendingFeedbackCount = 0,
   onOpenReports,
   onItemSelect,
   auditLogs: auditLogsFromApp,
@@ -732,6 +734,8 @@ export default function HomeScreen({
               onOpenLateOrders={onOpenLateOrders}
               onOpenLowStock={onOpenLowStock}
               onOpenWasteTracking={onOpenWasteTracking}
+              onOpenMessages={onOpenMessages}
+              pendingFeedbackCount={pendingFeedbackCount}
               iconSize={24}
             />
             {onOpenMaterialUsage && (
@@ -781,6 +785,8 @@ export default function HomeScreen({
               onOpenLateOrders={onOpenLateOrders}
               onOpenLowStock={onOpenLowStock}
               onOpenWasteTracking={onOpenWasteTracking}
+              onOpenMessages={onOpenMessages}
+              pendingFeedbackCount={pendingFeedbackCount}
             />
             {onOpenMaterialUsage && (
               <IconButton

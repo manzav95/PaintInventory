@@ -9,7 +9,7 @@ import { space, radius, colors } from "../theme/tokens";
 
 const useNative = Platform.OS !== "web";
 
-function NavButton({ label, icon, onPress, active }) {
+function NavButton({ label, icon, onPress, active, badgeCount = 0 }) {
   const theme = useTheme();
   const press = useRef(new Animated.Value(1)).current;
 
@@ -33,24 +33,51 @@ function NavButton({ label, icon, onPress, active }) {
   const activeBg = theme.dark
     ? colors.semantic.activeTintDark
     : colors.semantic.activeTintLight;
+  const hasBadge = Number(badgeCount) > 0;
+  const alertBg = theme.dark
+    ? "rgba(211, 47, 47, 0.18)"
+    : "rgba(211, 47, 47, 0.1)";
 
   return (
     <Animated.View style={{ transform: [{ scale: press }] }}>
-      <AppButton
-        mode="text"
-        onPress={onPress}
-        onPressIn={onPressIn}
-        onPressOut={onPressOut}
-        icon={icon}
-        style={[styles.navButton, active && { backgroundColor: activeBg }]}
-        textColor={
-          active ? theme.colors.onSurface : theme.colors.onSurfaceVariant
-        }
-        contentStyle={styles.navButtonContent}
-        labelStyle={styles.navButtonLabel}
-      >
-        {label}
-      </AppButton>
+      <View style={styles.navButtonWrap}>
+        <AppButton
+          mode="text"
+          onPress={onPress}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+          icon={hasBadge ? "email-alert" : icon}
+          style={[
+            styles.navButton,
+            active && { backgroundColor: activeBg },
+            hasBadge && !active && { backgroundColor: alertBg },
+          ]}
+          textColor={
+            hasBadge
+              ? theme.colors.error
+              : active
+                ? theme.colors.onSurface
+                : theme.colors.onSurfaceVariant
+          }
+          contentStyle={styles.navButtonContent}
+          labelStyle={styles.navButtonLabel}
+        >
+          {label}
+        </AppButton>
+        {hasBadge ? (
+          <View
+            style={[
+              styles.navBadge,
+              { backgroundColor: colors.semantic.notificationBadge },
+            ]}
+            pointerEvents="none"
+          >
+            <Text style={styles.navBadgeText}>
+              {badgeCount > 99 ? "99+" : String(badgeCount)}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </Animated.View>
   );
 }
@@ -69,6 +96,7 @@ export default function AppSidebar({
   onAddManual,
   showCheckInOutNav = true,
   inDrawer = false,
+  pendingFeedbackCount = 0,
 }) {
   const theme = useTheme();
 
@@ -180,12 +208,21 @@ export default function AppSidebar({
             onPress={() => onNavigate("lineup")}
           />
           {isAdmin && (
-            <NavButton
-              label="Reports"
-              icon="chart-line"
-              active={currentScreen === "reports"}
-              onPress={() => onNavigate("reports")}
-            />
+            <>
+              <NavButton
+                label="Messages"
+                icon="email-outline"
+                active={currentScreen === "messages"}
+                badgeCount={pendingFeedbackCount}
+                onPress={() => onNavigate("messages")}
+              />
+              <NavButton
+                label="Reports"
+                icon="chart-line"
+                active={currentScreen === "reports"}
+                onPress={() => onNavigate("reports")}
+              />
+            </>
           )}
         </>
       ) : null}
@@ -232,8 +269,28 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     borderRadius: radius.md,
   },
+  navButtonWrap: {
+    position: "relative",
+  },
   navButtonContent: { justifyContent: "flex-start" },
   navButtonLabel: { fontWeight: "500" },
+  navBadge: {
+    position: "absolute",
+    top: 4,
+    right: 8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  navBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+    lineHeight: 12,
+  },
   footer: { marginTop: 20, paddingTop: 12, paddingHorizontal: space[2] },
   version: { fontSize: 11 },
 });

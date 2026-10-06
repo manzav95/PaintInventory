@@ -381,6 +381,20 @@ function dayTotalsFromRows(rows, inventory) {
   return t;
 }
 
+function normalizeMuUser(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase();
+}
+
+function canEditMaterialUsageEntry(row, { isAdmin, userName } = {}) {
+  if (!row?.id) return false;
+  if (isAdmin) return true;
+  const me = normalizeMuUser(userName);
+  if (!me || me === "unknown") return false;
+  return normalizeMuUser(row.user_name) === me;
+}
+
 export default function MaterialUsageScreen({
   inventory = [],
   userName,
@@ -981,7 +995,7 @@ export default function MaterialUsageScreen({
   };
 
   const startEditEntry = (row, evt) => {
-    if (!isAdmin || !row?.id) return;
+    if (!canEditMaterialUsageEntry(row, { isAdmin, userName })) return;
     const ne = evt?.nativeEvent || {};
     setEditAnchor({
       pageX: Number(ne.pageX ?? ne.clientX) || 0,
@@ -1003,6 +1017,14 @@ export default function MaterialUsageScreen({
 
   const handleSaveEdit = async (payload) => {
     if (!editRow?.id) return;
+    if (!canEditMaterialUsageEntry(editRow, { isAdmin, userName })) {
+      showToast({
+        type: "error",
+        title: "Not allowed",
+        message: "You can only edit your own material usage entries.",
+      });
+      return;
+    }
     const anomaly = assessMaterialUsageQty({
       qtyGallons: payload?.qty_gallons,
       materialType: payload?.material_type || editRow.material_type,
@@ -1021,7 +1043,13 @@ export default function MaterialUsageScreen({
     }
     setEditSaving(true);
     try {
-      await MaterialUsageService.update(editRow.id, payload);
+      const savePayload = isAdmin
+        ? payload
+        : { ...payload, user_name: editRow.user_name || userName };
+      await MaterialUsageService.update(editRow.id, savePayload, {
+        requestingUser: userName,
+        isAdmin,
+      });
       setEditRow(null);
       await loadLogs();
       notifyUsageDataChanged();
@@ -1329,7 +1357,7 @@ export default function MaterialUsageScreen({
             {formatQtyDisplay(row)}
           </Text>
         </View>
-        {isAdmin ? (
+        {canEditMaterialUsageEntry(row, { isAdmin, userName }) ? (
           <View style={styles.entryAdminActions}>
             <AppButton
               mode="text"
@@ -1339,16 +1367,18 @@ export default function MaterialUsageScreen({
             >
               Edit
             </AppButton>
-            <AppButton
-              mode="text"
-              compact
-              textColor={theme.colors.error}
-              onPress={() => handleDeleteEntry(row)}
-              loading={deletingId === row.id}
-              disabled={busy}
-            >
-              Delete
-            </AppButton>
+            {isAdmin ? (
+              <AppButton
+                mode="text"
+                compact
+                textColor={theme.colors.error}
+                onPress={() => handleDeleteEntry(row)}
+                loading={deletingId === row.id}
+                disabled={busy}
+              >
+                Delete
+              </AppButton>
+            ) : null}
           </View>
         ) : null}
       </View>

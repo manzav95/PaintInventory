@@ -44,11 +44,13 @@ export default function NotificationsBell({
   minQuantity = 30,
   isAdmin = false,
   userName = "",
+  pendingFeedbackCount = 0,
   onOpenRecycleDue,
   onOpenBackOrders,
   onOpenLateOrders,
   onOpenLowStock,
   onOpenWasteTracking,
+  onOpenMessages,
   iconSize = 22,
 }) {
   const theme = useTheme();
@@ -118,6 +120,22 @@ export default function NotificationsBell({
 
   const allNotifications = useMemo(() => {
     const items = [];
+    if (isAdmin && pendingFeedbackCount > 0 && onOpenMessages) {
+      items.push({
+        id: "messages",
+        title: "Messages",
+        count: pendingFeedbackCount,
+        color: colors.brand.accent,
+        detail:
+          pendingFeedbackCount === 1
+            ? "1 new message — open Messages to review"
+            : `${pendingFeedbackCount} new messages — open Messages to review`,
+        onPress: () => {
+          setVisible(false);
+          onOpenMessages();
+        },
+      });
+    }
     if (isAdmin && wasteUnreadCount > 0 && onOpenWasteTracking) {
       items.push({
         id: "waste",
@@ -197,6 +215,7 @@ export default function NotificationsBell({
     }
     return items;
   }, [
+    pendingFeedbackCount,
     wasteUnreadCount,
     recycleDueCount,
     backOrderCount,
@@ -204,6 +223,7 @@ export default function NotificationsBell({
     lowStockItems.length,
     isAdmin,
     minQuantity,
+    onOpenMessages,
     onOpenWasteTracking,
     onOpenRecycleDue,
     onOpenBackOrders,

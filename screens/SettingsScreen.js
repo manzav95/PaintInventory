@@ -26,11 +26,14 @@ import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import InventoryService from "../services/inventoryService";
 import UserService from "../services/userService";
 import MaterialUsageService from "../services/materialUsageService";
+import { promptFeedback } from "../utils/feedback";
 import LoginHistoryModal from "../components/LoginHistoryModal";
+import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import { AppSurface, AppText } from "../components/ui";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
+import { getActionColor } from "../utils/actionColors";
 
 const MONTH_NAMES = [
   "January",
@@ -53,6 +56,7 @@ const PANEL = {
   account: { title: "Account", parent: "root" },
   admin: { title: "Admin", parent: "root" },
   "admin-users": { title: "Users", parent: "admin" },
+  "admin-user-activity": { title: "User activity", parent: "admin-users" },
   "admin-export": { title: "Export", parent: "admin" },
   "admin-overtime": { title: "Overtime", parent: "admin" },
   "admin-zeros": { title: "Zero quantities", parent: "admin" },
@@ -206,6 +210,13 @@ export default function SettingsScreen({
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [editRoleUser, setEditRoleUser] = useState(null);
   const [creatingUser, setCreatingUser] = useState(false);
+  const [activityUser, setActivityUser] = useState(null);
+  const [activityRange, setActivityRange] = useState("week");
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityDebouncedQ, setActivityDebouncedQ] = useState("");
+  const [activityRows, setActivityRows] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityCount, setActivityCount] = useState(0);
 
   // Desktop uses a persistent sidebar; land on a content panel (not a hub).
   useEffect(() => {
@@ -216,16 +227,60 @@ export default function SettingsScreen({
   }, [isDesktop, panel]);
 
   const panelMeta = PANEL[panel] || PANEL.root;
-  const panelTitle = panelMeta.title;
+  const panelTitle =
+    panel === "admin-user-activity" && activityUser
+      ? `${activityUser}`
+      : panelMeta.title;
 
   const goBackPanel = useCallback(() => {
     const parent = (PANEL[panel] || PANEL.root).parent;
+    if (panel === "admin-user-activity") {
+      setActivityUser(null);
+      setActivityRows([]);
+      setActivityQuery("");
+      setActivityDebouncedQ("");
+    }
     if (parent) {
       setPanel(parent);
       return;
     }
     onBack?.();
   }, [panel, onBack]);
+
+  const openUserActivity = useCallback((userName) => {
+    const name = String(userName || "").trim();
+    if (!name) return;
+    setActivityUser(name);
+    setActivityRange("week");
+    setActivityQuery("");
+    setActivityDebouncedQ("");
+    setPanel("admin-user-activity");
+  }, []);
+
+  const loadUserActivity = useCallback(async () => {
+    if (!isAdmin || !activityUser) return;
+    setActivityLoading(true);
+    try {
+      const data = await UserService.getActivity(activityUser, {
+        range: activityRange,
+        q: activityDebouncedQ,
+        limit: 500,
+      });
+      setActivityRows(Array.isArray(data?.activities) ? data.activities : []);
+      setActivityCount(Number(data?.count) || 0);
+    } catch (e) {
+      console.error("Load user activity error:", e);
+      setActivityRows([]);
+      setActivityCount(0);
+      showToast({
+        type: "error",
+        title: "Could not load activity",
+        message: e?.message || "Try again.",
+      });
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [isAdmin, activityUser, activityRange, activityDebouncedQ]);
 
   const loadUsers = async () => {
     if (!isAdmin) return;
@@ -344,6 +399,19 @@ export default function SettingsScreen({
     if (panel === "admin-users" && isAdmin) loadUsers();
     if (panel === "admin-export" && isAdmin) loadExportPeriods();
   }, [panel, isAdmin]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setActivityDebouncedQ(activityQuery.trim());
+    }, 250);
+    return () => clearTimeout(t);
+  }, [activityQuery]);
+
+  useEffect(() => {
+    if (panel === "admin-user-activity" && isAdmin && activityUser) {
+      loadUserActivity();
+    }
+  }, [panel, isAdmin, activityUser, loadUserActivity]);
 
   const selectedMonthLabel = useMemo(() => {
     const row = exportMonths.find((m) => m.key === selectedMonthKey);
@@ -545,6 +613,14 @@ export default function SettingsScreen({
             selected={panel === "account"}
             onPress={() => setPanel("account")}
           />
+          <SettingsMenuRow
+            icon="message-text-outline"
+            title="Feedback"
+            compact
+            showChevron={false}
+            selected={false}
+            onPress={() => promptFeedback({ userName })}
+          />
           {isAdmin ? (
             <>
               <AppText
@@ -559,7 +635,9 @@ export default function SettingsScreen({
                 title="Users"
                 compact
                 showChevron={false}
-                selected={panel === "admin-users"}
+                selected={
+                  panel === "admin-users" || panel === "admin-user-activity"
+                }
                 onPress={() => setPanel("admin-users")}
               />
               <SettingsMenuRow
@@ -632,6 +710,13 @@ export default function SettingsScreen({
         title="Account"
         description={`Signed in as ${userName || "Unknown"}`}
         onPress={() => setPanel("account")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="message-text-outline"
+        title="Feedback"
+        description="Send tips, bugs, or questions to admin"
+        onPress={() => promptFeedback({ userName })}
       />
       {isAdmin ? (
         <>
@@ -834,18 +919,26 @@ export default function SettingsScreen({
               const isLockedRole = roleKey === "admin";
               return (
               <View key={u.id || u.user_name} style={styles.userRow}>
-                <View style={styles.userRowInfo}>
+                <Pressable
+                  style={styles.userRowInfo}
+                  onPress={() => openUserActivity(u.user_name)}
+                >
                   <AppText variant="bodyStrong">{u.user_name}</AppText>
                   {isLockedRole ? (
                     <AppText variant="caption" tone="muted">
-                      Admin
+                      Admin · tap for activity
                     </AppText>
                   ) : (
                     <Menu
                       visible={editRoleUser === u.user_name}
                       onDismiss={() => setEditRoleUser(null)}
                       anchor={
-                        <Pressable onPress={() => setEditRoleUser(u.user_name)}>
+                        <Pressable
+                          onPress={(e) => {
+                            e?.stopPropagation?.();
+                            setEditRoleUser(u.user_name);
+                          }}
+                        >
                           <AppText variant="caption" tone="muted">
                             {accountTypeLabel(u.role)} · change
                           </AppText>
@@ -873,8 +966,15 @@ export default function SettingsScreen({
                       ? "Must change password on next login"
                       : "Password set"}
                   </AppText>
-                </View>
+                </Pressable>
                 <View style={styles.userRowActions}>
+                  <AppButton
+                    mode="text"
+                    compact
+                    onPress={() => openUserActivity(u.user_name)}
+                  >
+                    Activity
+                  </AppButton>
                   <AppButton
                     mode="text"
                     compact
@@ -914,6 +1014,107 @@ export default function SettingsScreen({
         </AppButton>
       </AppSurface>
     </>
+  );
+
+  const formatActivityTime = (ts) => {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts);
+    return d.toLocaleString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  const renderAdminUserActivity = () => (
+    <AppSurface>
+      <AppText variant="sectionTitle" style={styles.sectionTitle}>
+        {activityUser || "User"} activity
+      </AppText>
+      <AppText variant="caption" tone="muted" style={styles.blockHint}>
+        Logins, inventory actions, and material usage for this account.
+      </AppText>
+      <SegmentedButtons
+        value={activityRange}
+        onValueChange={setActivityRange}
+        style={styles.activityRange}
+        buttons={[
+          { value: "day", label: "Day" },
+          { value: "week", label: "Week" },
+          { value: "month", label: "Month" },
+          { value: "all", label: "All" },
+        ]}
+      />
+      <OutlinedSearchInput
+        value={activityQuery}
+        onChangeText={setActivityQuery}
+        placeholder="Search actions, items, jobs…"
+        style={styles.activitySearch}
+      />
+      <View style={styles.activityMetaRow}>
+        <AppText variant="caption" tone="muted">
+          {activityLoading
+            ? "Loading…"
+            : `${activityCount} event${activityCount === 1 ? "" : "s"}`}
+        </AppText>
+        <AppButton
+          mode="text"
+          compact
+          onPress={loadUserActivity}
+          disabled={activityLoading}
+        >
+          Refresh
+        </AppButton>
+      </View>
+      {activityLoading && activityRows.length === 0 ? (
+        <ActivityIndicator style={{ marginTop: 16 }} />
+      ) : activityRows.length === 0 ? (
+        <AppText variant="caption" tone="muted" style={{ marginTop: 12 }}>
+          No activity in this range
+          {activityDebouncedQ ? " matching your search" : ""}.
+        </AppText>
+      ) : (
+        <View style={styles.activityList}>
+          {activityRows.map((row) => {
+            const accent = getActionColor(
+              row.kind === "login" ? "login" : row.action,
+              row.actionType ? { _actionType: row.actionType } : undefined,
+            );
+            return (
+              <View
+                key={row.id}
+                style={[
+                  styles.activityRow,
+                  { borderBottomColor: theme.colors.outlineVariant },
+                ]}
+              >
+                <View
+                  style={[styles.activityDot, { backgroundColor: accent }]}
+                />
+                <View style={styles.activityBody}>
+                  <AppText variant="bodyStrong">{row.title}</AppText>
+                  {row.detail ? (
+                    <AppText variant="caption" tone="muted" numberOfLines={2}>
+                      {row.detail}
+                    </AppText>
+                  ) : null}
+                  <AppText
+                    variant="caption"
+                    tone="dim"
+                    style={styles.activityTime}
+                  >
+                    {formatActivityTime(row.timestamp)}
+                  </AppText>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+    </AppSurface>
   );
 
   const renderAdminExport = () => (
@@ -1200,6 +1401,8 @@ export default function SettingsScreen({
         return isAdmin ? renderAdminHub() : renderRoot();
       case "admin-users":
         return isAdmin ? renderAdminUsers() : renderRoot();
+      case "admin-user-activity":
+        return isAdmin ? renderAdminUserActivity() : renderRoot();
       case "admin-export":
         return isAdmin ? renderAdminExport() : renderRoot();
       case "admin-overtime":
@@ -1407,6 +1610,43 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  activityRange: {
+    marginTop: space[2],
+    marginBottom: space[3],
+  },
+  activitySearch: {
+    marginBottom: space[2],
+  },
+  activityMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: space[2],
+  },
+  activityList: {
+    marginTop: space[1],
+  },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  activityDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+  },
+  activityBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  activityTime: {
+    marginTop: 2,
   },
   webWrapper: {
     width: "100%",

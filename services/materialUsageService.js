@@ -87,10 +87,14 @@ class MaterialUsageService {
     });
   }
 
-  async update(id, entry) {
+  async update(id, entry, { requestingUser, isAdmin } = {}) {
     return _fetch(`/api/material-usage/${encodeURIComponent(id)}`, {
       method: 'PUT',
-      body: JSON.stringify(entry),
+      body: JSON.stringify({
+        ...entry,
+        requesting_user: requestingUser,
+        is_admin: !!isAdmin,
+      }),
     });
   }
 
