@@ -28,6 +28,7 @@ import UserService from "../services/userService";
 import MaterialUsageService from "../services/materialUsageService";
 import { promptFeedback } from "../utils/feedback";
 import LoginHistoryModal from "../components/LoginHistoryModal";
+import { displayUserName } from "../utils/displayUserName";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import { AppSurface, AppText } from "../components/ui";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
@@ -465,7 +466,12 @@ export default function SettingsScreen({
     try {
       const result = await UserService.create({
         userName: name,
-        role: newUserRole === "sales" ? "sales" : "user",
+        role:
+          newUserRole === "sales"
+            ? "sales"
+            : newUserRole === "admin"
+              ? "admin"
+              : "user",
       });
       if (!result?.success) {
         throw new Error(result?.error || "Could not create user");
@@ -686,7 +692,7 @@ export default function SettingsScreen({
         </ScrollView>
         <View style={styles.desktopSidebarFooter}>
           <AppText variant="caption" tone="muted">
-            {userName || "Unknown"}
+            {displayUserName(userName, "Unknown")}
           </AppText>
           <AppText variant="caption" tone="dim" style={styles.footerVersion}>
             v1.{version?.build ?? "?"}
@@ -708,7 +714,7 @@ export default function SettingsScreen({
       <SettingsMenuRow
         icon="account-outline"
         title="Account"
-        description={`Signed in as ${userName || "Unknown"}`}
+        description={`Signed in as ${displayUserName(userName, "Unknown")}`}
         onPress={() => setPanel("account")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
@@ -770,7 +776,7 @@ export default function SettingsScreen({
             tone="muted"
             style={styles.settingDescription}
           >
-            Logged in as: {userName || "Unknown"}
+            Logged in as: {displayUserName(userName, "Unknown")}
           </AppText>
         </View>
       </View>
@@ -854,7 +860,8 @@ export default function SettingsScreen({
           bcrypt hashes only — they cannot be viewed. Reset sets the password
           back to "password" and requires a change on next login. Standard
           accounts match today's warehouse users. Sales accounts can only view
-          inventory and the color book.
+          inventory and the color book. Admin accounts have the same access as
+          the master account.
         </AppText>
         <TextInput
           label="New user name"
@@ -872,7 +879,7 @@ export default function SettingsScreen({
             <Pressable onPress={() => setRoleMenuOpen(true)}>
               <TextInput
                 label="Account type"
-                value={newUserRole === "sales" ? "Sales" : "Standard"}
+                value={accountTypeLabel(newUserRole)}
                 mode="outlined"
                 editable={false}
                 style={[styles.userInput, { pointerEvents: "none" }]}
@@ -892,6 +899,13 @@ export default function SettingsScreen({
             title="Sales"
             onPress={() => {
               setNewUserRole("sales");
+              setRoleMenuOpen(false);
+            }}
+          />
+          <Menu.Item
+            title="Admin"
+            onPress={() => {
+              setNewUserRole("admin");
               setRoleMenuOpen(false);
             }}
           />
@@ -915,15 +929,15 @@ export default function SettingsScreen({
         ) : (
           <View style={styles.userList}>
             {users.map((u) => {
-              const roleKey = String(u.role || "").toLowerCase();
-              const isLockedRole = roleKey === "admin";
+              const isLockedRole =
+                String(u.user_name || "").trim().toLowerCase() === "admin123";
               return (
               <View key={u.id || u.user_name} style={styles.userRow}>
                 <Pressable
                   style={styles.userRowInfo}
                   onPress={() => openUserActivity(u.user_name)}
                 >
-                  <AppText variant="bodyStrong">{u.user_name}</AppText>
+                  <AppText variant="bodyStrong">{displayUserName(u.user_name)}</AppText>
                   {isLockedRole ? (
                     <AppText variant="caption" tone="muted">
                       Admin · tap for activity
@@ -953,6 +967,12 @@ export default function SettingsScreen({
                         title="Sales"
                         onPress={() =>
                           handleChangeUserRole(u.user_name, "sales")
+                        }
+                      />
+                      <Menu.Item
+                        title="Admin"
+                        onPress={() =>
+                          handleChangeUserRole(u.user_name, "admin")
                         }
                       />
                     </Menu>
@@ -1486,7 +1506,7 @@ export default function SettingsScreen({
         {panel === "root" ? (
           <View style={styles.footer}>
             <AppText variant="caption" tone="muted">
-              Signed in as {userName || "Unknown"}
+              Signed in as {displayUserName(userName, "Unknown")}
             </AppText>
             <AppText variant="caption" tone="dim" style={styles.footerVersion}>
               v1.{version?.build ?? "?"}

@@ -2,6 +2,7 @@ import React from "react";
 import { View, StyleSheet } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import FadeIn from "./FadeIn";
+import { displayUserName } from "../utils/displayUserName";
 
 export function getTimeGreeting(date = new Date()) {
   const hour = date.getHours();
@@ -12,7 +13,8 @@ export function getTimeGreeting(date = new Date()) {
 
 export default function DashboardGreeting({ isAdmin, userName, style }) {
   const theme = useTheme();
-  const displayName = isAdmin ? "Admin" : userName || "there";
+  const named = displayUserName(userName);
+  const displayName = named === "ADMIN" ? "ADMIN" : isAdmin ? "Admin" : named || "there";
   const greetingPhrase = getTimeGreeting();
 
   return (

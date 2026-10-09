@@ -18,6 +18,8 @@ import FadeIn from "../components/FadeIn";
 import ShakeView from "../components/ShakeView";
 import ScrollFrame from "../components/ScrollFrame";
 import showToast from "../utils/showToast";
+import { setAuthToken } from "../utils/authToken";
+import { displayUserName } from "../utils/displayUserName";
 import UserService from "../services/userService";
 import { colors, space, radius } from "../theme/tokens";
 import { AppText } from "../components/ui";
@@ -85,7 +87,8 @@ export default function LoginScreen({ onLogin }) {
     };
   }, []);
 
-  const finishLogin = (userName, role) => {
+  const finishLogin = async (userName, role, token) => {
+    await setAuthToken(token || "");
     onLogin(userName, role);
   };
 
@@ -195,7 +198,7 @@ export default function LoginScreen({ onLogin }) {
         setAdminGate(false);
         return;
       }
-      finishLogin(result.user.user_name, result.user.role);
+      finishLogin(result.user.user_name, result.user.role, result.token);
     } catch (e) {
       setShakeTick((n) => n + 1);
       showToast({
@@ -250,7 +253,7 @@ export default function LoginScreen({ onLogin }) {
         title: "Password updated",
         message: "You can use your new password next time.",
       });
-      finishLogin(name, pendingUser?.role);
+      finishLogin(name, pendingUser?.role, result.token);
     } catch (e) {
       setShakeTick((n) => n + 1);
       showToast({
@@ -307,7 +310,7 @@ export default function LoginScreen({ onLogin }) {
               {changingPassword ? (
                 <>
                   <AppText variant="body" tone="muted" style={styles.subtitle}>
-                    Welcome, {pendingUser.user_name}. You signed in with the
+                    Welcome, {displayUserName(pendingUser.user_name)}. You signed in with the
                     default password — choose a new one before continuing (min 3
                     characters; not "password").
                   </AppText>

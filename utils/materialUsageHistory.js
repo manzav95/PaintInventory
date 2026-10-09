@@ -1,4 +1,5 @@
 import { getHistorySortMs } from "./materialUsageDay";
+import { displayUserName } from "./displayUserName";
 
 /**
  * Map a material_usage DB row into an audit-log-shaped event for the dashboard.
@@ -17,7 +18,7 @@ export function materialUsageToHistoryEvent(row) {
     id: `mu-${id}`,
     action: "material_usage",
     itemId: row?.item_id ? String(row.item_id) : null,
-    userName: row?.user_name || "Unknown",
+    userName: displayUserName(row?.user_name, "Unknown"),
     timestamp: created,
     details: {
       _source: "material_usage",

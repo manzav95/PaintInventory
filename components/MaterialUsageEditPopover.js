@@ -20,6 +20,7 @@ import DateField from "./DateField";
 import TimeField from "./TimeField";
 import ScrollFrame from "./ScrollFrame";
 import { AppEmptyState } from "./ui";
+import { displayUserName } from "../utils/displayUserName";
 import { BOOTH_OPTIONS } from "../services/materialUsageService";
 import {
   isMaterialUsageEligibleItem,
@@ -349,7 +350,7 @@ export default function MaterialUsageEditPopover({
               style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
               numberOfLines={1}
             >
-              {row.user_name || "Unknown"}
+              {displayUserName(row.user_name, "Unknown")}
               {effectiveMaterialType
                 ? ` · ${String(effectiveMaterialType).replace(/_/g, " ")}`
                 : ""}

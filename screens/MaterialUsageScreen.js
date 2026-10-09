@@ -30,6 +30,7 @@ import PageHeader from "../components/PageHeader";
 import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import showToast from "../utils/showToast";
+import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
 import { assessMaterialUsageQty } from "../utils/materialUsageAnomaly";
 import {
@@ -68,6 +69,7 @@ import {
   getMaterialUsageShift as getShift,
 } from "../utils/materialUsageDay";
 import { getMaterialTypeColor } from "../utils/materialTypes";
+import { formatCurrency, usageRowDollars } from "../utils/pricing";
 import {
   isMaterialUsageEligibleItem,
   formatMaterialPickerLabel,
@@ -930,6 +932,22 @@ export default function MaterialUsageScreen({
     thisWeekSunday,
   ]);
 
+  const thisWeekDollars = useMemo(() => {
+    if (!isAdmin) return 0;
+    return filteredLogs.reduce((sum, row) => {
+      const d = getLogDate(row, materialUsageOvertime) || "";
+      if (!d || d < thisWeekMonday || d > thisWeekSunday) return sum;
+      return sum + usageRowDollars(row, inventory);
+    }, 0);
+  }, [
+    isAdmin,
+    filteredLogs,
+    inventory,
+    materialUsageOvertime,
+    thisWeekMonday,
+    thisWeekSunday,
+  ]);
+
   const thisWeekHasEntries = useMemo(() => {
     return filteredLogs.some((row) => {
       const d = getLogDate(row, materialUsageOvertime) || "";
@@ -1312,7 +1330,7 @@ export default function MaterialUsageScreen({
                 style={[styles.entryUser, { color: theme.colors.onSurface }]}
                 numberOfLines={1}
               >
-                {row.user_name || "—"}
+                {displayUserName(row.user_name, "—")}
               </Text>
               {row.booth ? (
                 <View
@@ -1867,6 +1885,16 @@ export default function MaterialUsageScreen({
             >
               Totals ({thisWeekTotalsLabel})
             </Text>
+            {isAdmin ? (
+              <Text
+                style={[
+                  styles.usageSummaryTitle,
+                  { color: theme.colors.onSurface, marginTop: 2 },
+                ]}
+              >
+                {formatCurrency(thisWeekDollars)}
+              </Text>
+            ) : null}
             <UsageTypeChips
               totals={thisWeekTotals}
               theme={theme}

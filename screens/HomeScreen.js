@@ -22,6 +22,11 @@ import NotificationsBell from "../components/NotificationsBell";
 import version from "../version";
 import { formatDayHeader } from "../utils/transactionDayUtils";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
+import { displayUserName } from "../utils/displayUserName";
+import {
+  isCustomStackLocation,
+  stackLetterFromLocation,
+} from "../utils/customStacks";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import {
   colors,
@@ -234,7 +239,7 @@ export default function HomeScreen({
       rows = rows.filter((log) => {
         const u = (log.userName || "").trim().toLowerCase();
         const display = (() => {
-          if (u && u !== "unknown") return log.userName;
+          if (u && u !== "unknown") return displayUserName(log.userName);
           const adminOnly =
             [
               "add",
@@ -282,7 +287,7 @@ export default function HomeScreen({
 
   const getDisplayUserName = (log) => {
     const u = (log.userName || "").trim().toLowerCase();
-    if (u && u !== "unknown") return log.userName;
+    if (u && u !== "unknown") return displayUserName(log.userName);
     const adminOnly =
       [
         "add",
@@ -342,6 +347,22 @@ export default function HomeScreen({
   const qrButtonText = "Check In / Check Out";
   const getItemName = (itemId) =>
     inventory.find((i) => i.id === itemId)?.name || itemId || "Unknown";
+
+  const receiveStackLabel = (log) => {
+    const type =
+      log?.action === "update" && log?.details?._actionType
+        ? log.details._actionType
+        : log?.action;
+    if (type !== "receiving") return "";
+    const item = inventory.find((i) => String(i.id) === String(log?.itemId));
+    const custom = ["custom_paint", "custom_stain"].includes(
+      String(item?.type || "").toLowerCase(),
+    );
+    const fromLog = String(log?.details?.location || log?.details?.newLocation || "").trim();
+    const loc = fromLog || (custom ? String(item?.location || "").trim() : "");
+    if (!loc || (!custom && !isCustomStackLocation(loc))) return "";
+    return ` in Stack ${stackLetterFromLocation(loc)}`;
+  };
 
   const transactionSection = (
     <Card style={styles.card}>
@@ -585,7 +606,7 @@ export default function HomeScreen({
                           ]}
                           numberOfLines={2}
                         >
-                          {itemName}
+                          {itemName}{receiveStackLabel(log)}
                         </Text>
                       </Pressable>
                     ) : (
@@ -596,7 +617,7 @@ export default function HomeScreen({
                         ]}
                         numberOfLines={2}
                       >
-                        {itemName}
+                        {itemName}{receiveStackLabel(log)}
                       </Text>
                     )}
                   </View>
@@ -855,7 +876,7 @@ export default function HomeScreen({
           <View style={styles.footer}>
             <Text style={styles.footerText}>
               Logged in as:{" "}
-              <Text style={styles.mono}>{isAdmin ? "Admin" : userName}</Text>
+              <Text style={styles.mono}>{displayUserName(userName) === "ADMIN" ? "ADMIN" : isAdmin ? "Admin" : userName}</Text>
             </Text>
             <Text style={styles.footerVersion}>v1.{version?.build ?? "?"}</Text>
           </View>

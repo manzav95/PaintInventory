@@ -33,6 +33,11 @@ import {
   getHistorySortMs,
 } from "../utils/materialUsageDay";
 import { logMatchesShift, SHIFT_LABELS } from "../utils/shiftUtils";
+import { displayUserName } from "../utils/displayUserName";
+import {
+  isCustomStackLocation,
+  stackLetterFromLocation,
+} from "../utils/customStacks";
 import { useAppLayout } from "../utils/layout";
 import {
   colors,
@@ -357,12 +362,25 @@ export default function DashboardScreen({
     return item?.name || itemId || "Unknown";
   };
 
+  const customReceiveStack = (log) => {
+    if (resolveActionType(log) !== "receiving") return "";
+    const item = inventory.find((i) => String(i.id) === String(log?.itemId));
+    const custom = CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase());
+    const fromLog = String(log?.details?.location || log?.details?.newLocation || "").trim();
+    const loc = fromLog || (custom ? String(item?.location || "").trim() : "");
+    if (!loc) return "";
+    if (!custom && !isCustomStackLocation(loc)) return "";
+    return `in Stack ${stackLetterFromLocation(loc)}`;
+  };
+
   const getEventColorName = (log) => {
     if (log?.action === "material_usage") {
       const name = String(log?.details?.color_name || "").trim();
       if (name) return name;
     }
-    return getItemName(log?.itemId);
+    const name = getItemName(log?.itemId);
+    const stack = customReceiveStack(log);
+    return stack ? `${name} ${stack}` : name;
   };
 
   const checkedOutByItemWeek = useMemo(() => {
@@ -531,7 +549,7 @@ export default function DashboardScreen({
 
   const getDisplayUserName = (log) => {
     const u = (log.userName || "").trim().toLowerCase();
-    if (u && u !== "unknown") return log.userName;
+    if (u && u !== "unknown") return displayUserName(log.userName);
     const adminOnly =
       [
         "add",

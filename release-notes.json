@@ -1,0 +1,12 @@
+{
+  "changes": [
+    "Item history opens on the last 3 months, and you can switch to 12 months or lifetime.",
+    "Stain formulas color each process and pigment, and highlight important red wording.",
+    "Stain formula search opens on Custom colors, with the formula photo on each card.",
+    "Emailing a stain formula sends only a PDF named with the color number."
+  ],
+  "adminOnly": [
+    "Waste totals include a dollar value next to the gallons.",
+    "Material usage totals include this week's dollar value."
+  ]
+}

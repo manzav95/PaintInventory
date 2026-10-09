@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { Text, Avatar, useTheme } from "react-native-paper";
 import { colors, space, radius } from "../theme/tokens";
+import { displayUserName } from "../utils/displayUserName";
 
 /** One letter for a single name; first + last initials when there are two+ words. */
 function initialsFromName(name) {
@@ -42,8 +43,8 @@ export default function UserMenuAvatar({
   const [anchor, setAnchor] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const btnRef = useRef(null);
 
-  const initial = initialsFromName(userName);
-  const displayName = (userName || "").trim() || "User";
+  const displayName = displayUserName(userName, "User");
+  const initial = initialsFromName(displayName);
   const labelFontSize = initial.length > 1 ? Math.round(size * 0.38) : undefined;
 
   useEffect(() => {

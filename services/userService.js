@@ -1,11 +1,12 @@
 import config from "../config";
+import { authHeaders } from "../utils/authToken";
 
 const API_URL = config.API_URL;
 
 async function _fetch(endpoint, options = {}) {
   const url = `${API_URL}${endpoint}`;
   const defaultOptions = {
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
   };
   try {
     const response = await fetch(url, { ...defaultOptions, ...options });

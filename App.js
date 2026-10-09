@@ -43,7 +43,7 @@ function stackToastLabel(location) {
   const loc = String(location || '').trim();
   if (!loc) return '';
   const m = loc.toUpperCase().match(/(?:^C-|^CUSTOM-)?([A-Z])$/);
-  return m?.[1] ? `Custom-${m[1]}` : loc;
+  return m?.[1] ? m[1] : loc;
 }
 import DashboardScreen from './screens/DashboardScreen';
 import ScanScreen from './screens/ScanScreen';
@@ -58,6 +58,7 @@ import UpcomingOrdersScreen from './screens/UpcomingOrdersScreen';
 import PlaceOrderScreen from './screens/PlaceOrderScreen';
 import StockPlanningScreen from './screens/StockPlanningScreen';
 import MessagesScreen from './screens/MessagesScreen';
+import StainFormulasScreen from './screens/StainFormulasScreen';
 import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
@@ -76,16 +77,78 @@ import {
   isAdminUser as isAdminAccount,
   isSalesRole,
 } from './utils/idleSession';
+import { loadAuthToken, clearAuthToken } from './utils/authToken';
 import UpdateRequiredModal from './components/UpdateRequiredModal';
 import {
   getLocalAppBuild,
-  fetchRemoteAppBuild,
+  getLocalReleaseChanges,
+  fetchRemoteAppVersion,
+  getSeenReleaseBuild,
 } from './utils/appVersion';
 import useIdleLogout from './utils/useIdleLogout';
 import LoginLogService from './services/loginLogService';
 
 const AUDIT_LOGS_CACHE_KEY = '@paint_inventory_audit_logs_v1';
 const AUDIT_LOGS_FETCH_LIMIT = 750;
+
+/** Web addresses for screens that open on their own. Item detail and an in-progress check-in stay off the URL. */
+const WEB_SCREEN_HASH = {
+  home: '/dashboard',
+  list: '/inventory',
+  qrscan: '/check-in',
+  add: '/add-item',
+  placeOrder: '/place-order',
+  stockPlanning: '/stock',
+  orders: '/orders',
+  stainFormulas: '/stain-formulas',
+  messages: '/messages',
+  materialUsage: '/material-usage',
+  wasteTracking: '/waste-tracking',
+  lineup: '/lineup',
+  reports: '/reports',
+  settings: '/settings',
+};
+
+const WEB_HASH_SCREEN = {
+  '/': 'home',
+  '/dashboard': 'home',
+  '/inventory': 'list',
+  '/check-in': 'qrscan',
+  '/add-item': 'add',
+  '/place-order': 'placeOrder',
+  '/stock': 'stockPlanning',
+  '/orders': 'orders',
+  '/stain-formulas': 'stainFormulas',
+  '/messages': 'messages',
+  '/material-usage': 'materialUsage',
+  '/waste-tracking': 'wasteTracking',
+  '/lineup': 'lineup',
+  '/reports': 'reports',
+  '/settings': 'settings',
+};
+
+const ADMIN_WEB_SCREENS = new Set([
+  'add',
+  'placeOrder',
+  'stockPlanning',
+  'orders',
+  'messages',
+  'reports',
+]);
+
+function normalizeWebHash(raw) {
+  const hash = String(raw || '').replace(/^#/, '') || '/';
+  const path = (hash.startsWith('/') ? hash : `/${hash}`).split('?')[0];
+  return path.replace(/\/+$/, '') || '/';
+}
+
+function screenFromWebHash(raw, { isAdmin, isSales }) {
+  const screen = WEB_HASH_SCREEN[normalizeWebHash(raw)];
+  if (!screen) return null;
+  if (isSales && screen !== 'list' && screen !== 'settings') return null;
+  if (ADMIN_WEB_SCREENS.has(screen) && !isAdmin) return null;
+  return screen;
+}
 
 export default function App() {
   const isWeb = Platform.OS === 'web';
@@ -106,15 +169,21 @@ export default function App() {
   const [materialUsageOvertime, setMaterialUsageOvertime] = useState(false);
   const [userName, setUserName] = useState(null);
   const [userRole, setUserRole] = useState('user');
+  const [sessionReady, setSessionReady] = useState(false);
   const [updateRequired, setUpdateRequired] = useState(false);
-  const isAdminUser = isAdminAccount(userName);
+  const [updateBuild, setUpdateBuild] = useState(0);
+  const [updateChanges, setUpdateChanges] = useState([]);
+  const [whatsNewVisible, setWhatsNewVisible] = useState(false);
+  const isAdminUser = isAdminAccount(userName) || userRole === 'admin';
   const isSales = isSalesRole(userRole) && !isAdminUser;
   /** Admin can preview the standard-user UI without signing out. */
   const [previewStandardView, setPreviewStandardView] = useState(false);
   const isAdmin = isAdminUser && !previewStandardView;
-  const actorName = isAdminUser ? 'Admin' : (userName || 'unknown');
+  const actorName = isAdminAccount(userName) ? 'Admin' : (userName || 'unknown');
   const [pendingFeedbackCount, setPendingFeedbackCount] = useState(0);
   const prevPendingFeedbackRef = useRef(null);
+  const currentScreenRef = useRef(currentScreen);
+  currentScreenRef.current = currentScreen;
   const idleLogoutTriggeredRef = useRef(false);
   const [isDarkMode, setIsDarkMode] = useState(true); // Default to dark mode
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -153,8 +222,6 @@ export default function App() {
   const [navDrawerOpen, setNavDrawerOpen] = useState(false);
   const [lineupAlert, setLineupAlert] = useState(null);
   const lineupAlertInitializedRef = useRef(false);
-  const currentScreenRef = useRef(currentScreen);
-  currentScreenRef.current = currentScreen;
   const paperTheme = isDarkMode ? darkTheme : lightTheme;
   const embeddedInShell = shouldUseShell(currentScreen);
 
@@ -290,41 +357,6 @@ export default function App() {
     } else if (screen === 'orders') {
       setOrdersInitialFilter(null);
     }
-    if (screen === 'materialUsage' && isWeb && typeof window !== 'undefined') {
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${window.location.search || ''}#/material-usage`,
-      );
-    } else if (screen === 'wasteTracking' && isWeb && typeof window !== 'undefined') {
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${window.location.search || ''}#/waste-tracking`,
-      );
-    } else if (screen === 'lineup' && isWeb && typeof window !== 'undefined') {
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${window.location.search || ''}#/lineup`,
-      );
-    } else if (screen === 'reports' && isWeb && typeof window !== 'undefined') {
-      window.history.replaceState(
-        null,
-        '',
-        `${window.location.pathname}${window.location.search || ''}#/reports`,
-      );
-    } else if (
-      (screen === 'home' || screen === 'list') &&
-      isWeb &&
-      typeof window !== 'undefined'
-    ) {
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + (window.location.search || ''),
-      );
-    }
     setPreviousScreen(currentScreen);
     setCurrentScreen(screen);
   };
@@ -390,8 +422,11 @@ export default function App() {
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         stockPlanning: 'Stock & week order',
+        stainFormulas: 'Stain Formulas',
         messages: 'Messages',
         list: 'Inventory',
+        qrscan: 'Check In / Check Out',
+        add: 'Add Item',
         reports: 'Reports',
         settings: 'Settings',
         home: 'Dashboard',
@@ -400,41 +435,46 @@ export default function App() {
     }
   }, [currentScreen]);
 
-  // Hash routing: #/material-usage opens Material Usage (all users)
+  const openHashedScreen = (screen) => {
+    if (!screen) return null;
+    if (screen === 'materialUsage') setMaterialUsageVisited(true);
+    if (screen === 'messages' && isAdminUser) {
+      setPendingFeedbackCount(0);
+      prevPendingFeedbackRef.current = 0;
+      markFeedbackSeen().catch(() => {});
+    }
+    if (screen === 'orders') setOrdersInitialFilter(null);
+    return screen;
+  };
+
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    if (!isWeb || typeof window === 'undefined' || !sessionReady || !userName) return;
+    if (currentScreen === 'login') return;
+    const hashPath = WEB_SCREEN_HASH[currentScreen];
+    if (!hashPath) return;
+    const nextHash = `#${hashPath}`;
+    if (window.location.hash === nextHash) return;
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search || ''}${nextHash}`,
+    );
+  }, [isWeb, sessionReady, userName, currentScreen]);
+
+  useEffect(() => {
+    if (!isWeb || typeof window === 'undefined') return undefined;
     const applyHash = () => {
-      const hash = (window.location.hash || '').replace(/^#/, '') || '/';
-      const path = hash.startsWith('/') ? hash : `/${hash}`;
-      if (path === '/material-usage' && userName != null) {
-        setMaterialUsageVisited(true);
-        setCurrentScreen('materialUsage');
-      } else if (path === '/waste-tracking' && userName != null) {
-        setCurrentScreen('wasteTracking');
-      } else if (path === '/lineup' && userName != null) {
-        setCurrentScreen('lineup');
-      } else if (path === '/reports' && userName != null && userName === 'admin123') {
-        setCurrentScreen('reports');
-      }
+      if (!userName) return;
+      const screen = screenFromWebHash(window.location.hash, { isAdmin, isSales });
+      if (!screen || screen === currentScreenRef.current) return;
+      openHashedScreen(screen);
+      setPreviousScreen(currentScreenRef.current);
+      setNavDrawerOpen(false);
+      setCurrentScreen(screen);
     };
-    applyHash();
-    const onHashChange = () => {
-      const h = (window.location.hash || '').replace(/^#/, '') || '/';
-      const p = h.startsWith('/') ? h : `/${h}`;
-      if (p === '/material-usage' && userName != null) {
-        setMaterialUsageVisited(true);
-        setCurrentScreen('materialUsage');
-      } else if (p === '/waste-tracking' && userName != null) {
-        setCurrentScreen('wasteTracking');
-      } else if (p === '/lineup' && userName != null) {
-        setCurrentScreen('lineup');
-      } else if (p === '/reports' && userName != null && userName === 'admin123') {
-        setCurrentScreen('reports');
-      }
-    };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, [userName]);
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, [isWeb, userName, isAdmin, isSales]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof document === "undefined") return undefined;
@@ -514,7 +554,7 @@ export default function App() {
   };
 
   const persistRole = async (name, role) => {
-    const storedRole = isAdminAccount(name)
+    const storedRole = isAdminAccount(name) || role === 'admin'
       ? 'admin'
       : isSalesRole(role)
         ? 'sales'
@@ -525,10 +565,15 @@ export default function App() {
 
   const checkAppVersion = useCallback(async () => {
     try {
-      const remote = await fetchRemoteAppBuild();
+      const remote = await fetchRemoteAppVersion();
       const local = getLocalAppBuild();
-      if (remote > 0 && local > 0 && remote > local) {
+      if (remote.build > 0 && local > 0 && remote.build > local) {
+        setUpdateBuild(remote.build);
+        setUpdateChanges(
+          remote.changes.length ? remote.changes : getLocalReleaseChanges(),
+        );
         setUpdateRequired(true);
+        setWhatsNewVisible(false);
       }
     } catch {
       // Offline / API down: do not block the session.
@@ -544,20 +589,28 @@ export default function App() {
         await recordUserActivity();
         idleLogoutTriggeredRef.current = false;
         setUserName(stored);
-        setUserRole(
-          isAdminAccount(stored)
-            ? 'admin'
-            : isSalesRole(storedRole)
-              ? 'sales'
-              : 'user',
-        );
-        setCurrentScreen(isAdminAccount(stored) ? 'home' : 'list');
+        await loadAuthToken();
+        const restoredRole = isAdminAccount(stored) || storedRole === 'admin'
+          ? 'admin'
+          : isSalesRole(storedRole)
+            ? 'sales'
+            : 'user';
+        setUserRole(restoredRole);
+        const admin = restoredRole === 'admin';
+        const sales = restoredRole === 'sales';
+        const hashed = isWeb
+          ? screenFromWebHash(window.location.hash, { isAdmin: admin, isSales: sales })
+          : null;
+        if (hashed === 'materialUsage') setMaterialUsageVisited(true);
+        setCurrentScreen(hashed || (admin ? 'home' : 'list'));
       } else {
         setCurrentScreen('login');
       }
     } catch (error) {
       console.error('Load user error:', error);
       setCurrentScreen('login');
+    } finally {
+      setSessionReady(true);
     }
   };
 
@@ -571,12 +624,19 @@ export default function App() {
     idleLogoutTriggeredRef.current = false;
     setPreviewStandardView(false);
     setUserName(trimmed);
-    setCurrentScreen(isAdminAccount(trimmed) ? 'home' : 'list');
+    const admin = isAdminAccount(trimmed) || role === 'admin';
+    const sales = isSalesRole(role) && !admin;
+    const hashed = isWeb
+      ? screenFromWebHash(window.location.hash, { isAdmin: admin, isSales: sales })
+      : null;
+    if (hashed === 'materialUsage') setMaterialUsageVisited(true);
+    setCurrentScreen(hashed || (admin ? 'home' : 'list'));
   };
 
   const handleSwitchUser = async () => {
     await AsyncStorage.removeItem('@inventory_user_name');
     await AsyncStorage.removeItem('@inventory_user_role');
+    await clearAuthToken();
     await clearUserActivity();
     setPreviewStandardView(false);
     setUserName(null);
@@ -585,6 +645,13 @@ export default function App() {
     setPreviousScreen('home');
     setMaterialUsageVisited(false);
     setCurrentScreen('login');
+    if (isWeb && typeof window !== 'undefined' && window.location.hash) {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}`,
+      );
+    }
   };
 
   const handleIdleLogout = useCallback(async () => {
@@ -592,6 +659,7 @@ export default function App() {
     idleLogoutTriggeredRef.current = true;
     await AsyncStorage.removeItem('@inventory_user_name');
     await AsyncStorage.removeItem('@inventory_user_role');
+    await clearAuthToken();
     await clearUserActivity();
     setUserName(null);
     setUserRole('user');
@@ -599,6 +667,13 @@ export default function App() {
     setPreviousScreen('home');
     setMaterialUsageVisited(false);
     setCurrentScreen('login');
+    if (isWeb && typeof window !== 'undefined' && window.location.hash) {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search || ''}`,
+      );
+    }
     Alert.alert(
       'Session ended',
       'You were logged out after 2 hours of inactivity.',
@@ -708,6 +783,24 @@ export default function App() {
     refreshReceiveOrders(false);
     refreshAuditLogs(false);
   }, [userName, refreshReceiveOrders, refreshAuditLogs]);
+
+  useEffect(() => {
+    if (!userName || updateRequired) return undefined;
+    let cancelled = false;
+    (async () => {
+      const local = getLocalAppBuild();
+      const notes = getLocalReleaseChanges();
+      if (!local || notes.length === 0) return;
+      const seen = await getSeenReleaseBuild();
+      if (cancelled || seen >= local) return;
+      setUpdateBuild(local);
+      setUpdateChanges(notes);
+      setWhatsNewVisible(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userName, updateRequired]);
 
   useEffect(() => {
     checkAppVersion();
@@ -1969,6 +2062,16 @@ export default function App() {
             onOpenPlaceOrder={() => navigateTo('placeOrder')}
           />
         );
+      case 'stainFormulas':
+        if (isSales) return null;
+        return (
+          <StainFormulasScreen
+            userName={actorName}
+            isAdmin={isAdmin}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+          />
+        );
       case 'messages':
         if (!isAdmin) {
           return null;
@@ -1988,6 +2091,7 @@ export default function App() {
           <WasteTrackingScreen
             userName={actorName}
             isAdmin={isAdmin}
+            inventory={inventory}
             embeddedInShell={embeddedInShell}
             formRefreshKey={formRefreshKey}
             onBack={() => navigateTo('home')}
@@ -2295,7 +2399,19 @@ export default function App() {
         <ToastHost />
         <ConfirmHost />
         <FeedbackHost />
-        <UpdateRequiredModal visible={updateRequired} />
+        <UpdateRequiredModal
+          visible={updateRequired}
+          blocking
+          build={updateBuild}
+          changes={updateChanges}
+        />
+        <UpdateRequiredModal
+          visible={whatsNewVisible && !updateRequired}
+          blocking={false}
+          build={updateBuild}
+          changes={updateChanges}
+          onDismiss={() => setWhatsNewVisible(false)}
+        />
         <Portal>
           <Dialog
             visible={!!lineupAlert}

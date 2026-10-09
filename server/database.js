@@ -644,6 +644,10 @@ class Database {
       CREATE INDEX IF NOT EXISTS idx_app_feedback_user ON app_feedback (user_name)
     `);
     console.log("App feedback table ready");
+
+    const stainStore = require("./stainFormulasStore");
+    await stainStore.ensureStainTables(this.pool);
+    await stainStore.seedDemoFormula(this.pool);
   }
 
   async getAllItems() {
@@ -1141,11 +1145,17 @@ class Database {
     );
   }
 
-  async getAuditLogs(limit = 100) {
-    const result = await this.pool.query(
-      "SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT $1",
-      [limit],
-    );
+  async getAuditLogs(limit = 100, itemId = null) {
+    const who = itemId != null ? String(itemId).trim() : "";
+    const result = who
+      ? await this.pool.query(
+          `SELECT * FROM audit_log WHERE "itemId" = $1 ORDER BY timestamp DESC LIMIT $2`,
+          [who, limit],
+        )
+      : await this.pool.query(
+          "SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT $1",
+          [limit],
+        );
     return result.rows.map((row) => ({
       ...row,
       details:
@@ -1395,13 +1405,13 @@ class Database {
     return {
       id: row.id,
       createdAt: row.created_at,
-      userName: row.user_name,
+      userName: String(row.user_name || "").trim().toLowerCase() === "admin123" ? "ADMIN" : row.user_name,
       message: row.message,
       category: row.category || "feedback",
       status: row.status || "pending",
       platform: row.platform || "",
       closedAt: row.closed_at,
-      closedBy: row.closed_by,
+      closedBy: String(row.closed_by || "").trim().toLowerCase() === "admin123" ? "ADMIN" : row.closed_by,
     };
   }
 
@@ -1589,7 +1599,8 @@ class Database {
     if (pin.length < 3) {
       return { success: false, error: "Password must be at least 3 characters" };
     }
-    const safeRole = role === "sales" ? "sales" : "user";
+    const requested = String(role || "").toLowerCase();
+    const safeRole = requested === "sales" ? "sales" : requested === "admin" ? "admin" : "user";
     try {
       const passwordHash = await this._hashPassword(pin);
       const result = await this.pool.query(
@@ -1715,7 +1726,25 @@ class Database {
     if (name.toLowerCase() === "admin123") {
       return { success: false, error: "Cannot change the admin account type" };
     }
-    const safeRole = role === "sales" ? "sales" : "user";
+    const requested = String(role || "").toLowerCase();
+    const safeRole = requested === "sales" ? "sales" : requested === "admin" ? "admin" : "user";
+    if (safeRole !== "admin") {
+      const current = await this.pool.query(
+        `SELECT role FROM app_users WHERE LOWER(user_name) = LOWER($1)`,
+        [name],
+      );
+      if (current.rows[0]?.role === "admin") {
+        const admins = await this.pool.query(
+          `SELECT COUNT(*)::int AS n FROM app_users WHERE role = 'admin'`,
+        );
+        if ((admins.rows[0]?.n || 0) <= 1) {
+          return {
+            success: false,
+            error: "Keep at least one admin account that can manage roles.",
+          };
+        }
+      }
+    }
     const result = await this.pool.query(
       `UPDATE app_users
        SET role = $2

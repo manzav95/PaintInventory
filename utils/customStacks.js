@@ -1,4 +1,4 @@
-/** Custom paint/stain stacks: stored as C-A … C-Z; dropdown shows A–Z; cards show Custom-A. */
+/** Custom paint/stain stacks: stored as C-A … C-Z; shown as the letter only (A–Z). */
 
 export const CUSTOM_TYPES = ["custom_paint", "custom_stain"];
 
@@ -43,9 +43,9 @@ export function customStackGroupLetter(itemOrLocation) {
   return stackLetterFromLocation(locStr);
 }
 
-/** Inventory card / list display: Custom-A */
+/** Inventory card / list display: A */
 export function formatCustomStackDisplay(location) {
-  return `Custom-${stackLetterFromLocation(location)}`;
+  return stackLetterFromLocation(location);
 }
 
 /** Display helper for any item location. */

@@ -18,6 +18,7 @@ import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import { listFeedback, updateFeedbackStatus, subscribeFeedbackChanged } from "../utils/feedback";
 import showToast from "../utils/showToast";
 import { radius } from "../theme/tokens";
+import { displayUserName } from "../utils/displayUserName";
 
 function formatWhen(ts) {
   if (!ts) return "—";
@@ -194,7 +195,7 @@ export default function MessagesScreen({
                           { color: theme.colors.onSurface },
                         ]}
                       >
-                        {row.userName || "Anonymous"}
+                        {displayUserName(row.userName, "Anonymous")}
                       </Text>
                       <Text
                         style={{
@@ -227,7 +228,7 @@ export default function MessagesScreen({
                     >
                       {formatWhen(row.createdAt)}
                       {closed && row.closedBy
-                        ? ` · closed by ${row.closedBy}`
+                        ? ` · closed by ${displayUserName(row.closedBy)}`
                         : ""}
                     </Text>
                     <View style={styles.actions}>

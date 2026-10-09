@@ -25,6 +25,7 @@ import ScrollFrame from "../components/ScrollFrame";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import { AppEmptyState, AppText } from "../components/ui";
 import showToast from "../utils/showToast";
+import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
 import { LINEUP_FORM_HELP } from "../constants/formHelpContent";
 import LineupService, {
@@ -695,7 +696,7 @@ export default function LineupScreen({
                     ]}
                   >
                     {row.laps === 2 ? "2 laps" : "1 lap"} · Start cart{" "}
-                    {row.cart_number || "—"} · {row.user_name || "Unknown"}
+                    {row.cart_number || "—"} · {displayUserName(row.user_name, "Unknown")}
                   </Text>
 
                   {userName ? (

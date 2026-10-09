@@ -23,8 +23,27 @@ import {
   formatCustomStackDisplay,
   isCustomStackLocation,
 } from "../utils/customStacks";
+import { displayUserName } from "../utils/displayUserName";
 
-const THREE_MONTHS_MS = 3 * 30 * 24 * 60 * 60 * 1000;
+const RANGE_OPTIONS = [
+  { value: "3", label: "3 months" },
+  { value: "12", label: "12 months" },
+  { value: "all", label: "Lifetime" },
+];
+
+function rangeLabel(range) {
+  if (range === "12") return "Last 12 months";
+  if (range === "all") return "Lifetime";
+  return "Last 3 months";
+}
+
+function cutoffForRange(range) {
+  if (range === "all") return null;
+  const months = range === "12" ? 12 : 3;
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.getTime();
+}
 
 function formatLocationLabel(loc) {
   const s = String(loc || "").trim();
@@ -158,7 +177,7 @@ function getTotalQuantity(action, details) {
 
 function getDisplayUserName(log) {
   const u = (log.userName || "").trim().toLowerCase();
-  if (u && u !== "unknown") return log.userName;
+  if (u && u !== "unknown") return displayUserName(log.userName);
   const adminOnly =
     ["add", "change_id", "set_next_id", "set_min_quantity", "delete"].includes(
       log.action,
@@ -227,19 +246,22 @@ export default function ItemTransactionHistoryScreen({
   const isWeb = Platform.OS === "web";
   const isDesktop = isWeb && width >= 700;
   const [activeTab, setActiveTab] = useState("checks");
+  const [range, setRange] = useState("3");
   const [logs, setLogs] = useState([]);
   const [usageLogs, setUsageLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const cutoff = useMemo(() => Date.now() - THREE_MONTHS_MS, []);
+  const cutoff = useMemo(() => cutoffForRange(range), [range]);
+  const periodLabel = rangeLabel(range);
 
   const loadChecks = useCallback(async () => {
-    const all = await AuditService.list(2000);
     const itemId = item?.id != null ? String(item.id) : "";
+    const all = await AuditService.list(10000, { itemId });
     let filtered = (Array.isArray(all) ? all : [])
       .filter((log) => String(log.itemId) === itemId)
       .filter((log) => {
+        if (cutoff == null) return true;
         const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
         return t >= cutoff;
       })
@@ -254,14 +276,16 @@ export default function ItemTransactionHistoryScreen({
       (item?.name && String(item.name).trim()) ||
       (item?.color && String(item.color).trim()) ||
       "";
-    const list = await MaterialUsageService.list(null, 2000, {
+    const list = await MaterialUsageService.list(null, 10000, {
       item_id: itemId || undefined,
       color_name: colorName || undefined,
       ...(isAdmin ? {} : { excludeAdmin: true }),
     });
-    const cutoffIso = new Date(cutoff).toISOString().slice(0, 10);
+    const cutoffIso =
+      cutoff == null ? null : new Date(cutoff).toISOString().slice(0, 10);
     const filtered = (Array.isArray(list) ? list : [])
       .filter((row) => {
+        if (!cutoffIso) return true;
         const d = String(row.entry_date || "").slice(0, 10);
         return !d || d >= cutoffIso;
       })
@@ -305,7 +329,13 @@ export default function ItemTransactionHistoryScreen({
 
   const checksContent =
     checksEmpty ? (
-      <AppEmptyState title="No check-in/out activity in the last 3 months" />
+      <AppEmptyState
+        title={
+          range === "all"
+            ? "No check-in/out activity"
+            : `No check-in/out activity in the last ${range === "12" ? "12" : "3"} months`
+        }
+      />
     ) : (
       logs.map((log, index) => {
         const showDayDividers = isAdmin && isDesktop;
@@ -415,7 +445,13 @@ export default function ItemTransactionHistoryScreen({
 
   const usageContent =
     usageEmpty ? (
-      <AppEmptyState title="No mix / usage history in the last 3 months" />
+      <AppEmptyState
+        title={
+          range === "all"
+            ? "No mix / usage history"
+            : `No mix / usage history in the last ${range === "12" ? "12" : "3"} months`
+        }
+      />
     ) : (
       usageLogs.map((row, index) => (
         <View
@@ -435,7 +471,7 @@ export default function ItemTransactionHistoryScreen({
             <Text
               style={[styles.user, { color: theme.colors.onSurfaceVariant }]}
             >
-              {row.user_name || "Unknown"}
+              {displayUserName(row.user_name, "Unknown")}
               {row.booth ? ` · ${row.booth}` : ""}
             </Text>
             <Text
@@ -495,8 +531,14 @@ export default function ItemTransactionHistoryScreen({
           {item.name || "Unnamed"}
         </Text>
         <Text style={[styles.itemId, { color: theme.colors.onSurfaceVariant }]}>
-          ID: {item.id} · Last 3 months
+          ID: {item.id} · {periodLabel}
         </Text>
+        <SegmentedButtons
+          value={range}
+          onValueChange={setRange}
+          style={styles.tabs}
+          buttons={RANGE_OPTIONS}
+        />
         <SegmentedButtons
           value={activeTab}
           onValueChange={setActiveTab}

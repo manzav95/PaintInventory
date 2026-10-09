@@ -207,6 +207,12 @@ export default function AppSidebar({
             active={currentScreen === "lineup"}
             onPress={() => onNavigate("lineup")}
           />
+          <NavButton
+            label="Stain Formulas"
+            icon="palette-swatch"
+            active={currentScreen === "stainFormulas"}
+            onPress={() => onNavigate("stainFormulas")}
+          />
           {isAdmin && (
             <>
               <NavButton

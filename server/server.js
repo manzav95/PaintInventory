@@ -758,7 +758,13 @@ app.post('/api/users/login', async (req, res) => {
     if (!result.success) {
       return res.status(401).json({ error: result.error || 'Login failed' });
     }
-    res.json(result);
+    const stainStore = require('./stainFormulasStore');
+    const token = await stainStore.createSession(
+      db.pool,
+      result.user.user_name,
+      result.user.role,
+    );
+    res.json({ ...result, token });
   } catch (error) {
     console.error('Error authenticating user:', error);
     res.status(500).json({ error: 'Failed to authenticate' });
@@ -773,7 +779,13 @@ app.post('/api/users/change-password', async (req, res) => {
     if (!result.success) {
       return res.status(400).json({ error: result.error || 'Failed to change password' });
     }
-    res.json(result);
+    const stainStore = require('./stainFormulasStore');
+    const token = await stainStore.createSession(
+      db.pool,
+      result.user.user_name,
+      result.user.role,
+    );
+    res.json({ ...result, token });
   } catch (error) {
     console.error('Error changing password:', error);
     res.status(500).json({ error: 'Failed to change password' });
@@ -782,6 +794,13 @@ app.post('/api/users/change-password', async (req, res) => {
 
 app.post('/api/users/:userName/role', async (req, res) => {
   try {
+    const stainStore = require('./stainFormulasStore');
+    const header = req.get('authorization') || '';
+    const token = header.replace(/^Bearer\s+/i, '').trim();
+    const session = await stainStore.getSession(db.pool, token);
+    if (!session || session.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin sign-in required.' });
+    }
     const result = await db.updateAppUserRole(req.params.userName, req.body?.role);
     if (!result.success) {
       return res.status(400).json({ error: result.error || 'Failed to update role' });
@@ -822,8 +841,13 @@ app.delete('/api/users/:userName', async (req, res) => {
 // Get audit logs (all transactions are stored in audit_log; limit only affects how many are returned per request)
 app.get('/api/audit', async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
-    const logs = await db.getAuditLogs(limit);
+    const itemId =
+      (req.query.itemId && String(req.query.itemId).trim()) ||
+      (req.query.item_id && String(req.query.item_id).trim()) ||
+      null;
+    const cap = itemId ? 20000 : 2000;
+    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, cap);
+    const logs = await db.getAuditLogs(limit, itemId);
     res.json(logs);
   } catch (error) {
     console.error('Error fetching audit logs:', error);
@@ -1052,7 +1076,6 @@ app.put('/api/lineup/:id/mixed', async (req, res) => {
 app.get('/api/material-usage', async (req, res) => {
   try {
     const booth = req.query.booth || null;
-    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, 2000);
     const fromDate = (req.query.from && String(req.query.from).trim()) || null;
     const toDate = (req.query.to && String(req.query.to).trim()) || null;
     const excludeAdmin = req.query.excludeAdmin === 'true' || req.query.excludeAdmin === '1';
@@ -1064,6 +1087,8 @@ app.get('/api/material-usage', async (req, res) => {
       (req.query.color_name && String(req.query.color_name).trim()) ||
       (req.query.colorName && String(req.query.colorName).trim()) ||
       null;
+    const cap = itemId || colorName ? 20000 : 2000;
+    const limit = Math.min(parseInt(req.query.limit || '500', 10) || 500, cap);
     const rows = await db.getMaterialUsage(booth, limit, fromDate, toDate, excludeAdmin, {
       itemId,
       colorName,
@@ -1366,6 +1391,20 @@ function readClientAppBuild() {
   }
 }
 
+function readReleaseChanges() {
+  try {
+    const filePath = path.join(__dirname, '..', 'release-notes.json');
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return Array.isArray(data?.changes)
+      ? data.changes
+          .map((line) => String(line || '').trim())
+          .filter((line) => line && !/^admin\b/i.test(line))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -1377,7 +1416,10 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/app-version', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ build: readClientAppBuild() });
+  res.json({
+    build: readClientAppBuild(),
+    changes: readReleaseChanges(),
+  });
 });
 
 // Helper function to generate Excel file
@@ -1457,7 +1499,7 @@ async function generateMaterialUsageExcel(fromDate, toDate) {
     'Qty (gal)': row.qty_gallons != null ? row.qty_gallons : '',
     'Catalyst (oz)': row.catalyst_oz != null ? row.catalyst_oz : '',
     Booth: row.booth || '',
-    User: row.user_name || '',
+    User: String(row.user_name || "").trim().toLowerCase() === "admin123" ? "ADMIN" : (row.user_name || ""),
   }));
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(excelData);
@@ -1653,6 +1695,8 @@ app.get('/api/feedback/status', async (req, res) => {
 });
 
 // Start server
+require('./stainFormulaRoutes').registerStainFormulaRoutes(app, db);
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`CURE API server running on http://0.0.0.0:${PORT}`);
   console.log(`Access from other devices: http://YOUR_IP:${PORT}`);

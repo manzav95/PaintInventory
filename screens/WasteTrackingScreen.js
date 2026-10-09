@@ -24,6 +24,7 @@ import ShakeView from "../components/ShakeView";
 import FormHelp from "../components/FormHelp";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import showToast from "../utils/showToast";
+import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
 import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
@@ -49,6 +50,11 @@ import {
 } from "../utils/wasteDrumConversion";
 import { colors } from "../theme/tokens";
 import { AppEmptyState } from "../components/ui";
+import {
+  formatCurrency,
+  wasteCategoryUnitPrices,
+  wasteTotalsDollars,
+} from "../utils/pricing";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -79,6 +85,7 @@ function parseInches(raw) {
 export default function WasteTrackingScreen({
   userName = "",
   isAdmin = false,
+  inventory = [],
   embeddedInShell = false,
   formRefreshKey = 0,
   onBack,
@@ -148,6 +155,14 @@ export default function WasteTrackingScreen({
     () => computeWasteSummary(records, todayPacificIso()),
     [records],
   );
+  const wastePrices = useMemo(
+    () => (isAdmin ? wasteCategoryUnitPrices(inventory) : null),
+    [isAdmin, inventory],
+  );
+  const wasteMoney = (totals) =>
+    isAdmin && wastePrices
+      ? formatCurrency(wasteTotalsDollars(totals, wastePrices))
+      : null;
   const alerts = useMemo(() => buildWasteAlerts(summary), [summary]);
   const weeks = useMemo(() => bundleWasteByWeek(records), [records]);
   const thisWeekMonday = useMemo(
@@ -398,7 +413,7 @@ export default function WasteTrackingScreen({
     );
     const ok = await confirmAction(
       "Delete waste record?",
-      `${formatMonthDayYear(row.entry_date)} · ${row.user_name || "—"}\nTotal ${formatGallonsTenths(total)} gal\n\nThis cannot be undone.`,
+      `${formatMonthDayYear(row.entry_date)} · ${displayUserName(row.user_name, "—")}\nTotal ${formatGallonsTenths(total)} gal\n\nThis cannot be undone.`,
       { confirmLabel: "Delete", destructive: true },
     );
     if (!ok) return;
@@ -613,6 +628,9 @@ export default function WasteTrackingScreen({
               >
                 YTD {summary.today.slice(0, 4)} ·{" "}
                 {formatGallonsTenths(summary.ytd.total)} gal
+                {wasteMoney(summary.ytd)
+                  ? ` · ${wasteMoney(summary.ytd)}`
+                  : ""}
               </Text>
               <Text
                 style={[
@@ -629,6 +647,9 @@ export default function WasteTrackingScreen({
               >
                 This month ({formatMonthLabel(summary.month)}) ·{" "}
                 {formatGallonsTenths(summary.thisMonth.total)} gal
+                {wasteMoney(summary.thisMonth)
+                  ? ` · ${wasteMoney(summary.thisMonth)}`
+                  : ""}
               </Text>
               <Text
                 style={[
@@ -644,6 +665,9 @@ export default function WasteTrackingScreen({
                 style={[styles.statTitle, { color: theme.colors.onSurface }]}
               >
                 This week · {formatGallonsTenths(summary.thisWeek.total)} gal
+                {wasteMoney(summary.thisWeek)
+                  ? ` · ${wasteMoney(summary.thisWeek)}`
+                  : ""}
               </Text>
               <Text
                 style={[
@@ -673,6 +697,7 @@ export default function WasteTrackingScreen({
                     ]}
                   >
                     {m.label}: {formatGallonsTenths(m.totals.total)} gal
+                    {wasteMoney(m.totals) ? ` · ${wasteMoney(m.totals)}` : ""}
                   </Text>
                 ))}
               </View>
@@ -780,6 +805,9 @@ export default function WasteTrackingScreen({
                         ]}
                       >
                         {formatGallonsTenths(week.totals.total)} gal
+                        {wasteMoney(week.totals)
+                          ? ` · ${wasteMoney(week.totals)}`
+                          : ""}
                       </Text>
                       {isAdmin ? (
                         <AppButton
@@ -865,7 +893,7 @@ export default function WasteTrackingScreen({
                                     { color: theme.colors.onSurface },
                                   ]}
                                 >
-                                  {r.user_name || "—"}
+                                  {displayUserName(r.user_name, "—")}
                                 </Text>
                                 <Text
                                   style={[

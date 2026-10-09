@@ -16,6 +16,7 @@ import AppButton from "./ui/AppButton";
 import LoginLogService from "../services/loginLogService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import ScrollFrame from "./ScrollFrame";
+import { displayUserName } from "../utils/displayUserName";
 
 function formatLoginTime(iso) {
   if (!iso) return "—";
@@ -31,9 +32,8 @@ function formatLoginTime(iso) {
   });
 }
 
-function displayUserName(userName) {
-  const n = String(userName ?? "").trim();
-  return n === "admin123" ? "Admin" : n || "Unknown";
+function loginDisplayName(userName) {
+  return displayUserName(userName, "Unknown");
 }
 
 export default function LoginHistoryModal({ visible, onDismiss }) {
@@ -136,7 +136,7 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
                   <Text
                     style={[styles.userName, { color: theme.colors.onSurface }]}
                   >
-                    {displayUserName(row.user_name)}
+                    {loginDisplayName(row.user_name)}
                   </Text>
                   <Text
                     style={[

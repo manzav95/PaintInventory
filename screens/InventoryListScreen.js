@@ -45,6 +45,7 @@ import {
   getMaterialTypeColor,
 } from "../utils/materialTypes";
 import showToast from "../utils/showToast";
+import { displayUserName } from "../utils/displayUserName";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
@@ -1960,7 +1961,7 @@ export default function InventoryListScreen({
                         hour: "2-digit",
                         minute: "2-digit",
                       },
-                    )} by ${item?.lastScannedBy || "unknown"}`
+                    )} by ${displayUserName(item?.lastScannedBy, "unknown")}`
                   : " "}
               </Text>
               ) : (

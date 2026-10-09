@@ -30,9 +30,18 @@ async function _fetch(endpoint, options = {}) {
 }
 
 class AuditService {
-  async list(limit = 500) {
+  async list(limit = 500, options = {}) {
     try {
-      const logs = await _fetch(`/api/audit?limit=${limit}`);
+      let opts = options;
+      let lim = limit;
+      if (limit && typeof limit === "object") {
+        opts = limit;
+        lim = opts.limit ?? 500;
+      }
+      const params = new URLSearchParams({ limit: String(lim) });
+      const itemId = opts?.itemId || opts?.item_id;
+      if (itemId) params.set("itemId", String(itemId));
+      const logs = await _fetch(`/api/audit?${params.toString()}`);
       return Array.isArray(logs) ? logs : [];
     } catch (error) {
       console.error('Audit list error:', error);

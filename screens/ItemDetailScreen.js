@@ -24,6 +24,7 @@ import PageHeader from "../components/PageHeader";
 import { getItemApMixingFlags } from "../utils/poItemLabels";
 import showAlert from "../utils/showAlert";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
+import { displayUserName } from "../utils/displayUserName";
 import {
   normalizeDateInput,
   formatRecycleDueFromLotDate,
@@ -302,7 +303,7 @@ export default function ItemDetailScreen({
           const dateStr = String(row.entry_date || "").slice(0, 10);
           const ts = dateStr ? new Date(`${dateStr}T12:00:00`).getTime() : 0;
           if (ts && ts < cutoff) continue;
-          const user = String(row.user_name || "Unknown").trim() || "Unknown";
+          const user = displayUserName(row.user_name, "Unknown");
           const gal = Number(row.qty_gallons) || 0;
           if (gal <= 0) continue;
           const prev = byUser.get(user) || {
@@ -830,7 +831,7 @@ export default function ItemDetailScreen({
         hour: "2-digit",
         minute: "2-digit",
       })}{" "}
-      by {item?.lastScannedBy || "unknown"}
+      by {displayUserName(item?.lastScannedBy, "unknown")}
     </Text>
   ) : null;
 
