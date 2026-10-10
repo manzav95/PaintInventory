@@ -35,6 +35,35 @@ function isHiddenAdminName(name) {
   return String(name || "").trim().toLowerCase() === HIDDEN_ADMIN_NAME;
 }
 
+/** Names are a first name plus a last initial, with or without a space. */
+function loginFirstName(name) {
+  const text = String(name || "").trim();
+  const spaced = text.split(/\s+/).filter(Boolean);
+  if (spaced.length > 1) return spaced[0].toLowerCase();
+  const stuck = text.match(/^(.*?)([A-Za-z])$/);
+  if (stuck && stuck[1].length > 1) return stuck[1].toLowerCase();
+  return text.toLowerCase();
+}
+
+/**
+ * Admins stay out of the list until the typed text is that person's full first name.
+ * A shared first name then shows the admin and the other account together.
+ */
+function filterLoginUsers(users, query) {
+  const q = String(query || "").trim().toLowerCase();
+  const typedFirst = q.split(/\s+/).filter(Boolean)[0] || "";
+  return users.filter((user) => {
+    const name = String(user.name || "");
+    const lower = name.toLowerCase();
+    const admin = String(user.role || "").toLowerCase() === "admin";
+    if (!admin) return !q || lower.includes(q);
+    const first = loginFirstName(name);
+    if (!q || typedFirst !== first) return false;
+    if (q.length > first.length) return lower.includes(q);
+    return true;
+  });
+}
+
 function openAdminGateFromTracker(setAdminGate, setSelectedName, setPassword, setMenuOpen) {
   setAdminGate(true);
   setSelectedName("");
@@ -70,8 +99,8 @@ export default function LoginScreen({ onLogin }) {
         const list = await UserService.list();
         if (!cancelled) {
           const names = (list || [])
-            .map((u) => u.user_name)
-            .filter((n) => n && !isHiddenAdminName(n));
+            .filter((u) => u?.user_name && !isHiddenAdminName(u.user_name))
+            .map((u) => ({ name: u.user_name, role: u.role || "user" }));
           setUsers(names);
         }
       } catch (e) {
@@ -94,11 +123,10 @@ export default function LoginScreen({ onLogin }) {
 
   const changingPassword = !!pendingUser;
 
-  const filteredUsers = useMemo(() => {
-    const q = selectedName.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((name) => String(name).toLowerCase().includes(q));
-  }, [users, selectedName]);
+  const filteredUsers = useMemo(
+    () => filterLoginUsers(users, selectedName),
+    [users, selectedName],
+  );
 
   const blurCloseTimerRef = useRef(null);
 
@@ -470,10 +498,10 @@ export default function LoginScreen({ onLogin }) {
                                   : "No users"}
                               </Text>
                             ) : (
-                              filteredUsers.map((name) => (
+                              filteredUsers.map((user) => (
                                 <Pressable
-                                  key={name}
-                                  onPress={() => pickName(name)}
+                                  key={user.name}
+                                  onPress={() => pickName(user.name)}
                                   style={({ pressed }) => [
                                     styles.nameRow,
                                     pressed && {
@@ -490,7 +518,7 @@ export default function LoginScreen({ onLogin }) {
                                     ]}
                                     numberOfLines={1}
                                   >
-                                    {name}
+                                    {user.name}
                                   </Text>
                                 </Pressable>
                               ))
