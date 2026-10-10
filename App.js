@@ -2069,6 +2069,7 @@ export default function App() {
             userName={actorName}
             isAdmin={isAdmin}
             embeddedInShell={embeddedInShell}
+            formRefreshKey={formRefreshKey}
             onBack={() => navigateTo('home')}
           />
         );

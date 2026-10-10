@@ -1,7 +1,8 @@
 "use strict";
 
 const store = require("./stainFormulasStore");
-const { parseStainExcelBuffer } = require("./stainFormulaParse");
+const { parseStainExcelBuffer, filenameNumbers, classificationFromNumber, workbookImages, applyFilenameHint } = require("./stainFormulaParse");
+const { parseHandwrittenFormula, ocrHandwrittenFormula } = require("./handwrittenFormula");
 const { workbookToPdf } = require("./stainFormulaPdf");
 
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -31,16 +32,90 @@ async function parseOne(pool, filename, buffer) {
     const duplicates = parsed.draft
       ? await store.findPossibleDuplicates(pool, parsed.draft)
       : [];
+    const images = await workbookImages(buffer);
+    const existing = parsed.draft?.formulaNumber
+      ? await store.findFormulaByNumber(pool, parsed.draft.formulaNumber)
+      : null;
+    if (existing) {
+      return {
+        filename,
+        ok: false,
+        duplicate: true,
+        warnings: [store.duplicateFormulaError(existing)],
+        draft: parsed.draft,
+        duplicates: [],
+        images: images.map((image) => ({
+          filename: image.filename,
+          mime: image.mime,
+          dataBase64: image.bytes.toString("base64"),
+        })),
+        sourceBase64: buffer.toString("base64"),
+      };
+    }
     return {
       filename,
       ok: !!parsed.ok,
       warnings: parsed.warnings || [],
       draft: parsed.draft,
       duplicates,
+      images: images.map((image) => ({
+        filename: image.filename,
+        mime: image.mime,
+        dataBase64: image.bytes.toString("base64"),
+      })),
       sourceBase64: buffer.toString("base64"),
     };
   }
+  if (isImage(filename)) {
+    let recognized = "";
+    try {
+      recognized = await ocrHandwrittenFormula(buffer);
+    } catch (error) {
+      recognized = "";
+    }
+    const parsed = parseHandwrittenFormula(recognized, filename);
+    const useful = parsed.draft.steps.length > 0 || (parsed.draft.formulaNumber && parsed.draft.formulaDate);
+    if (useful) {
+      const existing = parsed.draft.formulaNumber
+        ? await store.findFormulaByNumber(pool, parsed.draft.formulaNumber)
+        : null;
+      return {
+        filename,
+        ok: !existing && parsed.ok,
+        duplicate: !!existing,
+        warnings: existing ? [store.duplicateFormulaError(existing)] : parsed.warnings,
+        draft: parsed.draft,
+        duplicates: [],
+        sourceBase64: buffer.toString("base64"),
+      };
+    }
+  }
   if (/\.pdf$/i.test(filename) || isImage(filename)) {
+    const meta = {
+      formulaNumber: filenameNumbers(filename)[0] || "",
+      linkedNumbers: filenameNumbers(filename).slice(1),
+      colorName: "",
+    };
+    applyFilenameHint(meta, filename);
+    const existing = meta.formulaNumber ? await store.findFormulaByNumber(pool, meta.formulaNumber) : null;
+    if (existing) {
+      return {
+        filename,
+        ok: false,
+        duplicate: true,
+        warnings: [store.duplicateFormulaError(existing)],
+        draft: {
+          formulaNumber: meta.formulaNumber,
+          linkedNumbers: meta.linkedNumbers,
+          colorName: meta.colorName,
+          classification: classificationFromNumber(meta.formulaNumber),
+          materialForm: "unknown",
+          reviewStatus: "needs_review",
+          steps: [],
+        },
+        duplicates: [],
+      };
+    }
     return {
       filename,
       ok: true,
@@ -48,9 +123,10 @@ async function parseOne(pool, filename, buffer) {
         "This file was saved as the source. Text was not guessed from the image or PDF. Enter the formula, then approve it.",
       ],
       draft: {
-        formulaNumber: (filename.match(/(\d{3,6})/) || [])[1] || "",
-        colorName: "",
-        classification: "custom",
+        formulaNumber: meta.formulaNumber,
+        linkedNumbers: meta.linkedNumbers,
+        colorName: meta.colorName,
+        classification: classificationFromNumber(meta.formulaNumber),
         materialForm: "unknown",
         woodSpecies: "",
         woodType: "",
@@ -177,6 +253,36 @@ function registerStainFormulaRoutes(app, db) {
              VALUES ($1, $2, $3, $4, $5)`,
             [saved.formula.id, decoded.filename, "application/octet-stream", decoded.buffer, session.userName],
           );
+          if (isImage(decoded.filename)) {
+            const mime = /\.png$/i.test(decoded.filename) ? "image/png" : "image/jpeg";
+            await pool.query(
+              `INSERT INTO stain_formula_images
+               (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
+               VALUES ($1, $2, $3, $4, TRUE, $5, 0)`,
+              [saved.formula.id, "", mime, decoded.buffer, session.userName],
+            );
+            await pool.query(
+              `INSERT INTO stain_formula_notes (formula_id, body, category, pinned, critical, author_user)
+               VALUES ($1, $2, 'general', FALSE, FALSE, $3)`,
+              [saved.formula.id, "Uploaded from picture", session.userName],
+            );
+            saved.formula = await store.getFormula(pool, saved.formula.id);
+          }
+          if (isExcel(decoded.filename)) {
+            const images = await workbookImages(decoded.buffer);
+            for (let index = 0; index < images.length; index += 1) {
+              const image = images[index];
+              await pool.query(
+                `INSERT INTO stain_formula_images
+                 (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [saved.formula.id, "From Excel", image.mime, image.bytes, index === 0, session.userName, index],
+              );
+            }
+            if (images.length) {
+              saved.formula = await store.getFormula(pool, saved.formula.id);
+            }
+          }
         }
       }
       res.json(saved);
@@ -242,8 +348,46 @@ function registerStainFormulaRoutes(app, db) {
         }
         return res.json({ batch: true, results });
       }
-      const one = await parseOne(pool, decoded.filename, decoded.buffer);
-      res.json({ batch: false, results: [one] });
+      try {
+        const one = await parseOne(pool, decoded.filename, decoded.buffer);
+        res.json({ batch: false, results: [one] });
+      } catch (error) {
+        console.error("stain import file:", error);
+        res.json({
+          batch: false,
+          results: [{
+            filename: decoded.filename,
+            ok: false,
+            warnings: ["This Excel file could not be read automatically. Type the formula in, and the file is still kept with it."],
+            draft: (() => {
+              const meta = {
+                formulaNumber: filenameNumbers(decoded.filename)[0] || "",
+                linkedNumbers: filenameNumbers(decoded.filename).slice(1),
+                colorName: "",
+              };
+              applyFilenameHint(meta, decoded.filename);
+              return {
+              formulaNumber: meta.formulaNumber,
+              linkedNumbers: meta.linkedNumbers,
+              colorName: meta.colorName,
+              classification: classificationFromNumber(meta.formulaNumber),
+              materialForm: "unknown",
+              woodSpecies: "",
+              woodType: "",
+              formulaDate: "",
+              jobNumber: "",
+              doorStyle: "",
+              sheen: "",
+              reviewStatus: "needs_review",
+              steps: [{ stepNumber: 1, processName: "", notes: "", ingredients: [] }],
+              sourceFilename: decoded.filename,
+              };
+            })(),
+            duplicates: [],
+            sourceBase64: decoded.buffer.toString("base64"),
+          }],
+        });
+      }
     } catch (error) {
       console.error("stain import:", error);
       res.status(500).json({ error: error.message || "Import failed" });

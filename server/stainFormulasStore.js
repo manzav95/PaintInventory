@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { parseStainExcelBuffer, classificationFromColor } = require("./stainFormulaParse");
+const { parseStainExcelBuffer, classificationFromNumber } = require("./stainFormulaParse");
 
 const SPECIES = [
   "White Oak",
@@ -300,7 +300,7 @@ async function listFormulas(pool, query) {
       OR LOWER(special_notes) LIKE $${n}
     )`);
   }
-  if (classification === "standard" || classification === "custom") {
+  if (classification === "standard" || classification === "custom" || classification === "paint") {
     params.push(classification);
     where.push(`classification = $${params.length}`);
   }
@@ -527,17 +527,29 @@ async function unlinkColors(pool, left, right) {
   return { success: true };
 }
 
+function formulaDateValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const slash = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!slash) return "";
+  const year = slash[3].length === 2 ? `20${slash[3]}` : slash[3];
+  const month = slash[1].padStart(2, "0");
+  const day = slash[2].padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function cleanDraft(body) {
   const steps = Array.isArray(body.steps) ? body.steps : [];
   const wood = normalizeWood(body.woodType, body.woodSpecies, body.materialForm);
   return {
     formulaNumber: String(body.formulaNumber || body.formula_number || "").trim(),
     colorName: String(body.colorName || "").trim(),
-    classification: classificationFromColor(body.colorName),
+    classification: classificationFromNumber(body.formulaNumber || body.formula_number),
     materialForm: wood.materialForm,
     woodSpecies: wood.woodSpecies,
     woodType: wood.woodType,
-    formulaDate: String(body.formulaDate || "").slice(0, 10),
+    formulaDate: formulaDateValue(body.formulaDate),
     jobNumber: String(body.jobNumber || "").trim(),
     doorStyle: String(body.doorStyle || "").trim(),
     constructionStyle: String(body.constructionStyle || "").trim(),
@@ -548,16 +560,23 @@ function cleanDraft(body) {
     developer: String(body.developer || "").trim(),
     salesperson: String(body.salesperson || "").trim(),
     specialNotes: String(body.specialNotes || "").trim(),
-    importantFields: Array.isArray(body.importantFields) ? body.importantFields.map(String) : [],
-    reviewStatus: body.reviewStatus === "approved" ? "approved" : "needs_review",
+    importantFields: [],
+    reviewStatus: body.reviewStatus === "pending"
+      ? "pending"
+      : body.reviewStatus === "approved"
+        ? "approved"
+        : "needs_review",
     warnings: visibleWarnings(Array.isArray(body.warnings) ? body.warnings.map(String) : []),
     isDemo: !!body.isDemo,
     steps: steps.map((step, index) => ({
       stepNumber: Number(step.stepNumber),
       processName: String(step.processName || "").trim(),
-      notes: String(step.notes || "").trim(),
-      important: !!step.important,
-      importantNotes: String(step.importantNotes || "").trim(),
+      notes: "",
+      important: !!(step.important || step.importantNotes || step.notes),
+      importantNotes: [step.importantNotes, step.notes]
+        .map((item) => String(item || "").trim())
+        .filter((item, index, list) => item && list.indexOf(item) === index)
+        .join("\n"),
       sortIndex: index,
       ingredients: (step.ingredients || []).map((ing, i) => ({
         name: String(ing.name || "").trim(),
@@ -599,9 +618,33 @@ async function insertSteps(client, formulaId, steps) {
   }
 }
 
+async function findFormulaByNumber(pool, formulaNumber, excludeId) {
+  const name = String(formulaNumber || "").trim();
+  if (!name) return null;
+  const result = await pool.query(
+    `SELECT id, formula_number, wood_type, wood_species
+     FROM stain_formulas
+     WHERE LOWER(formula_number) = LOWER($1)
+       AND ($2::int IS NULL OR id <> $2)
+     LIMIT 1`,
+    [name, excludeId ? Number(excludeId) : null],
+  );
+  return result.rows[0] || null;
+}
+
+function duplicateFormulaError(row) {
+  const name = row.formula_number;
+  const wood = row.wood_type === "veneer" ? "Veneer" : row.wood_type === "solid" ? "Solid" : "";
+  const species = String(row.wood_species || "").trim();
+  const detail = [species, wood].filter(Boolean).join(", ");
+  return `${name} is already in the library${detail ? ` (${detail})` : ""}. Edit that formula instead of uploading it again.`;
+}
+
 async function saveFormula(pool, body, userName, existingId) {
   const draft = cleanDraft(body);
   if (!draft.formulaNumber) return { success: false, error: "Formula number is required" };
+  const existing = await findFormulaByNumber(pool, draft.formulaNumber, existingId);
+  if (existing) return { success: false, error: duplicateFormulaError(existing) };
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -644,7 +687,7 @@ async function saveFormula(pool, body, userName, existingId) {
            color_status, developer, salesperson, special_notes, important_fields, review_status, is_demo, warnings,
            created_by, updated_by
          ) VALUES (
-           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22::jsonb,$23,$23
+           $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21::jsonb,$22,$22
          ) RETURNING id`,
         [
           draft.formulaNumber, draft.colorName, draft.classification, draft.materialForm,
@@ -658,6 +701,14 @@ async function saveFormula(pool, body, userName, existingId) {
     }
     await insertSteps(client, id, draft.steps);
     await client.query("COMMIT");
+    const linked = Array.isArray(body.linkedNumbers) ? body.linkedNumbers : [];
+    const seen = new Set();
+    for (const item of linked) {
+      const number = String(item || "").trim().replace(/^#+/, "");
+      if (!number || number === draft.formulaNumber || seen.has(number)) continue;
+      seen.add(number);
+      await linkColors(pool, draft.formulaNumber, number, userName);
+    }
     return { success: true, formula: await getFormula(pool, id) };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -742,6 +793,53 @@ function describeChanges(prev, next) {
   return lines.join("\n") || "Saved with no field changes.";
 }
 
+async function repairMisreadFormulaMarks(pool) {
+  await pool.query(`UPDATE stain_formulas SET important_fields = '[]'::jsonb WHERE important_fields <> '[]'::jsonb`);
+  const steps = await pool.query(`
+    SELECT s.id, s.important_notes, s.notes
+    FROM stain_formula_steps s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM stain_formula_ingredients i
+      WHERE i.step_id = s.id
+        AND (
+          btrim(COALESCE(i.name, '')) <> ''
+          OR btrim(COALESCE(i.quantity_text, '')) <> ''
+          OR btrim(COALESCE(i.raw_line, '')) <> ''
+        )
+    )
+    AND (btrim(COALESCE(s.important_notes, '')) <> '' OR btrim(COALESCE(s.notes, '')) <> '')
+  `);
+  for (const step of steps.rows) {
+    const seen = new Set();
+    const lines = [step.important_notes, step.notes]
+      .flatMap((text) => String(text || "").split(/\n/))
+      .map((text) => text.trim())
+      .filter((text) => {
+        const key = text.toLowerCase();
+        if (!text || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    for (let index = 0; index < lines.length; index += 1) {
+      await pool.query(
+        `INSERT INTO stain_formula_ingredients
+         (step_id, name, quantity_text, unit, raw_line, uncertain, important, sort_index)
+         VALUES ($1, $2, '', '', $2, FALSE, FALSE, $3)`,
+        [step.id, lines[index], index],
+      );
+    }
+    await pool.query(
+      `UPDATE stain_formula_steps
+       SET notes = '', important_notes = '', important = FALSE
+       WHERE id = $1`,
+      [step.id],
+    );
+  }
+  if (steps.rows.length) {
+    console.log(`Moved ${steps.rows.length} process notes with no colorants onto the step`);
+  }
+}
+
 async function seedDemoFormula(pool) {
   const existing = await pool.query(
     `SELECT id FROM stain_formulas WHERE is_demo = TRUE AND formula_number = '1526' LIMIT 1`,
@@ -771,6 +869,7 @@ async function seedDemoFormula(pool) {
   );
   console.log("Seeded demo stain formula 1526");
   }
+  await repairMisreadFormulaMarks(pool);
   await linkColors(pool, "1526", "1401", "system");
   await linkColors(pool, "1526", "1536", "system");
   await pool.query(`
@@ -785,9 +884,9 @@ async function seedDemoFormula(pool) {
       )
     ), '[]'::jsonb)
   `);
-  const rows = await pool.query(`SELECT id, color_name, classification FROM stain_formulas`);
+  const rows = await pool.query(`SELECT id, formula_number, classification FROM stain_formulas`);
   for (const row of rows.rows) {
-    const next = classificationFromColor(row.color_name);
+    const next = classificationFromNumber(row.formula_number);
     if (next !== row.classification) {
       await pool.query(`UPDATE stain_formulas SET classification = $2 WHERE id = $1`, [row.id, next]);
     }
@@ -801,6 +900,8 @@ module.exports = {
   listFormulas,
   getFormula,
   saveFormula,
+  findFormulaByNumber,
+  duplicateFormulaError,
   findPossibleDuplicates,
   seedDemoFormula,
   linkColors,

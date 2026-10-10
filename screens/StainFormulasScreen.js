@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   StyleSheet,
@@ -30,11 +30,27 @@ import { displayUserName } from "../utils/displayUserName";
 const SPECIES = ["White Oak", "Maple", "Alder", "Walnut", "Cherry", "Beech", "Red Oak"];
 const NOTE_CATEGORIES = ["general", "color", "application", "drying", "adhesion", "quality"];
 
+function formatDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  const slash = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!slash) return text;
+  const year = slash[3].length === 2 ? `20${slash[3]}` : slash[3];
+  return `${slash[1].padStart(2, "0")}/${slash[2].padStart(2, "0")}/${year}`;
+}
+
 function formatWhen(ts) {
   if (!ts) return "";
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return formatDate(ts);
+  const date = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, "0");
+  const suffix = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${date}, ${hours}:${minutes} ${suffix}`;
 }
 
 function qtyLabel(ing) {
@@ -44,37 +60,36 @@ function qtyLabel(ing) {
 }
 
 function processTone(name) {
-  const text = String(name || "").toLowerCase();
+  const text = String(name || "").trim().toLowerCase();
+  if (!text) return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
   if (text.includes("dye")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
-  if (text.includes("toner")) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Toner" };
+  if (text.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
+  if (text.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
   if (text.includes("clear") || text.includes("sealer") || text.includes("top")) {
     return { color: "#ef6c00", soft: "rgba(239, 108, 0, 0.16)", label: "Clear" };
   }
-  if (text.includes("stain") || text.includes("glaze")) {
-    return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
-  }
-  return { color: "#C9972E", soft: "rgba(201, 151, 46, 0.16)", label: "Process" };
-}
-
-function pigmentTint(name) {
-  const text = String(name || "").toLowerCase();
-  const rules = [
-    [/red|scarlet|cherry|\br\d/, "#c62828"],
-    [/yellow|gold|\by\d/, "#f9a825"],
-    [/black|carbon|\bb\d/, "#424242"],
-    [/white|titanium|\bw\d/, "#f5f5f5"],
-    [/blue|navy/, "#1565c0"],
-    [/green|olive/, "#2e7d32"],
-    [/orange|amber/, "#ef6c00"],
-    [/brown|walnut|umber|sienna/, "#6d4c41"],
-    [/purple|violet|magenta/, "#8e24aa"],
-  ];
-  const hit = rules.find(([pattern]) => pattern.test(text));
-  return hit ? hit[1] : "";
+  if (text.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
+  return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
 }
 
 function classificationLabel(value) {
-  return value === "standard" ? "Standard color" : "Custom stain";
+  if (value === "standard") return "Standard Color";
+  if (value === "paint") return "Paint Process";
+  return "Custom Stain";
+}
+
+function titleWords(value) {
+  return String(value || "")
+    .split(/(\s+)/)
+    .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join("");
+}
+
+function woodLabel(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "veneer") return "Veneer";
+  if (text === "solid") return "Solid";
+  return titleWords(value);
 }
 
 async function blobToBase64(blob) {
@@ -135,11 +150,13 @@ export default function StainFormulasScreen({
   isAdmin = false,
   embeddedInShell = false,
   onBack,
+  formRefreshKey = 0,
 }) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const wide = width >= 900;
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [classification, setClassification] = useState("custom");
   const [species, setSpecies] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -150,39 +167,118 @@ export default function StainFormulasScreen({
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
   const [importing, setImporting] = useState(false);
-  const [drafts, setDrafts] = useState([]);
+  const [composer, setComposer] = useState(null);
+  const hasLoaded = useRef(false);
+  const listCache = useRef(new Map());
+  const refreshSeen = useRef(formRefreshKey);
+  const requestSeq = useRef(0);
+  const speciesFilter = advanced ? species : "";
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const listKey = useCallback(
+    (kind) => `${debouncedQuery}|${kind}|${speciesFilter}|${sort}`,
+    [debouncedQuery, speciesFilter, sort],
+  );
+
+  const showCached = useCallback((kind) => {
+    const cached = listCache.current.get(listKey(kind));
+    if (!cached) return false;
+    setRows(cached.formulas);
+    setTotal(cached.total);
+    hasLoaded.current = true;
+    return true;
+  }, [listKey]);
+
+  const load = useCallback(async (force = false) => {
+    const seq = ++requestSeq.current;
+    const key = listKey(classification);
+    const cached = showCached(classification);
+    if (cached && !force) {
+      setLoading(false);
+      return;
+    }
+    if (!cached && !hasLoaded.current) setLoading(true);
     try {
       const data = await StainFormulaService.list({
-        q: query.trim(),
+        q: debouncedQuery,
         classification,
-        species: advanced ? species : "",
+        species: speciesFilter,
         sort,
         limit: 60,
       });
-      setRows(data.formulas || []);
-      setTotal(data.total || 0);
+      const next = { formulas: data.formulas || [], total: data.total || 0 };
+      listCache.current.set(key, next);
+      if (seq !== requestSeq.current) return;
+      setRows(next.formulas);
+      setTotal(next.total);
+      hasLoaded.current = true;
     } catch (error) {
-      setRows([]);
+      if (seq !== requestSeq.current) return;
       showToast({
         type: "error",
         title: "Could not load formulas",
         message: error.message || "Sign in again if this keeps happening.",
       });
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, [query, classification, species, advanced, sort]);
+  }, [classification, debouncedQuery, listKey, showCached, sort, speciesFilter]);
 
   useEffect(() => {
-    const timer = setTimeout(load, 250);
-    return () => clearTimeout(timer);
+    const others = ["custom", "standard", "paint"].filter((kind) => kind !== classification);
+    let cancelled = false;
+    others.forEach((kind) => {
+      const key = listKey(kind);
+      if (listCache.current.has(key)) return;
+      StainFormulaService.list({
+        q: debouncedQuery,
+        classification: kind,
+        species: speciesFilter,
+        sort,
+        limit: 60,
+      })
+        .then((data) => {
+          if (cancelled) return;
+          listCache.current.set(key, { formulas: data.formulas || [], total: data.total || 0 });
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [classification, debouncedQuery, listKey, sort, speciesFilter]);
+
+  useEffect(() => {
+    load();
   }, [load]);
 
-  const importFiles = async () => {
-    const files = await pickFiles(".xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.zip", true);
+  useEffect(() => {
+    if (refreshSeen.current === formRefreshKey) return;
+    refreshSeen.current = formRefreshKey;
+    listCache.current.clear();
+    load(true);
+  }, [formRefreshKey, load]);
+
+  const asComposer = (item, index) => {
+    const fromName = (String(item?.filename || "").match(/(\d{3,6})/) || [])[1] || "";
+    const draft = item?.draft || { ...blankDraft(), formulaNumber: fromName };
+    return {
+      token: `${item?.filename || "formula"}-${index}-${Date.now()}`,
+      draft,
+      warnings: item?.warnings || [],
+      filename: item?.filename || "",
+      sourceBase64: item?.sourceBase64 || "",
+      images: item?.images || [],
+      duplicate: !!item?.duplicate,
+    };
+  };
+
+  const importFiles = async (picked) => {
+    const files = Array.isArray(picked) ? picked : await pickFiles(".xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.zip", true);
     if (!files.length) return;
     setImporting(true);
     try {
@@ -191,11 +287,28 @@ export default function StainFormulasScreen({
         const result = await StainFormulaService.importFile(file);
         collected.push(...(result.results || []));
       }
-      setDrafts(collected);
-      showToast({
-        title: "Import ready",
-        message: "Review each formula before it is saved.",
+      if (!collected.length) {
+        showToast({ type: "error", title: "Import failed", message: "Nothing was read from that file." });
+        return;
+      }
+      const seen = new Set();
+      const queued = collected.map((item) => {
+        const number = String(item?.draft?.formulaNumber || "").trim();
+        const key = number.toLowerCase();
+        if (item?.duplicate) return item;
+        if (key && seen.has(key)) {
+          return {
+            ...item,
+            duplicate: true,
+            warnings: [`${number} is already in this upload. Reject it to continue with the next file.`],
+          };
+        }
+        if (key) seen.add(key);
+        return item;
       });
+      const [first, ...rest] = queued.map(asComposer);
+      setSelectedId(null);
+      setComposer({ ...first, queue: rest });
     } catch (error) {
       showToast({ type: "error", title: "Import failed", message: error.message });
     } finally {
@@ -203,25 +316,45 @@ export default function StainFormulasScreen({
     }
   };
 
-  const publishDraft = async (item, index) => {
-    if (!item?.draft) return;
-    try {
-      const saved = await StainFormulaService.create({
-        ...item.draft,
-        warnings: item.warnings || [],
-        reviewStatus: "needs_review",
-        sourceFile: item.sourceBase64
-          ? { filename: item.filename, dataBase64: item.sourceBase64 }
-          : undefined,
-      });
-      setDrafts((list) => list.filter((_, i) => i !== index));
-      setSelectedId(saved.formula?.id || null);
-      await load();
-      showToast({ title: "Saved for review", message: "Confirm the formula before treating it as approved." });
-    } catch (error) {
-      showToast({ type: "error", title: "Save failed", message: error.message });
-    }
-  };
+  if (composer) {
+    return (
+      <FormulaDetail
+        key={composer.token}
+        id={null}
+        seed={composer}
+        isAdmin={isAdmin}
+        userName={userName}
+        wide={wide}
+        theme={theme}
+        embeddedInShell={embeddedInShell}
+        onBack={() => setComposer(null)}
+        onReject={() => {
+          const queue = composer.queue || [];
+          if (queue.length) {
+            const [next, ...rest] = queue;
+            setComposer({ ...next, queue: rest });
+            return;
+          }
+          setComposer(null);
+          listCache.current.clear();
+          load(true);
+        }}
+        onOpen={setSelectedId}
+        onCreated={(formula) => {
+          const queue = composer.queue || [];
+          if (queue.length) {
+            const [next, ...rest] = queue;
+            setComposer({ ...next, queue: rest });
+            return;
+          }
+          setComposer(null);
+          if (formula?.id) setSelectedId(formula.id);
+          listCache.current.clear();
+          load(true);
+        }}
+      />
+    );
+  }
 
   if (selectedId) {
     return (
@@ -232,7 +365,11 @@ export default function StainFormulasScreen({
         wide={wide}
         theme={theme}
         embeddedInShell={embeddedInShell}
-        onBack={() => setSelectedId(null)}
+        onBack={() => {
+          setSelectedId(null);
+          listCache.current.clear();
+          load(true);
+        }}
         onOpen={setSelectedId}
       />
     );
@@ -247,7 +384,7 @@ export default function StainFormulasScreen({
         </Text>
         <TextInput
           mode="outlined"
-          placeholder="Search formulas"
+          placeholder="Search Formulas"
           value={query}
           onChangeText={setQuery}
           style={styles.search}
@@ -255,97 +392,88 @@ export default function StainFormulasScreen({
         />
         <SegmentedButtons
           value={classification}
-          onValueChange={setClassification}
+          onValueChange={(value) => {
+            showCached(value);
+            setClassification(value);
+          }}
           style={styles.gap}
           buttons={[
             { value: "custom", label: "Custom" },
             { value: "standard", label: "Standard" },
+            { value: "paint", label: "Paint" },
           ]}
         />
         <AppButton compact mode="text" onPress={() => setAdvanced((open) => !open)}>
-          {advanced ? "Hide advanced search" : "Advanced search"}
+          {advanced ? "Hide Advanced Search" : "Advanced Search"}
         </AppButton>
         {advanced ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gap}>
-            <View style={styles.chips}>
-              <AppButton compact mode={species ? "outlined" : "contained"} onPress={() => setSpecies("")}>
-                Any wood
-              </AppButton>
-              {SPECIES.map((name) => (
-                <AppButton
-                  key={name}
-                  compact
-                  mode={species === name ? "contained" : "outlined"}
-                  onPress={() => setSpecies(name)}
-                >
-                  {name}
+          <View style={styles.gap}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.chips}>
+                <AppButton compact mode={species ? "outlined" : "contained"} onPress={() => setSpecies("")}>
+                  Any Wood
                 </AppButton>
-              ))}
+                {SPECIES.map((name) => (
+                  <AppButton
+                    key={name}
+                    compact
+                    mode={species === name ? "contained" : "outlined"}
+                    onPress={() => setSpecies(name)}
+                  >
+                    {name}
+                  </AppButton>
+                ))}
+              </View>
+            </ScrollView>
+            <View style={styles.toolbar}>
+              <SegmentedButtons
+                value={sort}
+                onValueChange={setSort}
+                style={{ flex: 1 }}
+                buttons={[
+                  { value: "newest", label: "Newest" },
+                  { value: "oldest", label: "Oldest" },
+                  { value: "alpha", label: "A–Z" },
+                  { value: "updated", label: "Updated" },
+                ]}
+              />
+              {wide ? (
+                <SegmentedButtons
+                  value={view}
+                  onValueChange={setView}
+                  buttons={[
+                    { value: "list", label: "List" },
+                    { value: "grid", label: "Grid" },
+                  ]}
+                />
+              ) : null}
             </View>
-          </ScrollView>
+          </View>
         ) : null}
-        <View style={styles.toolbar}>
-          <SegmentedButtons
-            value={sort}
-            onValueChange={setSort}
-            style={{ flex: 1 }}
-            buttons={[
-              { value: "newest", label: "Newest" },
-              { value: "oldest", label: "Oldest" },
-              { value: "alpha", label: "A–Z" },
-              { value: "updated", label: "Updated" },
-            ]}
-          />
-          <SegmentedButtons
-            value={view}
-            onValueChange={setView}
-            buttons={[
-              { value: "list", label: "List" },
-              { value: "grid", label: "Grid" },
-            ]}
-          />
-        </View>
         {isAdmin ? (
           <View style={styles.toolbar}>
-            <AppButton mode="contained" icon="plus" onPress={() => setDrafts([{ draft: blankDraft(), warnings: ["Manual entry"], filename: "" }])}>
-              Add formula
+            <AppButton
+              mode="contained"
+              icon="plus"
+              onPress={() => setComposer({
+                token: `new-${Date.now()}`,
+                draft: blankDraft(),
+                warnings: [],
+                filename: "",
+                sourceBase64: "",
+                queue: [],
+              })}
+            >
+              Add Formula
             </AppButton>
             <AppButton mode="outlined" icon="upload" loading={importing} onPress={importFiles}>
-              Import formulas
+              Import Formulas
             </AppButton>
           </View>
         ) : null}
-        {drafts.map((item, index) => (
-          <View key={`${item.filename}-${index}`} style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
-            <Text style={{ color: theme.colors.onSurface, fontWeight: "700" }}>
-              Review {item.filename || "new formula"}
-            </Text>
-            {(item.warnings || []).map((warning) => (
-              <Text key={warning} style={{ color: theme.colors.error, marginTop: 4 }}>
-                {warning}
-              </Text>
-            ))}
-            {(item.duplicates || []).length ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                Same formula number already exists ({item.duplicates.map((d) => `#${d.id}`).join(", ")}). Saving adds a separate record.
-              </Text>
-            ) : null}
-            <Text style={{ color: theme.colors.onSurface, marginTop: 6 }}>
-              {item.draft?.formulaNumber || "No number"} · {item.draft?.colorName || "No color"} · {item.draft?.woodSpecies || "No species"} · {item.draft?.woodType || "Wood type not set"}
-            </Text>
-            <View style={styles.toolbar}>
-              <AppButton mode="contained" onPress={() => publishDraft(item, index)}>
-                Save for review
-              </AppButton>
-              <AppButton mode="text" onPress={() => setDrafts((list) => list.filter((_, i) => i !== index))}>
-                Skip
-              </AppButton>
-            </View>
-          </View>
-        ))}
-        {loading ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
+        {loading && rows.length === 0 ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
         {!loading && rows.length === 0 ? <AppEmptyState title="No formulas match." /> : null}
-        <View style={view === "grid" && wide ? styles.grid : null}>
+        <View style={wide ? styles.grid : null}>
           {rows.map((row) => (
             <Pressable
               key={row.id}
@@ -353,24 +481,28 @@ export default function StainFormulasScreen({
               style={[
                 styles.card,
                 styles.listCard,
-                view === "grid" && wide ? styles.gridCard : null,
+                wide ? styles.gridCard : null,
                 { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface },
               ]}
             >
               <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={{ color: theme.colors.onSurface, fontWeight: "800" }}>
-                  {row.formulaNumber || "—"} · {row.colorName || "Untitled"}
+                <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 28, lineHeight: 32 }}>
+                  {row.formulaNumber || row.colorName || "—"}
                 </Text>
+                {row.colorName && row.colorName.toLowerCase() !== String(row.formulaNumber || "").trim().toLowerCase() ? (
+                  <Text style={{ color: theme.dark ? "#9aa4b2" : "#8b939e", fontStyle: "italic", marginTop: 2 }}>{row.colorName}</Text>
+                ) : null}
                 <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
                   {classificationLabel(row.classification)}
                   {row.woodSpecies ? ` · ${row.woodSpecies}` : ""}
-                  {row.woodType ? ` · ${row.woodType}` : ""}
+                  {row.woodType ? ` · ${woodLabel(row.woodType)}` : ""}
                   {row.jobNumber ? ` · Job ${row.jobNumber}` : ""}
                 </Text>
-                <Text style={{ color: row.reviewStatus === "approved" ? theme.colors.primary : theme.colors.error, marginTop: 4 }}>
-                  {row.reviewStatus === "approved" ? "Approved" : "Needs review"}
-                  {row.isDemo ? " · Test data" : ""}
-                </Text>
+                {row.reviewStatus === "pending" ? (
+                  <Text style={{ color: "#e07a00", fontWeight: "800", marginTop: 4 }}>Pending</Text>
+                ) : row.reviewStatus === "needs_review" ? (
+                  <Text style={{ color: theme.colors.error, marginTop: 4 }}>Needs Review</Text>
+                ) : null}
               </View>
               <FormulaThumb formulaId={row.id} imageId={row.primaryImageId} />
             </Pressable>
@@ -395,7 +527,7 @@ function FormulaThumb({ formulaId, imageId }) {
       cancelled = true;
     };
   }, [formulaId, imageId]);
-  if (!uri) return <View style={styles.cardThumb} />;
+  if (!imageId || !uri) return null;
   return <Image source={{ uri }} style={styles.cardThumb} resizeMode="cover" />;
 }
 
@@ -415,15 +547,17 @@ function blankDraft() {
     developer: "",
     salesperson: "",
     specialNotes: "",
-    reviewStatus: "needs_review",
+    reviewStatus: "approved",
     steps: [{ stepNumber: 1, processName: "", notes: "", ingredients: [] }],
   };
 }
 
-function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, onBack, onOpen }) {
+function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embeddedInShell, onBack, onReject, onOpen, onCreated }) {
+  const creating = id == null;
+  const seedRef = useRef(seed);
   const [formula, setFormula] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(creating);
   const [draft, setDraft] = useState(null);
   const [photos, setPhotos] = useState({});
   const [noteBody, setNoteBody] = useState("");
@@ -431,8 +565,26 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
   const [editingNote, setEditingNote] = useState(null);
   const [linkNumber, setLinkNumber] = useState("");
   const [zoom, setZoom] = useState(null);
+  const [openNotes, setOpenNotes] = useState({});
 
   const load = useCallback(async () => {
+    if (creating) {
+      const next = seedRef.current?.draft || blankDraft();
+      setFormula({
+        ...next,
+        images: [],
+        notes: [],
+        revisions: [],
+        family: [],
+        linkedNumbers: [],
+        warnings: seedRef.current?.warnings || [],
+        reviewStatus: next.reviewStatus || "approved",
+      });
+      setDraft(next);
+      setEditing(true);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const data = await StainFormulaService.get(id);
@@ -452,36 +604,83 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [creating, id]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const topFields = useMemo(
+  useEffect(() => {
+    if (!editing) {
+      setOpenNotes({});
+      return;
+    }
+    setOpenNotes((current) => {
+      const next = { ...current };
+      (draft?.steps || []).forEach((step, index) => {
+        const text = [step.importantNotes, step.notes].filter(Boolean).join("").trim();
+        if (text) next[index] = true;
+      });
+      return next;
+    });
+  }, [editing, draft]);
+
+  const editFields = useMemo(
     () => [
-      ["Formula date", "formulaDate"],
-      ["Job number", "jobNumber"],
-      ["Custom number", "formulaNumber"],
-      ["Color", "colorName"],
-    ],
-    [],
-  );
-  const detailFields = useMemo(
-    () => [
-      ["Wood type", "woodType"],
+      ["Formula Date", "formulaDate"],
+      ["Job Number", "jobNumber"],
+      ["Custom Number", "formulaNumber"],
       ["Species", "woodSpecies"],
-      ["Door style", "doorStyle"],
+      ["Door Style", "doorStyle"],
       ["Sheen", "sheen"],
-      ["Color status", "colorStatus"],
+      ["Color Description", "colorName"],
+      ["Color Status", "colorStatus"],
       ["Developer", "developer"],
       ["Salesperson", "salesperson"],
     ],
     [],
   );
+  const viewFields = useMemo(
+    () => [
+      ["Custom Number", "formulaNumber"],
+      ["Wood Type", "woodType"],
+      ["Species", "woodSpecies"],
+      ["Sheen", "sheen"],
+      ["Door Style", "doorStyle"],
+      ["Color Description", "colorName"],
+      ["Job Number", "jobNumber"],
+      ["Developer", "developer"],
+      ["Color Status", "colorStatus"],
+      ["Salesperson", "salesperson"],
+    ],
+    [],
+  );
+  const largeFields = useMemo(() => new Set(["formulaNumber", "woodType", "woodSpecies", "sheen"]), []);
 
   const save = async (reviewStatus) => {
     try {
+      if (creating && seedRef.current?.duplicate) {
+        showToast({
+          type: "error",
+          title: "Duplicate formula",
+          message: (seedRef.current.warnings || [])[0] || "This formula is already in the library. Reject it to continue.",
+          duration: 7000,
+        });
+        return;
+      }
+      if (creating) {
+        const saved = await StainFormulaService.create({
+          ...draft,
+          reviewStatus: reviewStatus || draft.reviewStatus || "needs_review",
+          warnings: seedRef.current?.warnings || [],
+          sourceFile: seedRef.current?.sourceBase64
+            ? { filename: seedRef.current.filename, dataBase64: seedRef.current.sourceBase64 }
+            : undefined,
+        });
+        showToast({ title: "Formula saved", message: saved.formula?.formulaNumber || "Saved" });
+        if (onCreated) onCreated(saved.formula);
+        return;
+      }
       const saved = await StainFormulaService.update(id, { ...draft, reviewStatus: reviewStatus || draft.reviewStatus });
       setFormula(saved.formula);
       setDraft(saved.formula);
@@ -596,6 +795,10 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
   };
 
   const addNote = async () => {
+    if (creating) {
+      showToast({ title: "Save the formula first", message: "Notes can be added after it is saved." });
+      return;
+    }
     if (!noteBody.trim()) return;
     await StainFormulaService.addNote(id, { body: noteBody.trim(), category: noteCategory, critical: noteCategory === "adhesion" || noteCategory === "quality" });
     setNoteBody("");
@@ -611,7 +814,6 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
   }
 
   const model = editing ? draft : formula;
-  const important = new Set(model.importantFields || []);
   const related = (formula.family || []).filter(
     (item) => String(item.formulaNumber) !== String(formula.formulaNumber),
   );
@@ -625,40 +827,77 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       {!embeddedInShell ? null : null}
       <ScrollView contentContainerStyle={styles.page}>
-        <View style={styles.toolbar}>
-          <AppButton mode="text" icon="arrow-left" onPress={onBack}>Back to search</AppButton>
-          <AppButton mode="outlined" icon="email" onPress={emailPdf}>Email formula</AppButton>
-          {isAdmin ? (
-            <AppButton mode={editing ? "contained" : "outlined"} onPress={() => (editing ? save() : setEditing(true))}>
-              {editing ? "Save" : "Edit"}
-            </AppButton>
-          ) : null}
-          {isAdmin && formula.reviewStatus !== "approved" ? (
-            <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
-          ) : null}
-        </View>
+        {wide ? (
+          <View style={styles.toolbar}>
+            <AppButton mode="text" icon="arrow-left" onPress={onBack}>Back To Search</AppButton>
+            {creating && onReject ? <AppButton mode="outlined" onPress={onReject}>Reject</AppButton> : null}
+            {id ? <AppButton mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : null}
+            {isAdmin && !(creating && seedRef.current?.duplicate) ? (
+              <AppButton mode={editing ? "contained" : "outlined"} onPress={() => (editing ? save() : setEditing(true))}>
+                {editing ? "Save" : "Edit"}
+              </AppButton>
+            ) : null}
+            {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
+              <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
+            ) : null}
+          </View>
+        ) : (
+          <View>
+            <AppButton mode="text" icon="arrow-left" onPress={onBack} style={styles.backLine}>Back To Search</AppButton>
+            <View style={styles.actionRow}>
+              {creating && onReject ? (
+                <AppButton mode="outlined" onPress={onReject}>Reject</AppButton>
+              ) : id ? <AppButton mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : <View />}
+              {isAdmin && !(creating && seedRef.current?.duplicate) ? (
+                <AppButton mode={editing ? "contained" : "outlined"} onPress={() => (editing ? save() : setEditing(true))}>
+                  {editing ? "Save" : "Edit"}
+                </AppButton>
+              ) : null}
+            </View>
+            {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
+              <AppButton mode="contained" onPress={() => save("approved")} style={styles.backLine}>Approve</AppButton>
+            ) : null}
+          </View>
+        )}
         <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-          {model.formulaNumber} · {model.colorName || "Untitled"}
+          {model.formulaNumber || model.colorName || "—"}
         </Text>
-        <Text style={{ color: formula.reviewStatus === "approved" ? theme.colors.primary : theme.colors.error }}>
-          {formula.reviewStatus === "approved" ? "Approved" : "Needs review"}
-          {formula.isDemo ? " · Demonstration record" : ""}
-          {` · ${classificationLabel(formula.classification)}`}
+        {model.colorName && model.colorName.toLowerCase() !== String(model.formulaNumber || "").trim().toLowerCase() ? (
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginTop: 4 }}>{model.colorName}</Text>
+        ) : null}
+        <Text style={{ color: model.reviewStatus === "pending" ? "#e07a00" : model.reviewStatus === "needs_review" ? theme.colors.error : theme.colors.onSurfaceVariant, fontWeight: model.reviewStatus === "pending" ? "800" : "400" }}>
+          {model.reviewStatus === "pending" ? "Pending · " : model.reviewStatus === "needs_review" ? "Needs Review · " : ""}
+          {classificationLabel(model.classification)}
         </Text>
+        {editing && isAdmin ? (
+          <AppButton
+            compact
+            mode={draft.reviewStatus === "pending" ? "contained" : "outlined"}
+            buttonColor={draft.reviewStatus === "pending" ? "#e07a00" : undefined}
+            textColor={draft.reviewStatus === "pending" ? "#fff" : "#e07a00"}
+            onPress={() => setDraft((current) => ({
+              ...current,
+              reviewStatus: current.reviewStatus === "pending" ? "approved" : "pending",
+            }))}
+            style={styles.backLine}
+          >
+            {draft.reviewStatus === "pending" ? "Pending" : "Mark Pending"}
+          </AppButton>
+        ) : null}
         {(formula.warnings || []).map((warning) => (
-          <Text key={warning} style={{ color: theme.colors.error, marginTop: 6 }}>{warning}</Text>
+          <Text key={warning} style={{ color: seedRef.current?.duplicate ? theme.colors.error : theme.colors.onSurfaceVariant, marginTop: 6 }}>{warning}</Text>
         ))}
         <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
-          Original date {formula.formulaDate || "—"} · Updated {formatWhen(formula.updatedAt)}
+          Original Date {formatDate(formula.formulaDate) || "—"} · Updated {formatWhen(formula.updatedAt)}
           {formula.updatedBy ? ` by ${displayUserName(formula.updatedBy)}` : ""}
         </Text>
         {editing ? (
-          <View style={wide ? styles.metaGrid : null}>
-            {topFields.concat(detailFields.filter(([, key]) => key !== "woodType")).map(([label, key]) => (
-              <TextInput key={key} mode="outlined" label={label} value={String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
+          <View style={styles.metaGrid}>
+            {editFields.slice(0, 3).map(([label, key]) => (
+              <TextInput key={key} mode="outlined" label={label} value={key === "formulaDate" ? formatDate(draft[key]) : String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
             ))}
             <View style={styles.field}>
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>Wood type</Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>Wood Type</Text>
               <SegmentedButtons
                 value={draft.woodType === "solid" || draft.woodType === "veneer" ? draft.woodType : ""}
                 onValueChange={(value) => setDraft({ ...draft, woodType: value, materialForm: value })}
@@ -668,40 +907,39 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                 ]}
               />
             </View>
-            <TextInput mode="outlined" label="Special notes" value={String(draft.specialNotes || "")} onChangeText={(v) => setDraft({ ...draft, specialNotes: v })} style={styles.field} multiline />
+            {editFields.slice(3).map(([label, key]) => (
+              <TextInput key={key} mode="outlined" label={label} value={String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
+            ))}
+            <TextInput mode="outlined" label="Special Notes" value={String(draft.specialNotes || "")} onChangeText={(v) => setDraft({ ...draft, specialNotes: v })} style={styles.field} multiline />
           </View>
         ) : (
           <View>
-            <View style={wide ? styles.metaGrid : null}>
-              {topFields.map(([label, key]) => (
-                <View key={key} style={[styles.metaCard, important.has(key) && styles.importantCard, { borderColor: important.has(key) ? "#c62828" : theme.colors.outlineVariant, backgroundColor: theme.colors.surface }]}>
-                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, fontWeight: "700" }}>{label.toUpperCase()}</Text>
-                  <Text style={{ color: important.has(key) ? "#b71c1c" : theme.colors.onSurface, fontSize: 18, fontWeight: "800", marginTop: 2 }}>
-                    {formula[key] || "—"}
-                  </Text>
-                  {important.has(key) ? <Text style={styles.importantTag}>IMPORTANT</Text> : null}
+            {[viewFields.slice(0, 6), viewFields.slice(6)].map((group, groupIndex) => (
+              <View key={groupIndex === 0 ? "main" : "extra"}>
+                {groupIndex === 1 ? <View style={[styles.detailDivider, { backgroundColor: theme.colors.outlineVariant }]} /> : null}
+                <View style={styles.metaGrid}>
+                  {group.map(([label, key]) => (
+                    <View key={key} style={[styles.metaCard, { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface }]}>
+                      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, fontWeight: "700" }}>{label}</Text>
+                      <Text style={{ color: theme.colors.onSurface, fontSize: largeFields.has(key) ? 22 : 16, fontWeight: "800", marginTop: 2 }}>
+                        {(key === "woodType" ? woodLabel(formula[key]) : formula[key]) || "—"}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-            <View style={wide ? styles.metaGrid : null}>
-              {detailFields.map(([label, key]) => (
-                <View key={key} style={[styles.metaCard, important.has(key) && styles.importantCard, { borderColor: important.has(key) ? "#c62828" : theme.colors.outlineVariant, backgroundColor: theme.colors.surface }]}>
-                  <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>{label}</Text>
-                  <Text style={{ color: important.has(key) ? "#b71c1c" : theme.colors.onSurface, fontWeight: "700" }}>{formula[key] || "—"}</Text>
-                </View>
-              ))}
-            </View>
+              </View>
+            ))}
           </View>
         )}
         {model.specialNotes && !editing ? (
-          <View style={[styles.card, important.has("specialNotes") ? styles.importantCard : null, { borderColor: important.has("specialNotes") ? "#c62828" : theme.colors.outlineVariant }]}>
-            <Text style={{ color: important.has("specialNotes") ? "#b71c1c" : theme.colors.onSurface, fontWeight: "800" }}>
-              {important.has("specialNotes") ? "IMPORTANT · " : ""}Special notes
+          <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+            <Text style={{ color: theme.colors.onSurface, fontWeight: "800" }}>
+              Special Notes
             </Text>
             <Text style={{ color: theme.colors.onSurface, marginTop: 4 }}>{model.specialNotes}</Text>
           </View>
         ) : null}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Similar colors</Text>
+        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Similar Colors</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }}>
           Open a related color without leaving this page. A link works both ways, and removing it removes it from both colors.
         </Text>
@@ -714,7 +952,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
               >
                 {item.formulaNumber}
                 {item.woodSpecies ? ` · ${item.woodSpecies}` : ""}
-                {item.woodType ? ` · ${item.woodType}` : item.missing ? " · not uploaded" : ""}
+                {item.woodType ? ` · ${woodLabel(item.woodType)}` : item.missing ? " · Not Uploaded" : ""}
               </AppButton>
               {isAdmin ? (
                 <AppButton
@@ -725,7 +963,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                     const ok = await confirmAction(
                       "Remove link",
                       `Unlink ${item.formulaNumber} from this color? It will also disappear from ${item.formulaNumber}.`,
-                      { confirmLabel: "Remove link", destructive: true },
+                      { confirmLabel: "Remove Link", destructive: true },
                     );
                     if (!ok) return;
                     try {
@@ -743,9 +981,9 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
             </View>
           ))}
         </View>
-        {isAdmin ? (
+        {isAdmin && !creating ? (
           <View style={styles.toolbar}>
-            <TextInput mode="outlined" label="Link color number" value={linkNumber} onChangeText={setLinkNumber} style={{ minWidth: 180 }} />
+            <TextInput mode="outlined" label="Link Color Number" value={linkNumber} onChangeText={setLinkNumber} style={{ minWidth: 180 }} />
             <AppButton
               mode="contained"
               onPress={async () => {
@@ -763,26 +1001,21 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
             </AppButton>
           </View>
         ) : null}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula steps</Text>
+        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula Steps</Text>
         <View style={wide ? styles.stepGrid : null}>
           {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex) => {
             const tone = processTone(step.processName);
+            const noteText = [step.importantNotes, step.notes].filter(Boolean).join("\n");
+            const showNote = !!noteText.trim() || !!openNotes[stepIndex];
             return (
               <View key={`${step.stepNumber}-${stepIndex}`} style={[styles.card, wide && styles.stepCard, { borderColor: tone.color, backgroundColor: tone.soft, borderLeftWidth: 6 }]}>
-                <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4 }}>{tone.label.toUpperCase()} · STEP {step.stepNumber}</Text>
+                <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4 }}>{tone.label} · Step {step.stepNumber}</Text>
                 {editing ? (
                   <TextInput mode="outlined" label="Process" value={step.processName || ""} onChangeText={(v) => patchStep(stepIndex, { processName: v })} style={{ marginTop: 6, backgroundColor: theme.colors.surface }} />
                 ) : (
                   <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 18, marginBottom: 8 }}>{step.processName || "—"}</Text>
                 )}
-                {(step.important || step.importantNotes) ? (
-                  <View style={styles.importantCard}>
-                    <Text style={styles.importantTag}>IMPORTANT</Text>
-                    {step.importantNotes ? <Text style={{ color: "#b71c1c", fontWeight: "700", marginTop: 4 }}>{step.importantNotes}</Text> : null}
-                  </View>
-                ) : null}
                 {(step.ingredients || []).map((ing, index) => {
-                  const tint = pigmentTint(ing.name);
                   if (editing) {
                     return (
                       <View key={`${stepIndex}-${index}`} style={styles.ingRow}>
@@ -794,27 +1027,47 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                     );
                   }
                   return (
-                    <View key={`${ing.rawLine}-${index}`} style={[styles.ingLine, ing.important && styles.importantCard, { borderColor: tint || theme.colors.outlineVariant, backgroundColor: tint ? `${tint}22` : theme.colors.surface }]}>
+                    <View key={`${ing.rawLine}-${index}`} style={[styles.ingLine, { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface }]}>
                       <Text style={[styles.qty, { color: theme.colors.onSurface }]}>{qtyLabel(ing) || "—"}</Text>
-                      <Text style={{ color: tint && tint !== "#f5f5f5" ? tint : theme.colors.onSurface, fontWeight: "700", flex: 1 }}>
+                      <Text style={{ color: theme.colors.onSurface, fontWeight: "700", flex: 1 }}>
                         {ing.name}
                       </Text>
-                      {ing.important ? <Text style={styles.importantTag}>IMPORTANT</Text> : null}
+                      {ing.important ? <Text style={styles.importantTag}>Important</Text> : null}
                     </View>
                   );
                 })}
                 {editing ? (
                   <AppButton compact mode="text" onPress={() => patchStep(stepIndex, { ingredients: [...(step.ingredients || []), { quantityText: "", unit: "g", name: "", rawLine: "", important: false }] })}>
-                    Add colorant
+                    Add Colorant
                   </AppButton>
                 ) : null}
-                {editing ? (
-                  <TextInput mode="outlined" label="Step notes" value={step.notes || ""} onChangeText={(v) => patchStep(stepIndex, { notes: v })} multiline style={{ marginTop: 6, backgroundColor: theme.colors.surface }} />
-                ) : step.notes ? (
-                  <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>{step.notes}</Text>
+                {editing && showNote ? (
+                  <View style={styles.importantCard}>
+                    <Text style={styles.importantTag}>Important</Text>
+                    <TextInput
+                      mode="outlined"
+                      label="Important Note"
+                      value={noteText}
+                      onChangeText={(v) => patchStep(stepIndex, { importantNotes: v, notes: "", important: !!String(v).trim() })}
+                      multiline
+                      textColor="#7f1010"
+                      outlineColor="#c62828"
+                      activeOutlineColor="#c62828"
+                      style={{ marginTop: 6, backgroundColor: "#fff" }}
+                      contentStyle={{ fontWeight: "700", fontSize: 16 }}
+                    />
+                  </View>
                 ) : null}
-                {!step.ingredients?.length && !step.notes && !editing ? (
-                  <Text style={{ color: theme.colors.onSurfaceVariant }}>No ingredients on this step.</Text>
+                {editing && !showNote ? (
+                  <AppButton compact mode="text" onPress={() => setOpenNotes((current) => ({ ...current, [stepIndex]: true }))}>
+                    Add Important Note
+                  </AppButton>
+                ) : null}
+                {!editing && noteText.trim() ? (
+                  <View style={styles.importantCard}>
+                    <Text style={styles.importantTag}>Important</Text>
+                    <Text style={{ color: "#b71c1c", fontWeight: "700", marginTop: 4 }}>{noteText}</Text>
+                  </View>
                 ) : null}
               </View>
             );
@@ -822,12 +1075,21 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
         </View>
         {editing ? (
           <AppButton mode="outlined" onPress={() => setDraft({ ...draft, steps: [...(draft.steps || []), { stepNumber: (draft.steps || []).length + 1, processName: "", notes: "", ingredients: [] }] })}>
-            Add step
+            Add Step
           </AppButton>
         ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Photos</Text>
-        {isAdmin ? <AppButton mode="outlined" icon="image" onPress={uploadPhoto}>Upload photo</AppButton> : null}
+        {creating && !(seedRef.current?.images || []).length ? (
+          <Text style={{ color: theme.colors.onSurfaceVariant }}>Save The Formula Before Adding Photos.</Text>
+        ) : null}
+        {!creating && isAdmin ? <AppButton mode="outlined" icon="image" onPress={uploadPhoto}>Upload Photo</AppButton> : null}
         <View style={styles.chips}>
+          {creating ? (seedRef.current?.images || []).map((image, index) => (
+            <View key={`excel-${index}`} style={styles.photo}>
+              <Image source={{ uri: `data:${image.mime || "image/jpeg"};base64,${image.dataBase64}` }} style={styles.photoImg} resizeMode="cover" />
+              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>From Excel</Text>
+            </View>
+          )) : null}
           {(formula.images || []).map((image) => (
             <View key={image.id} style={styles.photo}>
               {photos[image.id] ? (
@@ -835,10 +1097,10 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                   <Image source={{ uri: photos[image.id] }} style={styles.photoImg} resizeMode="cover" />
                 </Pressable>
               ) : (
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>No preview</Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant }}>No Preview</Text>
               )}
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
-                {image.isPrimary ? "Main photo · " : ""}
+                {image.isPrimary ? "Main Photo · " : ""}
                 {displayUserName(image.uploadedBy)} · {formatWhen(image.createdAt)}
               </Text>
               {isAdmin ? (
@@ -853,7 +1115,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                         setDraft(saved);
                       }}
                     >
-                      Use as main
+                      Use As Main
                     </AppButton>
                   ) : null}
                   <AppButton compact mode="text" onPress={async () => { await StainFormulaService.deleteImage(id, image.id); await load(); }}>
@@ -864,26 +1126,26 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
             </View>
           ))}
         </View>
-        {(formula.images || []).length === 0 ? (
-          <Text style={{ color: theme.colors.onSurfaceVariant }}>No reference photo.</Text>
+        {(formula.images || []).length === 0 && !(creating && (seedRef.current?.images || []).length) ? (
+          <Text style={{ color: theme.colors.onSurfaceVariant }}>No Reference Photo.</Text>
         ) : null}
-        {isAdmin ? (
+        {isAdmin && id ? (
           <View style={{ marginTop: 12 }}>
             <AppButton mode="outlined" icon="download" onPress={downloadPdf}>
               Download PDF
             </AppButton>
           </View>
         ) : null}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Production notes & history</Text>
+        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Production Notes & History</Text>
         {isAdmin ? (
           <View style={styles.card}>
             <SegmentedButtons
               value={noteCategory}
               onValueChange={setNoteCategory}
-              buttons={NOTE_CATEGORIES.slice(0, 3).map((value) => ({ value, label: value }))}
+              buttons={NOTE_CATEGORIES.slice(0, 3).map((value) => ({ value, label: titleWords(value) }))}
             />
             <TextInput mode="outlined" label="Note" value={noteBody} onChangeText={setNoteBody} multiline style={{ marginTop: 8 }} />
-            <AppButton mode="contained" onPress={addNote} style={{ marginTop: 8 }}>Add note</AppButton>
+            <AppButton mode="contained" onPress={addNote} style={{ marginTop: 8 }}>Add Note</AppButton>
           </View>
         ) : null}
         {(formula.notes || []).map((note) => {
@@ -891,7 +1153,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
           return (
             <View key={note.id} style={[styles.card, { borderColor: note.critical ? theme.colors.error : theme.colors.outlineVariant }]}>
               <Text style={{ color: theme.colors.primary, fontWeight: "700" }}>
-                {note.category}{note.pinned ? " · Pinned" : ""}{note.edited ? " · Edited" : ""}
+                {titleWords(note.category)}{note.pinned ? " · Pinned" : ""}{note.edited ? " · Edited" : ""}
               </Text>
               {editingNote === note.id ? (
                 <TextInput mode="outlined" value={noteBody} onChangeText={setNoteBody} multiline />
@@ -905,7 +1167,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
                 <View style={styles.toolbar}>
                   <AppButton compact mode="text" onPress={() => { setEditingNote(note.id); setNoteBody(note.body); }}>Edit</AppButton>
                   {editingNote === note.id ? (
-                    <AppButton compact onPress={async () => { await StainFormulaService.updateNote(id, note.id, { body: noteBody, category: note.category }); setEditingNote(null); await load(); }}>Save note</AppButton>
+                    <AppButton compact onPress={async () => { await StainFormulaService.updateNote(id, note.id, { body: noteBody, category: note.category }); setEditingNote(null); await load(); }}>Save Note</AppButton>
                   ) : null}
                   <AppButton compact mode="text" onPress={async () => {
                     const ok = await confirmAction("Delete note", "Remove your note?", { confirmLabel: "Delete", destructive: true });
@@ -918,7 +1180,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
             </View>
           );
         })}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Version history</Text>
+        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Version History</Text>
         {(formula.revisions || []).length ? formula.revisions.map((rev) => (
           <View key={rev.id} style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
             <Text style={{ color: theme.colors.onSurface, fontWeight: "800" }}>
@@ -934,7 +1196,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
         <Modal visible={!!zoom} transparent animationType="fade" onRequestClose={() => setZoom(null)}>
           <Pressable style={styles.lightbox} onPress={() => setZoom(null)}>
             {zoom ? <Image source={{ uri: zoom }} style={styles.lightboxImg} resizeMode="contain" /> : null}
-            <Text style={{ color: "#fff", marginTop: 12 }}>Tap to close</Text>
+            <Text style={{ color: "#fff", marginTop: 12 }}>Tap To Close</Text>
           </Pressable>
         </Modal>
         {isAdmin ? (
@@ -948,7 +1210,7 @@ function FormulaDetail({ id, isAdmin, userName, wide, theme, embeddedInShell, on
               onBack();
             }}
           >
-            Delete formula
+            Delete Formula
           </AppButton>
         ) : null}
       </ScrollView>
@@ -963,6 +1225,8 @@ const styles = StyleSheet.create({
   search: { marginBottom: 4 },
   gap: { marginBottom: 4 },
   toolbar: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", marginVertical: 6 },
+  backLine: { alignSelf: "flex-start" },
+  actionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   card: { borderWidth: 1, borderRadius: radius.md || 8, padding: 12, marginTop: 8 },
   listCard: { flexDirection: "row", alignItems: "center" },
@@ -971,10 +1235,11 @@ const styles = StyleSheet.create({
   gridCard: { width: "48%" },
   title: { fontSize: 26, fontWeight: "800" },
   section: { fontSize: 18, fontWeight: "800", marginTop: 16 },
-  metaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  metaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  detailDivider: { height: 1, width: "100%", marginTop: 16, marginBottom: 4 },
   meta: { width: "48%", marginTop: 8, fontSize: 14 },
-  metaCard: { width: "48%", minWidth: 220, marginTop: 8, borderWidth: 1, borderRadius: 10, padding: 10, flexGrow: 1 },
-  field: { width: "48%", minWidth: 220, marginTop: 8 },
+  metaCard: { width: "48%", marginTop: 8, borderWidth: 1, borderRadius: 10, padding: 10 },
+  field: { width: "48%", marginTop: 8 },
   stepGrid: { flexDirection: "row", flexWrap: "wrap", gap: space[3] || 10 },
   stepCard: { width: "31%", minWidth: 260 },
   ingLine: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6 },

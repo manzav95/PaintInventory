@@ -85,16 +85,148 @@ function materialFromWood(woodType) {
   };
 }
 
-function filenameNumber(filename) {
-  const m = String(filename || "").match(/(\d{3,6})/);
-  return m ? m[1] : "";
+function filenameNumbers(filename) {
+  const base = String(filename || "").replace(/\.[^.]+$/, "");
+  const found = [];
+  const re = /#?(\d{3,6})(?!\d)/g;
+  let match = re.exec(base);
+  while (match) {
+    if (!found.includes(match[1])) found.push(match[1]);
+    match = re.exec(base);
+  }
+  return found;
 }
 
-/** #1401 or 1401… is custom. A word name such as Honey Oak is standard. */
-function classificationFromColor(colorName) {
-  const stripped = String(colorName || "").trim().replace(/^#+\s*/, "");
-  if (!stripped) return "custom";
-  return /^\d/.test(stripped) ? "custom" : "standard";
+function filenameNumber(filename) {
+  return filenameNumbers(filename)[0] || "";
+}
+
+/** Wood, file, and status words. These are not a color name. */
+const FILENAME_SKIP_WORDS = new Set([
+  "solid", "veneer", "oak", "maple", "alder", "walnut", "cherry", "beech",
+  "rift", "quarter", "sawn", "white", "red", "stain", "stains", "formula",
+  "formulas", "sheen", "door", "shaker", "mini", "sample", "temp", "temporary",
+  "hold", "pending", "delete", "deleted", "unused", "cancelled", "canceled",
+  "cancel", "void", "copy", "final", "new", "old", "updated", "revised",
+  "revision", "draft", "test", "demo", "do", "not", "use", "dont", "note",
+  "notes", "see", "file", "files", "wood", "species", "custom", "standard",
+  "paint", "process", "step", "steps", "job", "number", "no", "yes", "ok",
+  "wip", "archive", "archived", "backup", "version", "ver", "edit", "edited",
+  "fixed", "fix", "glaze", "toner", "dye", "clear", "sealer", "topcoat", "top",
+  "coat", "base", "mix", "mixed", "customer", "special",
+  "img", "image", "images", "photo", "photos", "picture", "pictures",
+  "jpeg", "jpg", "png", "heic", "screenshot", "camera", "scan",
+]);
+
+/**
+ * Former custom colors that are stock standard names now.
+ * A short file-name match is listed under the word, not the old number.
+ */
+const STANDARD_COLOR_NAMES = new Set([
+  "sand", "graphite", "honey", "honey oak", "acier", "truffle", "ebony",
+  "slate", "taupe", "linen", "oatmeal", "pewter", "bronze", "chestnut",
+  "espresso", "mocha", "sable", "mink", "driftwood", "charcoal", "ivory",
+  "cream", "beige", "cocoa", "coffee", "umber", "sienna", "khaki", "greige",
+  "stone", "ash", "smoke", "fog", "mist", "dune", "wheat", "caramel",
+  "toffee", "cinnamon", "nutmeg", "pecan", "onyx", "steel", "nickel",
+  "copper", "rust", "clay", "adobe", "blush", "rose", "natural", "hazel",
+]);
+
+function filenameTail(filename) {
+  return String(filename || "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/#?\d{3,6}(?!\d)/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/[()]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function titlePhrase(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function standardColorName(text) {
+  const words = String(text || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-z]/g, ""))
+    .filter(Boolean);
+  if (!words.length || words.length > 2) return "";
+  const joined = words.join(" ");
+  if (STANDARD_COLOR_NAMES.has(joined)) return titlePhrase(joined);
+  const colors = words.filter((word) => STANDARD_COLOR_NAMES.has(word));
+  const other = words.filter((word) => !STANDARD_COLOR_NAMES.has(word) && !FILENAME_SKIP_WORDS.has(word));
+  if (colors.length && !other.length) return titlePhrase(colors.join(" "));
+  return "";
+}
+
+function adoptStandardName(meta, name) {
+  const previous = String(meta.formulaNumber || "").trim();
+  if (previous && previous.toLowerCase() !== name.toLowerCase()) {
+    const links = Array.isArray(meta.linkedNumbers) ? meta.linkedNumbers.slice() : [];
+    if (!links.includes(previous)) links.unshift(previous);
+    meta.linkedNumbers = links;
+  }
+  meta.formulaNumber = name;
+}
+
+/** Words after the custom number go in the color description. A known color name is listed as that standard color. */
+function applyFilenameHint(meta, filename) {
+  const tail = filenameTail(filename);
+  const words = tail ? tail.split(/\s+/) : [];
+  const sheetColor = String(meta.colorName || "").trim();
+  const fileOnly = words.length > 0 && words.every((word) => {
+    const clean = word.toLowerCase().replace(/[^a-z]/g, "");
+    return !clean || FILENAME_SKIP_WORDS.has(clean);
+  });
+  if (tail && !fileOnly) {
+    if (!sheetColor) meta.colorName = tail;
+    else if (!sheetColor.toLowerCase().includes(tail.toLowerCase())) meta.colorName = `${sheetColor} · ${tail}`;
+  }
+  const named = (words.length <= 2 ? standardColorName(tail) : "") || standardColorName(sheetColor);
+  if (named) {
+    adoptStandardName(meta, named);
+    return;
+  }
+  if (!String(meta.formulaNumber || "").trim() && tail && !fileOnly) {
+    adoptStandardName(meta, titlePhrase(tail));
+  }
+}
+
+/** The boxed custom number sits to the right of the header, outside columns A–G. */
+function sheetFormulaNumber(rows) {
+  let best = "";
+  let bestCol = -1;
+  const limit = Math.min(rows.length, 10);
+  for (let r = 0; r < limit; r += 1) {
+    const row = rows[r] || [];
+    const width = Math.min(row.length, 12);
+    for (let c = 0; c < width; c += 1) {
+      const text = cellText(row[c]);
+      if (!/^\d{3,6}$/.test(text)) continue;
+      const nearby = [row[c - 1], row[c - 2], row[c + 1]].map((cell) => cellText(cell)).join(" ");
+      if (/job/i.test(nearby)) continue;
+      if (c >= bestCol) {
+        best = text;
+        bestCol = c;
+      }
+    }
+  }
+  return best;
+}
+
+/** A leading letter is standard. A number starting with 3 or 4 is a paint process. Anything else is custom. */
+function classificationFromNumber(formulaNumber) {
+  const raw = String(formulaNumber || "").trim();
+  if (/^[A-Za-z]/.test(raw)) return "standard";
+  const text = raw.replace(/^#+/, "");
+  if (/^[34]/.test(text)) return "paint";
+  return "custom";
 }
 
 function colLetter(index) {
@@ -190,17 +322,26 @@ function parseStainWorkbook(workbook, filename = "", redCells = new Set()) {
       if (!key) continue;
       const value = cellText(row[valueCol]);
       if (value) meta[key] = value;
-      if (value && redCells.has(`${colLetter(valueCol)}${r + 1}`)) {
-        meta.importantFields.push(key);
-      }
     }
   }
 
-  meta.formulaNumber = filenameNumber(filename);
+  const fromName = filenameNumbers(filename);
+  const fromSheet = sheetFormulaNumber(rows);
+  if (fromName.length > 1) {
+    meta.formulaNumber = fromName[0];
+    meta.linkedNumbers = fromName.slice(1);
+    if (fromSheet && fromSheet !== meta.formulaNumber && !meta.linkedNumbers.includes(fromSheet)) {
+      meta.linkedNumbers.push(fromSheet);
+    }
+  } else {
+    meta.formulaNumber = fromSheet || fromName[0] || "";
+    meta.linkedNumbers = [];
+  }
+  applyFilenameHint(meta, filename);
 
   const wood = materialFromWood(meta.woodType);
   if (!meta.formulaNumber) {
-    warnings.push("Custom number was not found in the filename.");
+    warnings.push("Type the custom number. It was not in the sheet header or the file name.");
   }
 
   const stepCols = [0, 3, 6];
@@ -224,11 +365,10 @@ function parseStainWorkbook(workbook, filename = "", redCells = new Set()) {
       const nextRow = rows[r + 1] || [];
       headerHits.forEach((hit) => {
         const processName = cellText(nextRow[hit.col]);
-        const nameCell = `${colLetter(hit.col)}${r + 2}`;
         const step = {
           stepNumber: hit.number,
           processName: STEP_RE.test(processName) ? "" : processName,
-          important: redCells.has(nameCell) && !STEP_RE.test(processName),
+          important: false,
           notes: "",
           importantNotes: "",
           ingredients: [],
@@ -266,6 +406,26 @@ function parseStainWorkbook(workbook, filename = "", redCells = new Set()) {
 
   steps.forEach((step) => {
     delete step.col;
+    const colorants = (step.ingredients || []).filter((ing) =>
+      String(ing.name || ing.rawLine || ing.quantityText || "").trim(),
+    );
+    const lines = [step.importantNotes, step.notes]
+      .flatMap((text) => String(text || "").split(/\n/))
+      .map((text) => text.trim())
+      .filter(Boolean);
+    if (colorants.length || !lines.length) return;
+    step.ingredients = lines.map((name) => ({
+      quantityText: "",
+      quantity: null,
+      unit: "",
+      name,
+      rawLine: name,
+      uncertain: false,
+      important: false,
+    }));
+    step.importantNotes = "";
+    step.notes = "";
+    step.important = false;
   });
   steps.sort((a, b) => a.stepNumber - b.stepNumber);
 
@@ -278,8 +438,9 @@ function parseStainWorkbook(workbook, filename = "", redCells = new Set()) {
     warnings,
     draft: {
       formulaNumber: meta.formulaNumber,
+      linkedNumbers: meta.linkedNumbers,
       colorName: meta.colorName,
-      classification: classificationFromColor(meta.colorName),
+      classification: classificationFromNumber(meta.formulaNumber),
       materialForm: wood.materialForm,
       woodSpecies: wood.species,
       woodType: wood.woodType,
@@ -294,12 +455,59 @@ function parseStainWorkbook(workbook, filename = "", redCells = new Set()) {
       developer: meta.developer,
       salesperson: meta.salesperson,
       specialNotes: meta.specialNotes,
-      importantFields: meta.importantFields,
+      importantFields: [],
       reviewStatus: "needs_review",
       steps,
       sourceFilename: filename,
     },
   };
+}
+
+const IMAGE_MIME = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+/** Photos embedded in the workbook. Tiny leftover icons are skipped. */
+async function workbookImages(buffer) {
+  let JSZip;
+  try {
+    JSZip = require("jszip");
+  } catch {
+    return [];
+  }
+  let zip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch {
+    return [];
+  }
+  const referenced = new Set();
+  const relNames = Object.keys(zip.files).filter((name) => /xl\/(?:drawings|worksheets)\/_rels\/.+\.rels$/i.test(name));
+  for (const name of relNames) {
+    const xml = await zip.files[name].async("string");
+    const matches = xml.match(/media\/[^"']+/gi) || [];
+    matches.forEach((match) => referenced.add(match.split("/").pop().toLowerCase()));
+  }
+  const names = Object.keys(zip.files)
+    .filter((name) => /^xl\/media\//i.test(name) && !zip.files[name].dir)
+    .sort();
+  const images = [];
+  for (const name of names) {
+    const base = name.split("/").pop() || "image";
+    if (referenced.size && !referenced.has(base.toLowerCase())) continue;
+    const ext = (base.split(".").pop() || "").toLowerCase();
+    const mime = IMAGE_MIME[ext];
+    if (!mime) continue;
+    const bytes = await zip.files[name].async("nodebuffer");
+    if (bytes.length < 4096) continue;
+    images.push({ filename: base, mime, bytes });
+    if (images.length >= 8) break;
+  }
+  return images;
 }
 
 async function parseStainExcelBuffer(buffer, filename) {
@@ -317,6 +525,9 @@ module.exports = {
   parseStainWorkbook,
   parseStainExcelBuffer,
   parseIngredientLine,
-  classificationFromColor,
+  classificationFromNumber,
+  filenameNumbers,
+  applyFilenameHint,
+  workbookImages,
   cellText,
 };

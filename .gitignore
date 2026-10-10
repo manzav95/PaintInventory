@@ -16,6 +16,7 @@ server/node_modules/
 server/*.db
 server/*.db-journal
 server/exports/
+server/.ocr-bin/
 
 # macOS
 .DS_Store
