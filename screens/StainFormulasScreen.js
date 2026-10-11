@@ -14,6 +14,7 @@ import {
   TextInput,
   useTheme,
   ActivityIndicator,
+  IconButton,
   SegmentedButtons,
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
@@ -571,6 +572,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [editingNote, setEditingNote] = useState(null);
   const [linkNumber, setLinkNumber] = useState("");
   const [zoom, setZoom] = useState(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const [openNotes, setOpenNotes] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -597,7 +599,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         warnings: seedRef.current?.warnings || [],
         reviewStatus: next.reviewStatus || "approved",
       });
-      setDraft(next);
+      setDraft({ ...next, warnings: seedRef.current?.warnings || [] });
       setEditing(true);
       setLoading(false);
       return;
@@ -691,7 +693,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         const saved = await StainFormulaService.create({
           ...draft,
           reviewStatus: reviewStatus || draft.reviewStatus || "needs_review",
-          warnings: seedRef.current?.warnings || [],
+          warnings: (draft.warnings || []).map((item) => String(item || "").trim()).filter(Boolean),
           sourceFile: seedRef.current?.sourceBase64
             ? { filename: seedRef.current.filename, dataBase64: seedRef.current.sourceBase64 }
             : undefined,
@@ -700,7 +702,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         if (onCreated) onCreated(saved.formula);
         return;
       }
-      const saved = await StainFormulaService.update(id, { ...draft, reviewStatus: reviewStatus || draft.reviewStatus });
+      const saved = await StainFormulaService.update(id, {
+        ...draft,
+        reviewStatus: reviewStatus || draft.reviewStatus,
+        warnings: (draft.warnings || []).map((item) => String(item || "").trim()).filter(Boolean),
+      });
       setFormula(saved.formula);
       setDraft(saved.formula);
       setEditing(false);
@@ -750,25 +756,36 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
 
   const loadPdf = async () => StainFormulaService.fetchPdf(id);
 
-  const downloadPdf = async () => {
+  const saveDownload = async (blob, filename) => {
+    if (Platform.OS === "web" && typeof document !== "undefined") {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
+    const base64 = await blobToBase64(blob);
+    const uri = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+    showToast({ title: "Saved", message: filename });
+  };
+
+  const downloadFormula = async (kind) => {
+    setDownloadOpen(false);
     try {
-      const { blob } = await loadPdf();
-      const filename = `${String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula"}.pdf`;
-      if (Platform.OS === "web" && typeof document !== "undefined") {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        return;
-      }
-      const base64 = await blobToBase64(blob);
-      const uri = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
-      showToast({ title: "PDF saved", message: filename });
+      const loaded = kind === "excel"
+        ? await StainFormulaService.fetchExcel(id)
+        : await loadPdf();
+      const fallback = `${String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula"}.${kind === "excel" ? "xlsx" : "pdf"}`;
+      await saveDownload(loaded.blob, loaded.filename || fallback);
     } catch (error) {
-      showToast({ type: "error", title: "Could not download PDF", message: error.message });
+      showToast({
+        type: "error",
+        title: kind === "excel" ? "Could not download Excel" : "Could not download PDF",
+        message: error.message,
+      });
     }
   };
 
@@ -939,9 +956,27 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             {draft.reviewStatus === "pending" ? "Pending" : "Mark Pending"}
           </AppButton>
         ) : null}
-        {(formula.warnings || []).map((warning) => (
-          <Text key={warning} style={{ color: seedRef.current?.duplicate ? theme.colors.error : theme.colors.onSurfaceVariant, marginTop: 6 }}>{warning}</Text>
-        ))}
+        {editing && isAdmin ? (
+          (draft.warnings || []).map((warning, index) => (
+            <TextInput
+              key={`warning-${index}`}
+              mode="outlined"
+              label="Photo note"
+              value={warning}
+              onChangeText={(value) => setDraft((current) => {
+                const warnings = [...(current.warnings || [])];
+                warnings[index] = value;
+                return { ...current, warnings };
+              })}
+              multiline
+              style={{ marginTop: 6 }}
+            />
+          ))
+        ) : (
+          (formula.warnings || []).map((warning) => (
+            <Text key={warning} style={{ color: seedRef.current?.duplicate ? theme.colors.error : theme.colors.onSurfaceVariant, marginTop: 6 }}>{warning}</Text>
+          ))
+        )}
         <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
           Original Date {formatDate(formula.formulaDate) || "—"} · Updated {formatWhen(formula.updatedAt)}
           {formula.updatedBy ? ` by ${displayUserName(formula.updatedBy)}` : ""}
@@ -1189,8 +1224,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         ) : null}
         {isAdmin && id ? (
           <View style={{ marginTop: 12 }}>
-            <AppButton mode="outlined" icon="download" onPress={downloadPdf}>
-              Download PDF
+            <AppButton mode="outlined" icon="download" onPress={() => setDownloadOpen(true)}>
+              Download
             </AppButton>
           </View>
         ) : null}
@@ -1253,6 +1288,21 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         )) : (
           <Text style={{ color: theme.colors.onSurfaceVariant }}>No edits yet. The first save after this version starts the history.</Text>
         )}
+        <Modal visible={downloadOpen} transparent animationType="fade" onRequestClose={() => setDownloadOpen(false)}>
+          <Pressable style={styles.downloadOverlay} onPress={() => setDownloadOpen(false)}>
+            <Pressable
+              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <View style={styles.downloadHeader}>
+                <Text style={[styles.downloadTitle, { color: theme.colors.onSurface }]}>Download</Text>
+                <IconButton icon="close" size={20} onPress={() => setDownloadOpen(false)} accessibilityLabel="Close" />
+              </View>
+              <AppButton mode="contained" onPress={() => downloadFormula("pdf")}>PDF</AppButton>
+              <AppButton mode="outlined" onPress={() => downloadFormula("excel")} style={{ marginTop: 8 }}>Excel</AppButton>
+            </Pressable>
+          </Pressable>
+        </Modal>
         <Modal visible={!!zoom} transparent animationType="fade" onRequestClose={() => setZoom(null)}>
           <Pressable style={styles.lightbox} onPress={() => setZoom(null)}>
             <View style={styles.lightboxFrame}>
@@ -1348,6 +1398,10 @@ const styles = StyleSheet.create({
   importantTag: { color: "#b71c1c", fontWeight: "900", letterSpacing: 0.6, fontSize: 11 },
   photo: { width: 180, gap: 4 },
   photoImg: { width: 180, height: 140, borderRadius: 8, backgroundColor: "#111" },
+  downloadOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 16 },
+  downloadCard: { width: "100%", maxWidth: 360, borderRadius: 12, padding: 16 },
+  downloadHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  downloadTitle: { fontSize: 20, fontWeight: "700" },
   lightbox: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", padding: 16 },
   lightboxFrame: { width: "100%", height: "80%", justifyContent: "flex-end" },
   lightboxImg: { width: "100%", height: "100%", position: "absolute", top: 0, left: 0 },

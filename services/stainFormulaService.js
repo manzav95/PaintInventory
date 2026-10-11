@@ -107,6 +107,16 @@ const StainFormulaService = {
     const match = disposition.match(/filename="([^"]+)"/);
     return { blob, filename: match?.[1] || "formula.pdf" };
   },
+  async fetchExcel(formulaId) {
+    const response = await fetch(`${API_URL}/api/stain-formulas/${formulaId}/excel`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error("Could not build the formula Excel");
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="([^"]+)"/);
+    return { blob, filename: match?.[1] || "formula.xlsx" };
+  },
   async downloadSource(formulaId, fileId, filename) {
     const response = await fetch(
       `${API_URL}/api/stain-formulas/${formulaId}/files/${fileId}`,

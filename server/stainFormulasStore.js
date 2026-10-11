@@ -566,7 +566,9 @@ function cleanDraft(body) {
       : body.reviewStatus === "approved"
         ? "approved"
         : "needs_review",
-    warnings: visibleWarnings(Array.isArray(body.warnings) ? body.warnings.map(String) : []),
+    warnings: visibleWarnings(
+      Array.isArray(body.warnings) ? body.warnings.map((item) => String(item || "").trim()) : [],
+    ).filter(Boolean),
     isDemo: !!body.isDemo,
     steps: steps.map((step, index) => ({
       stepNumber: Number(step.stepNumber),

@@ -4,6 +4,7 @@ const store = require("./stainFormulasStore");
 const { parseStainExcelBuffer, filenameNumbers, classificationFromNumber, workbookImages, applyFilenameHint } = require("./stainFormulaParse");
 const { parseHandwrittenFormula, ocrHandwrittenFormula } = require("./handwrittenFormula");
 const { workbookToPdf } = require("./stainFormulaPdf");
+const { fillMasterBlank } = require("./stainFormulaSheet");
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -394,28 +395,64 @@ function registerStainFormulaRoutes(app, db) {
     }
   });
 
+  function downloadName(formula, ext) {
+    const base = String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula";
+    return `${base}.${ext}`;
+  }
+
+  async function workbookBytes(formula) {
+    const file = await pool.query(
+      `SELECT filename, bytes FROM stain_formula_files
+       WHERE formula_id = $1 AND filename ~* '\\.xls[xm]?$'
+       ORDER BY id DESC LIMIT 1`,
+      [formula.id],
+    );
+    if (file.rows[0]) {
+      return {
+        bytes: file.rows[0].bytes,
+        filename: file.rows[0].filename || downloadName(formula, "xlsm"),
+        generated: false,
+      };
+    }
+    const bytes = Buffer.from(await fillMasterBlank(formula));
+    return { bytes, filename: downloadName(formula, "xlsx"), generated: true };
+  }
+
   app.get("/api/stain-formulas/:id/pdf", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
       const formula = await store.getFormula(pool, Number(req.params.id));
       if (!formula) return res.status(404).json({ error: "Not found" });
-      const file = await pool.query(
-        `SELECT bytes FROM stain_formula_files
-         WHERE formula_id = $1 AND filename ~* '\\.xls[xm]?$'
-         ORDER BY id DESC LIMIT 1`,
-        [formula.id],
-      );
-      if (!file.rows[0]) {
-        return res.status(404).json({ error: "No Excel file is stored for this formula." });
-      }
-      const pdf = await workbookToPdf(file.rows[0].bytes);
-      const name = `${String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula"}.pdf`;
+      const workbook = await workbookBytes(formula);
+      const pdf = await workbookToPdf(workbook.bytes);
+      const name = downloadName(formula, "pdf");
       res.set("Content-Type", "application/pdf");
       res.set("Content-Disposition", `attachment; filename="${name}"`);
       res.send(pdf);
     } catch (error) {
       console.error("stain pdf:", error);
       res.status(500).json({ error: "Failed to build formula PDF" });
+    }
+  });
+
+  app.get("/api/stain-formulas/:id/excel", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const formula = await store.getFormula(pool, Number(req.params.id));
+      if (!formula) return res.status(404).json({ error: "Not found" });
+      const workbook = await workbookBytes(formula);
+      const name = String(workbook.filename).replace(/"/g, "") || downloadName(formula, "xlsx");
+      res.set(
+        "Content-Type",
+        workbook.generated
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "application/vnd.ms-excel.sheet.macroEnabled.12",
+      );
+      res.set("Content-Disposition", `attachment; filename="${name}"`);
+      res.send(workbook.bytes);
+    } catch (error) {
+      console.error("stain excel:", error);
+      res.status(500).json({ error: "Failed to build formula Excel" });
     }
   });
 
