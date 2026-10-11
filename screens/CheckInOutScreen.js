@@ -861,10 +861,10 @@ export default function CheckInOutScreen({
                 icon="truck-delivery"
                 style={styles.promptPrimaryBtn}
               >
-                Yes — select PO
+                Yes, select PO
               </AppButton>
               <AppButton mode="outlined" onPress={handleDeliveryPromptNo}>
-                No — regular check-in
+                No, regular check-in
               </AppButton>
               <AppButton mode="text" onPress={() => setShowDeliveryPrompt(false)}>
                 Cancel

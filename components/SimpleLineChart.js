@@ -150,28 +150,8 @@ export default function SimpleLineChart({
         </Text>
       </View>
     ) : (
-      <Text
-        style={[
-          styles.headerSlot,
-          styles.hint,
-          { color: theme.colors.onSurfaceVariant },
-        ]}
-      >
-        {scrollable
-          ? "Scroll chart for all dates · tap a point for totals"
-          : "Tap a point for date and quantity"}
-      </Text>
+      <View style={styles.headerSlot} />
     )
-  ) : scrollable ? (
-    <Text
-      style={[
-        styles.headerSlot,
-        styles.hint,
-        { color: theme.colors.onSurfaceVariant },
-      ]}
-    >
-      Scroll chart for all dates
-    </Text>
   ) : (
     <View style={styles.headerSlot} />
   );

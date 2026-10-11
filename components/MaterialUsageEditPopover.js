@@ -528,7 +528,7 @@ export default function MaterialUsageEditPopover({
                     {materialSuggestions.length === 0 &&
                     (colorQuery || "").trim() ? (
                       <AppEmptyState
-                        title="No matches — use custom above"
+                        title="No matches. Use custom above."
                         style={styles.emptyList}
                       />
                     ) : null}

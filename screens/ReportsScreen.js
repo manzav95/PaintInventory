@@ -688,24 +688,7 @@ export default function ReportsScreen({ onBack, embeddedInShell = false }) {
           >
             Stats for: {loading && !summary ? "—" : periodLabel}
           </Text>
-          <Text
-            style={[
-              styles.periodHint,
-              { color: theme.colors.onSurfaceVariant },
-            ]}
-          >
-            Tap any chart point to view that period's totals. Week, month,
-            year, and lifetime groupings show different period values.
-          </Text>
           <MetricStrip items={metricItems} />
-          <Text
-            style={[
-              styles.estimateNote,
-              { color: theme.colors.onSurfaceVariant },
-            ]}
-          >
-            Order value is estimated from current item prices × line quantities.
-          </Text>
           <View style={[styles.chartGrid, isWide && styles.chartGridWide]}>
             <Card style={chartCardStyle} mode="outlined">
               <Card.Content style={styles.chartCardContent}>

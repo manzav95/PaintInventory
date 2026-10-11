@@ -569,8 +569,7 @@ export default function ReceivePoModal({
                       { color: theme.colors.onSurfaceVariant },
                     ]}
                   >
-                    Enter gallons per line (defaults to remaining). Custom colors
-                    can set stack A–Z.
+                    Gallons per line. Custom colors: stack A-Z.
                   </Text>
                 </View>
                 {receiveOrdersLoading && !receiveOrdersLoaded ? (

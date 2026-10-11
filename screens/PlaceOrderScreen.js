@@ -485,7 +485,7 @@ export default function PlaceOrderScreen({
       const title = "Separate POs required";
       const msg =
         "AP items and mixing items must be on separate purchase orders. " +
-        "Clear quantities for one group and submit, then place the other group as a second order—or use the AP and Mixing tabs so only one type is on screen.";
+        "Clear quantities for one group and submit, then place the other group as a second order. Or use the AP and Mixing tabs so only one type is on screen.";
       if (Platform.OS === "web" && typeof window !== "undefined") {
         window.alert(`${title}\n\n${msg}`);
       } else {
@@ -530,7 +530,7 @@ export default function PlaceOrderScreen({
       const MAX_LINES = 25;
       const lineSummaries = lines.map((l) => {
         const name = (l.item.name || l.item.id || "Item").trim();
-        return `• ${name} — ${l.quantity} gal`;
+        return `• ${name}: ${l.quantity} gal`;
       });
       const shown = lineSummaries.slice(0, MAX_LINES);
       const overflow =
@@ -675,7 +675,7 @@ export default function PlaceOrderScreen({
             </View>
             {orderLines.length === 0 ? (
               <AppEmptyState
-                title="No items yet — tap a card below to add."
+                title="No items yet. Tap a card below to add."
                 style={styles.orderCartEmpty}
               />
             ) : (

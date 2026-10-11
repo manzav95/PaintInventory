@@ -20,14 +20,12 @@ import {
 import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import ShakeView from "../components/ShakeView";
-import FormHelp from "../components/FormHelp";
 import ScrollFrame from "../components/ScrollFrame";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import { AppEmptyState, AppText } from "../components/ui";
 import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
-import { LINEUP_FORM_HELP } from "../constants/formHelpContent";
 import LineupService, {
   LINEUP_PIECE_TYPE_OPTIONS,
   parseLineupPieceTypes,
@@ -402,11 +400,6 @@ export default function LineupScreen({
     }
   };
 
-  const myEntries = useMemo(
-    () => entries.filter((e) => sameUser(e.user_name, userName)),
-    [entries, userName],
-  );
-
   const formCard = (
     <Card style={surfaceCardStyle} mode="outlined">
       <ShakeView trigger={shakeTick}>
@@ -417,12 +410,7 @@ export default function LineupScreen({
             >
               {editingId ? "Edit lineup" : "Post lineup"}
             </Text>
-            <FormHelp content={LINEUP_FORM_HELP} />
           </View>
-          <AppText variant="caption" tone="muted" style={styles.hint}>
-            Rough estimate of what’s loading on the line — helps mixers grab
-            colors ahead of time.
-          </AppText>
 
           <TextInput
             label="Job number"
@@ -608,13 +596,6 @@ export default function LineupScreen({
         <Text style={[styles.sectionLabel, { color: theme.colors.onSurface }]}>
           Current lineup
         </Text>
-        <AppText variant="caption" tone="muted" style={styles.hint}>
-          {isAdmin
-            ? "Everyone can view. You can edit or delete any entry as admin."
-            : "Everyone can view. Only you can edit or delete entries you posted"}{" "}
-          ({myEntries.length} of yours). Check off items you’ve mixed — only you
-          see your checkmarks.
-        </AppText>
 
         {loading ? (
           <SkeletonStack lines={4} style={{ marginTop: 8 }} />

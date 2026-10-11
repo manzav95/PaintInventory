@@ -48,6 +48,7 @@ function usageForBucket(summary, index) {
     return {
       label: detail.label,
       gallons: detail.materialUsageGallons || 0,
+      value: detail.materialUsageValue || 0,
       byType: detail.materialUsageByType || {},
       count: detail.materialUsageCount || 0,
     };
@@ -55,6 +56,7 @@ function usageForBucket(summary, index) {
   return {
     label: summary.buckets?.[index] || "—",
     gallons: summary.materialUsageGallons?.[index] ?? 0,
+    value: summary.materialUsageValue?.[index] ?? 0,
     byType: {},
     count: summary.materialUsageCount?.[index] ?? 0,
   };
@@ -121,6 +123,7 @@ export default function MaterialUsageReportModal({
     return {
       label: "All periods",
       gallons: report?.totals?.materialUsageGallons || 0,
+      value: report?.totals?.materialUsageValue || 0,
       byType: report?.totals?.materialUsageByType || {},
       count: report?.totals?.materialUsageCount || 0,
     };
@@ -131,11 +134,19 @@ export default function MaterialUsageReportModal({
       {
         label: "Total (gal)",
         value: `${Math.round(periodUsage.gallons * 10) / 10}`,
+        suffix: " gal",
         color: USAGE_TOTAL_COLOR,
+      },
+      {
+        label: "Used ($)",
+        value: `$${Math.round(periodUsage.value || 0).toLocaleString()}`,
+        suffix: "",
+        color: "#ffb74d",
       },
       ...TYPE_META.map((t) => ({
         label: t.label,
         value: `${periodUsage.byType?.[t.key] || 0}`,
+        suffix: " gal",
         color: t.color,
       })),
     ],
@@ -244,15 +255,6 @@ export default function MaterialUsageReportModal({
                     ? ` · ${periodUsage.count} entries`
                     : ""}
                 </Text>
-                <Text
-                  style={[
-                    styles.hint,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  Tap a chart point to view gallons by type for that period.
-                </Text>
-
                 <View style={[styles.metrics, isWide && styles.metricsWide]}>
                   {metricRow.map((m) => (
                     <View
@@ -276,7 +278,7 @@ export default function MaterialUsageReportModal({
                       <Text
                         style={[styles.metricValue, { color: m.color }]}
                       >
-                        {m.value} gal
+                        {m.value}{m.suffix}
                       </Text>
                     </View>
                   ))}
@@ -304,6 +306,17 @@ export default function MaterialUsageReportModal({
                         selectedIndex={selectedBucketIndex}
                         onPointSelect={setSelectedBucketIndex}
                       />
+                      <SimpleLineChart
+                        title={`Used material price per ${groupBy}`}
+                        data={report.materialUsageValue || []}
+                        labels={report.buckets || []}
+                        color="#ffb74d"
+                        currency
+                        height={240}
+                        interactive
+                        selectedIndex={selectedBucketIndex}
+                        onPointSelect={setSelectedBucketIndex}
+                      />
                     </Card.Content>
                   </Card>
                 )}
@@ -325,7 +338,7 @@ export default function MaterialUsageReportModal({
                         { color: theme.colors.onSurface },
                       ]}
                     >
-                      By type — {periodUsage.label}
+                      By type: {periodUsage.label}
                     </Text>
                     {TYPE_META.map((t) => (
                       <View key={t.key} style={styles.typeRow}>

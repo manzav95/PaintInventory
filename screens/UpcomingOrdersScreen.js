@@ -464,7 +464,7 @@ export default function UpcomingOrdersScreen({
   const confirmDeleteOrder = (order) => {
     const id = Number(order.id);
     if (!Number.isFinite(id) || id < 1) {
-      Alert.alert("Error", "Invalid order — cannot delete.");
+      Alert.alert("Error", "Invalid order. Cannot delete.");
       return;
     }
     const poLabel =
@@ -1564,7 +1564,7 @@ export default function UpcomingOrdersScreen({
                             { color: theme.colors.onSurfaceVariant },
                           ]}
                         >
-                          Optional — link this custom color to a job for search.
+                          Optional.
                         </Text>
                       </>
                     ) : null}

@@ -21,12 +21,10 @@ import DateField from "../components/DateField";
 import PageHeader from "../components/PageHeader";
 import StaggerItem from "../components/StaggerItem";
 import ShakeView from "../components/ShakeView";
-import FormHelp from "../components/FormHelp";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
-import { WASTE_FORM_HELP } from "../constants/formHelpContent";
 import WasteTrackingService from "../services/wasteTrackingService";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
@@ -226,7 +224,7 @@ export default function WasteTrackingScreen({
       setTimeout(() => setCopiedId(null), 2000);
       showToast({
         title: "Copied",
-        message: "Paste into Excel — Paint, Clear, Primer, Acetone.",
+        message: "Paste into Excel. Paint, Clear, Primer, Acetone.",
       });
     } catch (e) {
       showToast({
@@ -246,7 +244,7 @@ export default function WasteTrackingScreen({
       setTimeout(() => setCopiedWeek(null), 2000);
       showToast({
         title: "Week copied",
-        message: "Paste into Excel — 4 columns × 5 rows (Mon–Fri).",
+        message: "Paste into Excel. 4 columns x 5 rows, Mon-Fri.",
       });
     } catch (e) {
       showToast({
@@ -452,7 +450,6 @@ export default function WasteTrackingScreen({
             >
               {editingId ? "Edit waste" : "Log waste"}
             </Text>
-            <FormHelp content={WASTE_FORM_HELP} />
           </View>
           <DateField
             label="Date"
@@ -477,8 +474,7 @@ export default function WasteTrackingScreen({
           <Text
             style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
           >
-            Enter inches → auto converts to gal ({GALLONS_PER_INCH} gal/in).
-            Enter moves to the next field.
+            Enter inches. Converts to {GALLONS_PER_INCH} gal/in.
           </Text>
 
           <View style={styles.inchGrid}>
@@ -728,15 +724,6 @@ export default function WasteTrackingScreen({
           >
             Data alerts
           </Text>
-          <Text
-            style={[
-              styles.hint,
-              { color: theme.colors.onSurfaceVariant, marginTop: 0 },
-            ]}
-          >
-            Unusual increase vs the previous week or month (≥50% and +0.8
-            gal).
-          </Text>
           {alerts.map((a) => (
             <Text
               key={a.id}
@@ -755,8 +742,7 @@ export default function WasteTrackingScreen({
         Waste records by week (gal)
       </Text>
       <Text style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}>
-        Copy week pastes Mon–Fri into a 4×5 Excel grid (Paint, Clear,
-        Primer, Acetone).
+        Copy week: Mon-Fri into a 4x5 grid. Paint, Clear, Primer, Acetone.
       </Text>
       {loading && records.length === 0 ? (
         <SkeletonStack lines={4} style={{ marginTop: 8 }} />

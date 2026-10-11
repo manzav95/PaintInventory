@@ -26,7 +26,7 @@ async function _fetch(endpoint, options = {}) {
 }
 
 function buildMailtoUrl(items, requestedBy) {
-  const subject = `Low paint stock — ${items.length} item${items.length === 1 ? "" : "s"}`;
+  const subject = `Low paint stock: ${items.length} item${items.length === 1 ? "" : "s"}`;
   const lines = items.map((it) => {
     const name = it.name || "Unnamed";
     const id = it.id != null ? String(it.id) : "—";

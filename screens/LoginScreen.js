@@ -338,9 +338,8 @@ export default function LoginScreen({ onLogin }) {
               {changingPassword ? (
                 <>
                   <AppText variant="body" tone="muted" style={styles.subtitle}>
-                    Welcome, {displayUserName(pendingUser.user_name)}. You signed in with the
-                    default password — choose a new one before continuing (min 3
-                    characters; not "password").
+                    Welcome, {displayUserName(pendingUser.user_name)}. Choose a new
+                    password (min 3 characters, not "password").
                   </AppText>
                   <TextInput
                     label="New password"

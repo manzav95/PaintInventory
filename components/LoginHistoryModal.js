@@ -84,15 +84,6 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
             </Text>
             <IconButton icon="close" size={20} onPress={onDismiss} />
           </View>
-          <Text
-            style={[
-              styles.hint,
-              { color: theme.colors.onSurfaceVariant },
-            ]}
-          >
-            Each sign-in is recorded with a timestamp (newest first).
-          </Text>
-
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator />

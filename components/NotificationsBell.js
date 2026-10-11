@@ -128,8 +128,8 @@ export default function NotificationsBell({
         color: colors.brand.accent,
         detail:
           pendingFeedbackCount === 1
-            ? "1 new message — open Messages to review"
-            : `${pendingFeedbackCount} new messages — open Messages to review`,
+            ? "1 new message. Open Messages to review."
+            : `${pendingFeedbackCount} new messages. Open Messages to review.`,
         onPress: () => {
           setVisible(false);
           onOpenMessages();
@@ -202,7 +202,7 @@ export default function NotificationsBell({
         color: colors.semantic.lowStockValue,
         detail: isAdmin
           ? `Below ${minQuantity} gal (or item minimum)`
-          : `Paint below ${minQuantity} gal — notify purchasing`,
+          : `Paint below ${minQuantity} gal. Notify purchasing.`,
         onPress:
           isAdmin && onOpenLowStock
             ? () => {

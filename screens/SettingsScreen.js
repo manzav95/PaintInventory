@@ -31,7 +31,7 @@ import LoginHistoryModal from "../components/LoginHistoryModal";
 import { displayUserName } from "../utils/displayUserName";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import { AppSurface, AppText } from "../components/ui";
-import { colors, fontFamily, space, radius } from "../theme/tokens";
+import { colors, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
 import { getActionColor } from "../utils/actionColors";
@@ -707,7 +707,6 @@ export default function SettingsScreen({
       <SettingsMenuRow
         icon="palette-outline"
         title="Appearance"
-        description="Theme and display"
         onPress={() => setPanel("appearance")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
@@ -721,7 +720,6 @@ export default function SettingsScreen({
       <SettingsMenuRow
         icon="message-text-outline"
         title="Feedback"
-        description="Send tips, bugs, or questions to admin"
         onPress={() => promptFeedback({ userName })}
       />
       {isAdmin ? (
@@ -730,7 +728,6 @@ export default function SettingsScreen({
           <SettingsMenuRow
             icon="shield-account-outline"
             title="Admin"
-            description="Users, export, overtime, inventory tools"
             onPress={() => setPanel("admin")}
           />
         </>
@@ -746,13 +743,6 @@ export default function SettingsScreen({
       <View style={styles.settingRow}>
         <View style={styles.settingInfo}>
           <AppText variant="bodyStrong">Dark Mode</AppText>
-          <AppText
-            variant="caption"
-            tone="muted"
-            style={styles.settingDescription}
-          >
-            Use a dark color scheme across the app
-          </AppText>
         </View>
         <Switch
           value={isDarkMode}
@@ -802,28 +792,24 @@ export default function SettingsScreen({
       <SettingsMenuRow
         icon="account-group-outline"
         title="Users"
-        description="Create accounts, reset passwords, login history"
         onPress={() => setPanel("admin-users")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
       <SettingsMenuRow
         icon="file-excel-outline"
         title="Export"
-        description="Inventory and material usage Excel downloads"
         onPress={() => setPanel("admin-export")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
       <SettingsMenuRow
         icon="clock-outline"
         title="Overtime"
-        description="Material usage day / swing cutoffs"
         onPress={() => setPanel("admin-overtime")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
       <SettingsMenuRow
         icon="numeric-0-box-outline"
         title="Zero quantities"
-        description="Reset custom color stock to 0"
         onPress={() => setPanel("admin-zeros")}
         danger
       />
@@ -831,14 +817,12 @@ export default function SettingsScreen({
       <SettingsMenuRow
         icon="palette-swatch-outline"
         title="Color hex lookup"
-        description="Fill missing hex codes from color names"
         onPress={() => setPanel("admin-hex")}
       />
       <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
       <SettingsMenuRow
         icon="barcode"
         title="External codes"
-        description="Paint barcode / external ID suffix"
         onPress={() => setPanel("admin-codes")}
       />
     </AppSurface>
@@ -855,13 +839,8 @@ export default function SettingsScreen({
           tone="muted"
           style={styles.settingDescription}
         >
-          Create named accounts. New accounts start with password "password"
-          and must choose a new one on first login. Passwords are stored as
-          bcrypt hashes only — they cannot be viewed. Reset sets the password
-          back to "password" and requires a change on next login. Standard
-          accounts match today's warehouse users. Sales accounts can only view
-          inventory and the color book. Admin accounts have the same access as
-          the master account.
+          New accounts start with password "password" and must change it on
+          first login. Sales can only view inventory. Admins have full access.
         </AppText>
         <TextInput
           label="New user name"
@@ -1021,9 +1000,6 @@ export default function SettingsScreen({
         <AppText variant="sectionTitle" style={styles.sectionTitle}>
           Login history
         </AppText>
-        <AppText variant="caption" tone="muted" style={styles.blockHint}>
-          View sign-in history for all users (timestamp per login).
-        </AppText>
         <AppButton
           mode="outlined"
           onPress={() => setLoginHistoryOpen(true)}
@@ -1053,9 +1029,6 @@ export default function SettingsScreen({
     <AppSurface>
       <AppText variant="sectionTitle" style={styles.sectionTitle}>
         {activityUser || "User"} activity
-      </AppText>
-      <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Logins, inventory actions, and material usage for this account.
       </AppText>
       <SegmentedButtons
         value={activityRange}
@@ -1142,9 +1115,6 @@ export default function SettingsScreen({
       <AppText variant="sectionTitle" style={styles.sectionTitle}>
         Inventory
       </AppText>
-      <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Export current inventory to an Excel file.
-      </AppText>
       <AppButton
         mode="outlined"
         onPress={onExportExcel}
@@ -1161,9 +1131,6 @@ export default function SettingsScreen({
       />
       <AppText variant="sectionTitle" style={styles.sectionTitle}>
         Material usage
-      </AppText>
-      <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Export by month or year (only periods with logged quantity are listed).
       </AppText>
       <SegmentedButtons
         value={exportTab}
@@ -1291,8 +1258,7 @@ export default function SettingsScreen({
         Zero quantities
       </AppText>
       <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Sets every custom paint/stain quantity to 0. Does not delete items. Use
-        after a physical recount reset.
+        Sets custom paint and stain quantities to 0. Does not delete items.
       </AppText>
       <AppButton
         mode="outlined"
@@ -1310,9 +1276,7 @@ export default function SettingsScreen({
         ]}
       />
       <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Zeros only custom paint/stain items with no check-in, check-out,
-        receiving, or quantity change in the past 2 days. Skips recently active
-        stock.
+        Custom colors with no activity in the past 2 days.
       </AppText>
       <AppButton
         mode="outlined"
@@ -1332,9 +1296,7 @@ export default function SettingsScreen({
         Fill missing color hex
       </AppText>
       <AppText variant="caption" tone="muted" style={styles.blockHint}>
-        Finds custom paint/stain items that have a name (or color book code)
-        but no hex, then looks up hex codes online. Progress shows in a bar at
-        the top of the app so you can keep working. Confirm when it finishes.
+        Looks up missing hex codes for custom colors.
       </AppText>
       <AppButton
         mode="contained"
@@ -1361,12 +1323,7 @@ export default function SettingsScreen({
         tone="muted"
         style={styles.settingDescription}
       >
-        Optional ending sequence automatically appended to Paint and Custom
-        Paint IDs (for bucket barcodes). Example:{" "}
-        <Text style={{ fontFamily: fontFamily.mono }}>-794394</Text> turns ID{" "}
-        <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323</Text> into
-        external code{" "}
-        <Text style={{ fontFamily: fontFamily.mono }}>H66LNL49323-794394</Text>.
+        Added to the end of paint IDs.
       </AppText>
       <TextInput
         label="Suffix (optional)"

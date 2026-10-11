@@ -380,7 +380,7 @@ export default function StainFormulasScreen({
       {!embeddedInShell ? <PageHeader title="Stain Formulas" onBack={onBack} /> : null}
       <ScrollView contentContainerStyle={styles.page}>
         <Text style={[styles.lead, { color: theme.colors.onSurfaceVariant }]}>
-          {total} formula{total === 1 ? "" : "s"}. Search by number, color, job, wood, or description.
+          {total} formula{total === 1 ? "" : "s"}
         </Text>
         <TextInput
           mode="outlined"
@@ -509,6 +509,12 @@ export default function StainFormulasScreen({
           ))}
         </View>
       </ScrollView>
+      {importing ? (
+        <View style={styles.busyCover}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={{ color: "#fff", marginTop: 12, fontWeight: "700" }}>Working</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -566,6 +572,17 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [linkNumber, setLinkNumber] = useState("");
   const [zoom, setZoom] = useState(null);
   const [openNotes, setOpenNotes] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const runBusy = async (work) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await work();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (creating) {
@@ -658,6 +675,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const largeFields = useMemo(() => new Set(["formulaNumber", "woodType", "woodSpecies", "sheen"]), []);
 
   const save = async (reviewStatus) => {
+    if (busy) return;
+    setBusy(true);
     try {
       if (creating && seedRef.current?.duplicate) {
         showToast({
@@ -688,6 +707,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
       showToast({ title: "Saved", message: "Previous steps were kept in revision history." });
     } catch (error) {
       showToast({ type: "error", title: "Save failed", message: error.message });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -714,15 +735,17 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const uploadPhoto = async () => {
     const files = await pickFiles("image/png,image/jpeg", true);
     if (!files.length) return;
-    const hasPhoto = (formula.images || []).length > 0;
-    for (let index = 0; index < files.length; index += 1) {
-      await StainFormulaService.addImage(id, {
-        ...files[index],
-        caption: "Reference photo",
-        isPrimary: !hasPhoto && index === 0,
-      });
-    }
-    await load();
+    await runBusy(async () => {
+      const hasPhoto = (formula.images || []).length > 0;
+      for (let index = 0; index < files.length; index += 1) {
+        await StainFormulaService.addImage(id, {
+          ...files[index],
+          caption: "Reference photo",
+          isPrimary: !hasPhoto && index === 0,
+        });
+      }
+      await load();
+    });
   };
 
   const loadPdf = async () => StainFormulaService.fetchPdf(id);
@@ -800,9 +823,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
       return;
     }
     if (!noteBody.trim()) return;
-    await StainFormulaService.addNote(id, { body: noteBody.trim(), category: noteCategory, critical: noteCategory === "adhesion" || noteCategory === "quality" });
-    setNoteBody("");
-    await load();
+    await runBusy(async () => {
+      await StainFormulaService.addNote(id, { body: noteBody.trim(), category: noteCategory, critical: noteCategory === "adhesion" || noteCategory === "quality" });
+      setNoteBody("");
+      await load();
+    });
   };
 
   if (loading || !formula || !draft) {
@@ -823,9 +848,45 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
     related.push({ formulaNumber: number, missing: true });
   });
 
+  const colorTitle = model.formulaNumber || model.colorName || "—";
+  const colorSubtitle = model.colorName && model.colorName.toLowerCase() !== String(model.formulaNumber || "").trim().toLowerCase()
+    ? model.colorName
+    : "";
+  const primaryImage = (formula.images || []).find((image) => image.isPrimary) || (formula.images || [])[0] || null;
+  const seedImage = creating ? (seedRef.current?.images || [])[0] : null;
+  const headerPhotoUri = primaryImage && photos[primaryImage.id]
+    ? photos[primaryImage.id]
+    : seedImage?.dataBase64
+      ? `data:${seedImage.mime || "image/jpeg"};base64,${seedImage.dataBase64}`
+      : "";
+
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       {!embeddedInShell ? null : null}
+      <View
+        style={[
+          styles.stickyTitle,
+          { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.outlineVariant },
+        ]}
+      >
+        <View style={styles.stickyTitleRow}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
+              {colorTitle}
+            </Text>
+            {colorSubtitle ? (
+              <Text style={{ color: theme.dark ? "#9aa4b2" : "#8b939e", fontStyle: "italic" }} numberOfLines={1}>
+                {colorSubtitle}
+              </Text>
+            ) : null}
+          </View>
+          {headerPhotoUri ? (
+            <Pressable onPress={() => setZoom(headerPhotoUri)}>
+              <Image source={{ uri: headerPhotoUri }} style={styles.headerPhoto} resizeMode="cover" />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
       <ScrollView contentContainerStyle={styles.page}>
         {wide ? (
           <View style={styles.toolbar}>
@@ -859,12 +920,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             ) : null}
           </View>
         )}
-        <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-          {model.formulaNumber || model.colorName || "—"}
-        </Text>
-        {model.colorName && model.colorName.toLowerCase() !== String(model.formulaNumber || "").trim().toLowerCase() ? (
-          <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginTop: 4 }}>{model.colorName}</Text>
-        ) : null}
         <Text style={{ color: model.reviewStatus === "pending" ? "#e07a00" : model.reviewStatus === "needs_review" ? theme.colors.error : theme.colors.onSurfaceVariant, fontWeight: model.reviewStatus === "pending" ? "800" : "400" }}>
           {model.reviewStatus === "pending" ? "Pending · " : model.reviewStatus === "needs_review" ? "Needs Review · " : ""}
           {classificationLabel(model.classification)}
@@ -967,7 +1022,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                     );
                     if (!ok) return;
                     try {
-                      const saved = await StainFormulaService.unlinkColor(id, item.formulaNumber);
+                      const saved = await runBusy(() => StainFormulaService.unlinkColor(id, item.formulaNumber));
+                      if (!saved) return;
                       setFormula(saved);
                       setDraft(saved);
                     } catch (error) {
@@ -988,7 +1044,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
               mode="contained"
               onPress={async () => {
                 try {
-                  const saved = await StainFormulaService.linkColor(id, linkNumber.trim());
+                  const saved = await runBusy(() => StainFormulaService.linkColor(id, linkNumber.trim()));
+                  if (!saved) return;
                   setFormula(saved);
                   setDraft(saved);
                   setLinkNumber("");
@@ -1084,7 +1141,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         ) : null}
         {!creating && isAdmin ? <AppButton mode="outlined" icon="image" onPress={uploadPhoto}>Upload Photo</AppButton> : null}
         <View style={styles.chips}>
-          {creating ? (seedRef.current?.images || []).map((image, index) => (
+          {creating ? (seedRef.current?.images || []).slice(headerPhotoUri ? 1 : 0).map((image, index) => (
             <View key={`excel-${index}`} style={styles.photo}>
               <Image source={{ uri: `data:${image.mime || "image/jpeg"};base64,${image.dataBase64}` }} style={styles.photoImg} resizeMode="cover" />
               <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>From Excel</Text>
@@ -1092,7 +1149,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           )) : null}
           {(formula.images || []).map((image) => (
             <View key={image.id} style={styles.photo}>
-              {photos[image.id] ? (
+              {image.id === primaryImage?.id ? null : photos[image.id] ? (
                 <Pressable onPress={() => setZoom(photos[image.id])}>
                   <Image source={{ uri: photos[image.id] }} style={styles.photoImg} resizeMode="cover" />
                 </Pressable>
@@ -1110,7 +1167,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                       compact
                       mode="text"
                       onPress={async () => {
-                        const saved = await StainFormulaService.setPrimaryImage(id, image.id);
+                        const saved = await runBusy(() => StainFormulaService.setPrimaryImage(id, image.id));
+                        if (!saved) return;
                         setFormula(saved);
                         setDraft(saved);
                       }}
@@ -1118,7 +1176,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                       Use As Main
                     </AppButton>
                   ) : null}
-                  <AppButton compact mode="text" onPress={async () => { await StainFormulaService.deleteImage(id, image.id); await load(); }}>
+                  <AppButton compact mode="text" onPress={() => runBusy(async () => { await StainFormulaService.deleteImage(id, image.id); await load(); })}>
                     Remove
                   </AppButton>
                 </View>
@@ -1167,13 +1225,15 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                 <View style={styles.toolbar}>
                   <AppButton compact mode="text" onPress={() => { setEditingNote(note.id); setNoteBody(note.body); }}>Edit</AppButton>
                   {editingNote === note.id ? (
-                    <AppButton compact onPress={async () => { await StainFormulaService.updateNote(id, note.id, { body: noteBody, category: note.category }); setEditingNote(null); await load(); }}>Save Note</AppButton>
+                    <AppButton compact onPress={() => runBusy(async () => { await StainFormulaService.updateNote(id, note.id, { body: noteBody, category: note.category }); setEditingNote(null); await load(); })}>Save Note</AppButton>
                   ) : null}
                   <AppButton compact mode="text" onPress={async () => {
                     const ok = await confirmAction("Delete note", "Remove your note?", { confirmLabel: "Delete", destructive: true });
                     if (!ok) return;
-                    await StainFormulaService.deleteNote(id, note.id);
-                    await load();
+                    await runBusy(async () => {
+                      await StainFormulaService.deleteNote(id, note.id);
+                      await load();
+                    });
                   }}>Delete</AppButton>
                 </View>
               ) : null}
@@ -1195,7 +1255,12 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         )}
         <Modal visible={!!zoom} transparent animationType="fade" onRequestClose={() => setZoom(null)}>
           <Pressable style={styles.lightbox} onPress={() => setZoom(null)}>
-            {zoom ? <Image source={{ uri: zoom }} style={styles.lightboxImg} resizeMode="contain" /> : null}
+            <View style={styles.lightboxFrame}>
+              {zoom ? <Image source={{ uri: zoom }} style={styles.lightboxImg} resizeMode="contain" /> : null}
+              <View style={styles.lightboxBar}>
+                <Text style={styles.lightboxBarText}>{colorTitle}</Text>
+              </View>
+            </View>
             <Text style={{ color: "#fff", marginTop: 12 }}>Tap To Close</Text>
           </Pressable>
         </Modal>
@@ -1206,7 +1271,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             onPress={async () => {
               const ok = await confirmAction("Delete formula", "This removes the formula and its notes.", { confirmLabel: "Delete", destructive: true });
               if (!ok) return;
-              await StainFormulaService.remove(id);
+              await runBusy(() => StainFormulaService.remove(id));
               onBack();
             }}
           >
@@ -1214,12 +1279,43 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           </AppButton>
         ) : null}
       </ScrollView>
+      {busy ? (
+        <View style={styles.busyCover}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={{ color: "#fff", marginTop: 12, fontWeight: "700" }}>Working</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  stickyTitle: {
+    position: "sticky",
+    top: 0,
+    zIndex: 8,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    maxWidth: 1100,
+    width: "100%",
+    alignSelf: "center",
+  },
+  stickyTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  headerPhoto: { width: 96, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
+  busyCover: {
+    position: Platform.OS === "web" ? "fixed" : "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 40,
+  },
   page: { padding: 16, paddingBottom: 48, maxWidth: 1100, width: "100%", alignSelf: "center", gap: 8 },
   lead: { fontSize: 14, lineHeight: 20 },
   search: { marginBottom: 4 },
@@ -1253,5 +1349,8 @@ const styles = StyleSheet.create({
   photo: { width: 180, gap: 4 },
   photoImg: { width: 180, height: 140, borderRadius: 8, backgroundColor: "#111" },
   lightbox: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", padding: 16 },
-  lightboxImg: { width: "100%", height: "80%" },
+  lightboxFrame: { width: "100%", height: "80%", justifyContent: "flex-end" },
+  lightboxImg: { width: "100%", height: "100%", position: "absolute", top: 0, left: 0 },
+  lightboxBar: { backgroundColor: "rgba(0,0,0,0.72)", paddingVertical: 10, paddingHorizontal: 16, alignItems: "center" },
+  lightboxBarText: { color: "#fff", fontWeight: "800", fontSize: 22 },
 });

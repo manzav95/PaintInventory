@@ -3,7 +3,7 @@ const DEFAULT_TO = "manuelzavala@precisioncabinets.com";
 function buildFeedbackEmail({ message, userName, platform }) {
   const who = String(userName || "").trim() || "Anonymous";
   const body = String(message || "").trim();
-  const subject = `CURE app feedback — ${who}`;
+  const subject = `CURE app feedback: ${who}`;
   const text = [
     `Feedback from ${who}`,
     `When: ${new Date().toLocaleString()}`,

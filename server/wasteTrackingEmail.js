@@ -20,7 +20,7 @@ function formatMonthDayYear(dateStr) {
 
 function buildEmailContent(entry) {
   const dateLabel = formatMonthDayYear(entry.entry_date);
-  const subject = `Waste tracking — ${dateLabel} — ${entry.user_name || "unknown"}`;
+  const subject = `Waste tracking: ${dateLabel}, ${entry.user_name || "unknown"}`;
   const text = [
     "VOC / Waste tracking entry",
     "",
@@ -109,7 +109,7 @@ async function sendWasteTrackingEmail(entry) {
   return {
     success: false,
     mailtoUrl,
-    message: "SMTP not configured — use mailto fallback on client.",
+    message: "SMTP not configured. Use mailto fallback on client.",
   };
 }
 

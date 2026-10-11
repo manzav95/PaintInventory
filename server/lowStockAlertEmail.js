@@ -2,7 +2,7 @@ const DEFAULT_TO = "manuelzavala@precisioncabinets.com";
 
 function buildEmailContent(items, requestedBy) {
   const list = Array.isArray(items) ? items : [];
-  const subject = `Low paint stock — ${list.length} item${list.length === 1 ? "" : "s"}`;
+  const subject = `Low paint stock: ${list.length} item${list.length === 1 ? "" : "s"}`;
   const lines = list.map((it) => {
     const name = it.name || "Unnamed";
     const id = it.id != null ? String(it.id) : "—";
@@ -86,7 +86,7 @@ async function sendLowStockAlertEmail({ items, requestedBy }) {
   return {
     success: false,
     mailtoUrl,
-    message: "SMTP not configured — use mailto fallback on client.",
+    message: "SMTP not configured. Use mailto fallback on client.",
   };
 }
 

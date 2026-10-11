@@ -28,7 +28,6 @@ import DateField from "../components/DateField";
 import TimeField from "../components/TimeField";
 import PageHeader from "../components/PageHeader";
 import ShakeView from "../components/ShakeView";
-import FormHelp from "../components/FormHelp";
 import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
@@ -45,7 +44,6 @@ import {
 import StaggerItem from "../components/StaggerItem";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import ScrollFrame from "../components/ScrollFrame";
-import { MATERIAL_USAGE_FORM_HELP } from "../constants/formHelpContent";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import { nestedSurfaceColor } from "../utils/themeColors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -901,7 +899,7 @@ export default function MaterialUsageScreen({
       setTimeout(() => setCopiedWeek(null), 2000);
       showToast({
         title: "Week copied",
-        message: `Paste into Excel — ${boothWeekCopyHint(boothFilter)}.`,
+        message: `Paste into Excel. ${boothWeekCopyHint(boothFilter)}.`,
       });
     } catch (e) {
       showToast({
@@ -1416,7 +1414,6 @@ export default function MaterialUsageScreen({
             >
               Log mix
             </Text>
-            <FormHelp content={MATERIAL_USAGE_FORM_HELP} />
           </View>
           <Text
             style={[
@@ -1525,7 +1522,7 @@ export default function MaterialUsageScreen({
                 {effectiveMaterialType
                   ? ` · ${formatMaterialTypeLabel(effectiveMaterialType)}`
                   : ""}
-                {isPrimerSelected ? " — tap Log to submit" : ""}
+                {isPrimerSelected ? ". Tap Log to submit." : ""}
               </Text>
             ) : resolvedTypedPaint ? (
               <Text
@@ -1619,7 +1616,7 @@ export default function MaterialUsageScreen({
                 {materialSuggestions.length === 0 &&
                 (colorQuery || "").trim() ? (
                   <AppEmptyState
-                    title="No inventory matches — use custom above"
+                    title="No inventory matches. Use custom above."
                     style={styles.emptyList}
                   />
                 ) : null}

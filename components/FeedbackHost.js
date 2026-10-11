@@ -154,15 +154,6 @@ export default function FeedbackHost() {
         >
           <Dialog.Title style={styles.title}>Help & feedback</Dialog.Title>
           <Dialog.Content style={styles.content}>
-            <Text
-              style={[
-                styles.lead,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              Send a tip, bug, or question. Track status below.
-            </Text>
-
             <SegmentedButtons
               value={category}
               onValueChange={setCategory}

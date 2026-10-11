@@ -358,7 +358,7 @@ function registerStainFormulaRoutes(app, db) {
           results: [{
             filename: decoded.filename,
             ok: false,
-            warnings: ["This Excel file could not be read automatically. Type the formula in, and the file is still kept with it."],
+            warnings: ["This Excel file could not be read. Type the formula in. The file is still kept."],
             draft: (() => {
               const meta = {
                 formulaNumber: filenameNumbers(decoded.filename)[0] || "",

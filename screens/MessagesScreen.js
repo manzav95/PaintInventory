@@ -133,9 +133,6 @@ export default function MessagesScreen({
         <PageHeader title="Messages" onBack={onBack} />
       ) : null}
       <View style={styles.inner}>
-        <Text style={[styles.lead, { color: theme.colors.onSurfaceVariant }]}>
-          Feedback, bugs, and issues from users. Mark complete when done.
-        </Text>
         <SegmentedButtons
           value={filter}
           onValueChange={setFilter}

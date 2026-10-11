@@ -316,7 +316,7 @@ export default function App() {
             title: added === 1 ? "New message" : "New messages",
             message:
               added === 1
-                ? "Someone sent feedback — open Messages to review."
+                ? "Someone sent feedback. Open Messages to review."
                 : `${added} new feedback messages waiting.`,
             duration: 4500,
           });
@@ -1649,7 +1649,7 @@ export default function App() {
     if (hexBackfillRunningRef.current || hexBackfillJob?.status === 'running') {
       showToast({
         title: 'Already running',
-        message: 'Hex lookup is in progress — check the bar at the top.',
+        message: 'Hex lookup is in progress. Check the bar at the top.',
       });
       return;
     }

@@ -210,7 +210,7 @@ export default function QRScanScreen({
       setShakeTick((n) => n + 1);
       Alert.alert(
         "Multiple matches",
-        "Several materials look similar — pick one from the list below.",
+        "Several materials look similar. Pick one from the list below.",
       );
       return;
     }

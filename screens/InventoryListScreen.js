@@ -2431,7 +2431,7 @@ export default function InventoryListScreen({
                               {mostUsedColor.name}
                             </Title>
                             <Text style={[styles.analyticsSubtext, { color: ink.dim }]}>
-                              {mostUsedColor.totalGal} gal —{" "}
+                              {mostUsedColor.totalGal} gal{" "}
                               {mostUsedColor.isWeek
                                 ? `week of ${mostUsedColor.periodLabel}`
                                 : mostUsedColor.periodLabel}

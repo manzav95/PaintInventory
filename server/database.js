@@ -3774,8 +3774,10 @@ class Database {
         `SELECT
            ${usageBucket} AS bucket,
            COALESCE(SUM(qty_gallons), 0)::float AS usage_gallons,
-           COUNT(*)::int AS usage_count
+           COUNT(*)::int AS usage_count,
+           COALESCE(SUM(qty_gallons * COALESCE(i.price, 0)), 0)::float AS usage_value
          FROM material_usage
+         LEFT JOIN items i ON i.id = material_usage.item_id
          WHERE (entry_date::date) >= $1::date
            AND (entry_date::date) <= $2::date
          GROUP BY bucket
@@ -3786,7 +3788,8 @@ class Database {
         `SELECT
            ${usageTypeBucket} AS bucket,
            COALESCE(NULLIF(LOWER(TRIM(mu.material_type)), ''), LOWER(i.type), '') AS mat_type,
-           COALESCE(SUM(mu.qty_gallons), 0)::float AS usage_gallons
+           COALESCE(SUM(mu.qty_gallons), 0)::float AS usage_gallons,
+           COALESCE(SUM(mu.qty_gallons * COALESCE(i.price, 0)), 0)::float AS usage_value
          FROM material_usage mu
          LEFT JOIN items i ON i.id = mu.item_id
          WHERE (mu.entry_date::date) >= $1::date
@@ -3809,7 +3812,9 @@ class Database {
           orderValue: 0,
           materialUsageGallons: 0,
           materialUsageCount: 0,
+          materialUsageValue: 0,
           materialUsageByType: Database.emptyUsageByType(),
+          materialUsageValueByType: Database.emptyUsageByType(),
         });
       }
       return bucketMap.get(key);
@@ -3884,6 +3889,7 @@ class Database {
       const b = rowBucket(row.bucket);
       b.materialUsageGallons += parseFloat(row.usage_gallons) || 0;
       b.materialUsageCount += parseInt(row.usage_count, 10) || 0;
+      b.materialUsageValue += parseFloat(row.usage_value) || 0;
     }
 
     for (const row of usageTypeRows.rows) {
@@ -3892,6 +3898,10 @@ class Database {
       const gal = parseFloat(row.usage_gallons) || 0;
       if (matType && gal > 0) {
         b.materialUsageByType[matType] += gal;
+      }
+      const typeValue = parseFloat(row.usage_value) || 0;
+      if (matType && typeValue > 0) {
+        b.materialUsageValueByType[matType] += typeValue;
       }
     }
 
@@ -3911,8 +3921,10 @@ class Database {
         acc.orderValue += b.orderValue;
         acc.materialUsageGallons += b.materialUsageGallons;
         acc.materialUsageCount += b.materialUsageCount;
+        acc.materialUsageValue += b.materialUsageValue;
         for (const k of Object.keys(acc.materialUsageByType)) {
           acc.materialUsageByType[k] += b.materialUsageByType[k] || 0;
+          acc.materialUsageValueByType[k] += b.materialUsageValueByType[k] || 0;
         }
         return acc;
       },
@@ -3923,11 +3935,16 @@ class Database {
         orderValue: 0,
         materialUsageGallons: 0,
         materialUsageCount: 0,
+        materialUsageValue: 0,
         materialUsageByType: Database.emptyUsageByType(),
+        materialUsageValueByType: Database.emptyUsageByType(),
       },
     );
     totals.materialUsageByType = Database.roundUsageByType(
       totals.materialUsageByType,
+    );
+    totals.materialUsageValueByType = Database.roundUsageByType(
+      totals.materialUsageValueByType,
     );
 
     const bucketDetails = sorted.map((b) => ({
@@ -3938,7 +3955,9 @@ class Database {
       orderValue: Math.round(b.orderValue * 100) / 100,
       materialUsageGallons: Math.round(b.materialUsageGallons * 10) / 10,
       materialUsageCount: b.materialUsageCount,
+      materialUsageValue: Math.round(b.materialUsageValue * 100) / 100,
       materialUsageByType: Database.roundUsageByType(b.materialUsageByType),
+      materialUsageValueByType: Database.roundUsageByType(b.materialUsageValueByType),
     }));
 
     return {
@@ -3952,6 +3971,7 @@ class Database {
       orderValue: sorted.map((b) => Math.round(b.orderValue * 100) / 100),
       materialUsageGallons: sorted.map((b) => Math.round(b.materialUsageGallons * 10) / 10),
       materialUsageCount: sorted.map((b) => b.materialUsageCount),
+      materialUsageValue: sorted.map((b) => Math.round(b.materialUsageValue * 100) / 100),
       bucketDetails,
       totals,
     };
@@ -4031,7 +4051,8 @@ class Database {
         [from, to],
       ),
       this.pool.query(
-        `SELECT id, name, type, external_code, price FROM items ORDER BY name ASC NULLS LAST`,
+        `SELECT id, name, type, external_code, price, quantity, "minQuantity" AS min_quantity
+         FROM items ORDER BY name ASC NULLS LAST`,
       ),
     ]);
 
@@ -4050,6 +4071,9 @@ class Database {
           orderQuantity: 0,
           orderValue: 0,
           usageGallons: 0,
+          quantity: 0,
+          minQuantity: null,
+          price: 0,
         });
       }
       return stats.get(id);
@@ -4061,6 +4085,9 @@ class Database {
       entry.name = item.name || item.id;
       entry.type = item.type || "";
       entry.external_code = item.external_code || "";
+      entry.quantity = Number(item.quantity) || 0;
+      entry.minQuantity = item.min_quantity == null ? null : Number(item.min_quantity);
+      entry.price = Number(item.price) || 0;
     }
 
     for (const row of auditRows.rows) {

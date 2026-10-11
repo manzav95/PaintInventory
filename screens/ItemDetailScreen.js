@@ -623,7 +623,7 @@ export default function ItemDetailScreen({
               numberOfLines={1}
             >
               {u.user}
-              {u.booth ? ` · ${u.booth}` : ""} — {u.gallons} gal
+              {u.booth ? ` · ${u.booth}` : ""} · {u.gallons} gal
             </Text>
           ))}
         </View>
@@ -856,7 +856,7 @@ export default function ItemDetailScreen({
             { color: theme.colors.onSurfaceVariant },
           ]}
         >
-          View only — admin access required to make changes
+          View only. Admin access required to make changes.
         </Text>
       )}
       {isAdmin && item?.id && (

@@ -206,7 +206,7 @@ export default function StockPlanningScreen({
             type: "error",
             title: "No colors found",
             message:
-              "Collapse all finish colors so only the name and Cab LF show, then try again — or paste the list below.",
+              "Could not read colors. Paste the name and Cab LF list.",
           });
         } else {
           showToast({
@@ -452,9 +452,7 @@ export default function StockPlanningScreen({
             <Text
               style={[styles.lead, { color: theme.colors.onSurfaceVariant }]}
             >
-              Based on the last ~6 months of check-outs for standard colors and
-              AP materials (primer / clear / catalyst). Suggested stock = about
-              2 weeks of use.
+              About 2 weeks of use.
             </Text>
 
             <View style={styles.toolbar}>
@@ -729,10 +727,7 @@ export default function StockPlanningScreen({
             <Text
               style={[styles.lead, { color: theme.colors.onSurfaceVariant }]}
             >
-              Drop or paste (⌘/Ctrl+V) a Finish Quantities screenshot — collapse
-              all colors so you only see the name and Cab LF. Paint gallons =
-              Cab LF ÷ {CAB_LF_PER_GALLON}. Use Current week (Mon–Fri) or Next
-              week.
+              Paste a Finish Quantities list. Gallons = Cab LF / {CAB_LF_PER_GALLON}.
             </Text>
 
             <SegmentedButtons
@@ -984,8 +979,7 @@ export default function StockPlanningScreen({
               <Text
                 style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}
               >
-                No week list yet — upload a collapsed report or paste color + LF
-                lines.
+                No week list yet. Paste color and Cab LF.
               </Text>
             )}
           </ScrollView>
