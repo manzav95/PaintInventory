@@ -38,6 +38,9 @@ const StainFormulaService = {
   create(body) {
     return _fetch("/api/stain-formulas", { method: "POST", body: JSON.stringify(body) });
   },
+  approveAll() {
+    return _fetch("/api/stain-formulas/approve-all", { method: "POST" });
+  },
   update(id, body) {
     return _fetch(`/api/stain-formulas/${id}`, { method: "PUT", body: JSON.stringify(body) });
   },

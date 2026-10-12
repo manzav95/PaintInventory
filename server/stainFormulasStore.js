@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { parseStainExcelBuffer, classificationFromNumber } = require("./stainFormulaParse");
+const { productLabel } = require("./colorantCatalog");
 
 const SPECIES = [
   "White Oak",
@@ -316,10 +317,12 @@ async function listFormulas(pool, query) {
     sort === "oldest"
       ? "created_at ASC"
       : sort === "alpha"
-        ? "LOWER(color_name) ASC, formula_number ASC"
-        : sort === "updated"
-          ? "updated_at DESC"
-          : "created_at DESC";
+        ? "LOWER(COALESCE(NULLIF(TRIM(formula_number), ''), color_name)) ASC, LOWER(color_name) ASC"
+        : sort === "number"
+          ? "CASE WHEN formula_number ~ '^[0-9]+$' THEN formula_number::bigint END DESC NULLS LAST, LOWER(formula_number) DESC"
+          : sort === "updated"
+            ? "updated_at DESC"
+            : "created_at DESC";
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const count = await pool.query(
     `SELECT COUNT(*)::int AS n FROM stain_formulas ${whereSql}`,
@@ -371,7 +374,7 @@ async function loadSteps(pool, formulaId) {
       .filter((row) => row.step_id === step.id)
       .map((row) => ({
         id: row.id,
-        name: row.name,
+        name: productLabel(row.name),
         quantityText: row.quantity_text,
         unit: row.unit,
         rawLine: row.raw_line,
@@ -618,6 +621,17 @@ async function insertSteps(client, formulaId, steps) {
       );
     }
   }
+}
+
+async function approveAllFormulas(pool, userName) {
+  const result = await pool.query(
+    `UPDATE stain_formulas
+     SET review_status = 'approved', updated_by = $1, updated_at = NOW()
+     WHERE review_status IS DISTINCT FROM 'approved'
+     RETURNING id`,
+    [userName || "unknown"],
+  );
+  return { success: true, count: result.rowCount || 0 };
 }
 
 async function findFormulaByNumber(pool, formulaNumber, excludeId) {
@@ -902,6 +916,7 @@ module.exports = {
   listFormulas,
   getFormula,
   saveFormula,
+  approveAllFormulas,
   findFormulaByNumber,
   duplicateFormulaError,
   findPossibleDuplicates,

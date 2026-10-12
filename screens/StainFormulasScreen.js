@@ -29,6 +29,7 @@ import { space, radius } from "../theme/tokens";
 import { displayUserName } from "../utils/displayUserName";
 
 const SPECIES = ["White Oak", "Maple", "Alder", "Walnut", "Cherry", "Beech", "Red Oak"];
+const FORMULA_PAGE_SIZE = 50;
 const NOTE_CATEGORIES = ["general", "color", "application", "drying", "adhesion", "quality"];
 
 function formatDate(value) {
@@ -66,11 +67,17 @@ function processTone(name) {
   if (text.includes("dye")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
   if (text.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
   if (text.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
+  if (/\bprimer\b/.test(text)) return { color: "#ffffff", soft: "rgba(255, 255, 255, 0.12)", label: "Primer" };
+  if (/\bpaint\b/.test(text)) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Paint" };
   if (text.includes("clear") || text.includes("sealer") || text.includes("top")) {
     return { color: "#ef6c00", soft: "rgba(239, 108, 0, 0.16)", label: "Clear" };
   }
   if (text.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
   return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
+}
+
+function defaultSort(kind) {
+  return kind === "standard" ? "alpha" : "number";
 }
 
 function classificationLabel(value) {
@@ -161,7 +168,7 @@ export default function StainFormulasScreen({
   const [classification, setClassification] = useState("custom");
   const [species, setSpecies] = useState("");
   const [advanced, setAdvanced] = useState(false);
-  const [sort, setSort] = useState("newest");
+  const [sort, setSort] = useState(defaultSort("custom"));
   const [view, setView] = useState("list");
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -173,6 +180,9 @@ export default function StainFormulasScreen({
   const listCache = useRef(new Map());
   const refreshSeen = useRef(formRefreshKey);
   const requestSeq = useRef(0);
+  const moreLock = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageTick, setPageTick] = useState(0);
   const speciesFilter = advanced ? species : "";
 
   useEffect(() => {
@@ -181,12 +191,12 @@ export default function StainFormulasScreen({
   }, [query]);
 
   const listKey = useCallback(
-    (kind) => `${debouncedQuery}|${kind}|${speciesFilter}|${sort}`,
+    (kind, kindSort = sort) => `${debouncedQuery}|${kind}|${speciesFilter}|${kindSort}`,
     [debouncedQuery, speciesFilter, sort],
   );
 
-  const showCached = useCallback((kind) => {
-    const cached = listCache.current.get(listKey(kind));
+  const showCached = useCallback((kind, kindSort = sort) => {
+    const cached = listCache.current.get(listKey(kind, kindSort));
     if (!cached) return false;
     setRows(cached.formulas);
     setTotal(cached.total);
@@ -209,7 +219,8 @@ export default function StainFormulasScreen({
         classification,
         species: speciesFilter,
         sort,
-        limit: 60,
+        limit: FORMULA_PAGE_SIZE,
+        offset: 0,
       });
       const next = { formulas: data.formulas || [], total: data.total || 0 };
       listCache.current.set(key, next);
@@ -233,14 +244,16 @@ export default function StainFormulasScreen({
     const others = ["custom", "standard", "paint"].filter((kind) => kind !== classification);
     let cancelled = false;
     others.forEach((kind) => {
-      const key = listKey(kind);
+      const kindSort = defaultSort(kind);
+      const key = listKey(kind, kindSort);
       if (listCache.current.has(key)) return;
       StainFormulaService.list({
         q: debouncedQuery,
         classification: kind,
         species: speciesFilter,
-        sort,
-        limit: 60,
+        sort: kindSort,
+        limit: FORMULA_PAGE_SIZE,
+        offset: 0,
       })
         .then((data) => {
           if (cancelled) return;
@@ -252,6 +265,50 @@ export default function StainFormulasScreen({
       cancelled = true;
     };
   }, [classification, debouncedQuery, listKey, sort, speciesFilter]);
+
+  const loadMore = useCallback(async () => {
+    if (moreLock.current) return;
+    const key = listKey(classification);
+    const cached = listCache.current.get(key);
+    const have = cached?.formulas?.length || 0;
+    const all = cached?.total || 0;
+    if (!have || have >= all) return;
+    moreLock.current = true;
+    setLoadingMore(true);
+    const seq = requestSeq.current;
+    try {
+      const data = await StainFormulaService.list({
+        q: debouncedQuery,
+        classification,
+        species: speciesFilter,
+        sort,
+        limit: FORMULA_PAGE_SIZE,
+        offset: have,
+      });
+      if (seq !== requestSeq.current) return;
+      const seen = new Set((cached.formulas || []).map((row) => row.id));
+      const extra = (data.formulas || []).filter((row) => row?.id && !seen.has(row.id));
+      const merged = (cached.formulas || []).concat(extra);
+      const nextTotal = data.total || all;
+      listCache.current.set(key, { formulas: merged, total: nextTotal });
+      setRows(merged);
+      setTotal(nextTotal);
+      if (extra.length) setPageTick((n) => n + 1);
+    } catch (error) {
+      if (seq !== requestSeq.current) return;
+      showToast({
+        type: "error",
+        title: "Could not load formulas",
+        message: error.message || "Sign in again if this keeps happening.",
+      });
+    } finally {
+      moreLock.current = false;
+      setLoadingMore(false);
+    }
+  }, [classification, debouncedQuery, listKey, sort, speciesFilter]);
+
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
 
   useEffect(() => {
     load();
@@ -379,7 +436,16 @@ export default function StainFormulasScreen({
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       {!embeddedInShell ? <PageHeader title="Stain Formulas" onBack={onBack} /> : null}
-      <ScrollView contentContainerStyle={styles.page}>
+      <ScrollView
+        contentContainerStyle={styles.page}
+        scrollEventThrottle={200}
+        onScroll={(event) => {
+          if (Platform.OS === "web") return;
+          const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+          const remaining = contentSize.height - layoutMeasurement.height - contentOffset.y;
+          if (remaining < 280) loadMoreRef.current();
+        }}
+      >
         <Text style={[styles.lead, { color: theme.colors.onSurfaceVariant }]}>
           {total} formula{total === 1 ? "" : "s"}
         </Text>
@@ -394,14 +460,16 @@ export default function StainFormulasScreen({
         <SegmentedButtons
           value={classification}
           onValueChange={(value) => {
-            showCached(value);
+            const nextSort = defaultSort(value);
+            setSort(nextSort);
+            showCached(value, nextSort);
             setClassification(value);
           }}
           style={styles.gap}
           buttons={[
             { value: "custom", label: "Custom" },
             { value: "standard", label: "Standard" },
-            { value: "paint", label: "Paint" },
+            { value: "paint", label: "Paint Processes" },
           ]}
         />
         <AppButton compact mode="text" onPress={() => setAdvanced((open) => !open)}>
@@ -470,6 +538,35 @@ export default function StainFormulasScreen({
             <AppButton mode="outlined" icon="upload" loading={importing} onPress={importFiles}>
               Import Formulas
             </AppButton>
+            <AppButton
+              mode="outlined"
+              icon="check-all"
+              onPress={async () => {
+                const ok = await confirmAction(
+                  "Approve all",
+                  "Mark every formula approved?",
+                  { confirmLabel: "Approve All", destructive: false },
+                );
+                if (!ok) return;
+                setImporting(true);
+                try {
+                  const result = await StainFormulaService.approveAll();
+                  listCache.current.clear();
+                  await load(true);
+                  const count = result?.count || 0;
+                  showToast({
+                    title: count ? "Approved" : "Nothing to approve",
+                    message: count ? `${count} formula${count === 1 ? "" : "s"} approved.` : "Every formula is already approved.",
+                  });
+                } catch (error) {
+                  showToast({ type: "error", title: "Could not approve formulas", message: error.message });
+                } finally {
+                  setImporting(false);
+                }
+              }}
+            >
+              Approve All
+            </AppButton>
           </View>
         ) : null}
         {loading && rows.length === 0 ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}
@@ -509,6 +606,15 @@ export default function StainFormulasScreen({
             </Pressable>
           ))}
         </View>
+        {rows.length > 0 && rows.length < total ? (
+          <FormulaListSentinel
+            key={`${classification}|${debouncedQuery}|${speciesFilter}|${sort}|${pageTick}`}
+            active
+            pageTick={pageTick}
+            onReach={() => loadMoreRef.current()}
+          />
+        ) : null}
+        {loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : null}
       </ScrollView>
       {importing ? (
         <View style={styles.busyCover}>
@@ -518,6 +624,25 @@ export default function StainFormulasScreen({
       ) : null}
     </View>
   );
+}
+
+function FormulaListSentinel({ active, pageTick, onReach }) {
+  const host = useRef(null);
+  const onReachRef = useRef(onReach);
+  onReachRef.current = onReach;
+
+  useEffect(() => {
+    if (!active || Platform.OS !== "web" || typeof IntersectionObserver === "undefined") return undefined;
+    const el = host.current;
+    if (!el || typeof el.getBoundingClientRect !== "function") return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onReachRef.current();
+    }, { root: null, rootMargin: "240px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [active, pageTick]);
+
+  return <View ref={host} style={{ height: 24 }} />;
 }
 
 function FormulaThumb({ formulaId, imageId }) {
@@ -577,10 +702,10 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [busy, setBusy] = useState(false);
 
   const runBusy = async (work) => {
-    if (busy) return;
+    if (busy) return undefined;
     setBusy(true);
     try {
-      await work();
+      return await work();
     } finally {
       setBusy(false);
     }
@@ -1211,7 +1336,18 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                       Use As Main
                     </AppButton>
                   ) : null}
-                  <AppButton compact mode="text" onPress={() => runBusy(async () => { await StainFormulaService.deleteImage(id, image.id); await load(); })}>
+                  <AppButton
+                    compact
+                    mode="text"
+                    onPress={async () => {
+                      const ok = await confirmAction("Delete picture", "Remove this picture from the formula?", { confirmLabel: "Delete", destructive: true });
+                      if (!ok) return;
+                      await runBusy(async () => {
+                        await StainFormulaService.deleteImage(id, image.id);
+                        await load();
+                      });
+                    }}
+                  >
                     Remove
                   </AppButton>
                 </View>

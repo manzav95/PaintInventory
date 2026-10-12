@@ -19,6 +19,10 @@ const pool = new Pool({
     : false,
 });
 
+pool.on("error", (err) => {
+  console.error("PostgreSQL pool error:", err.message);
+});
+
 /** Parse gallon qty from API/DB (supports 0.5 increments). */
 function parseStoredGallons(val) {
   const n = parseFloat(val);

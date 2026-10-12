@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
+const { productLabel } = require("./colorantCatalog");
 
 const TEMPLATE = path.join(__dirname, "fixtures", "master-blank.xlsm");
 
@@ -44,12 +45,13 @@ function colorStatus(formula) {
 }
 
 function ingredientLine(ing) {
+  const name = productLabel(text(ing.name));
   const raw = text(ing.rawLine);
-  const name = text(ing.name);
   const qty = text(ing.quantityText);
   const unit = text(ing.unit);
-  if (raw && (!qty || raw.toLowerCase().includes(qty.toLowerCase()))) return raw;
-  return [qty, unit, name || raw].filter(Boolean).join(" ");
+  const label = name || raw;
+  if (!label) return "";
+  return [qty, unit, label].filter(Boolean).join(" ");
 }
 
 function stepLines(step) {

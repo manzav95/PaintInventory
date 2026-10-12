@@ -131,12 +131,34 @@ function findByName(text) {
   return best;
 }
 
+function productLabel(name) {
+  let text = String(name || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (/stain colorant/i.test(text)) {
+    return text.replace(/\s+stain colorant\s*$/i, "").trim();
+  }
+  const dyeProduct = /^S61/i.test(text)
+    || /dye stain concentrate/i.test(text)
+    || /\bdye (quart|gallon)\b/i.test(text)
+    || /^nerosol\b/i.test(text);
+  if (dyeProduct) {
+    text = text
+      .replace(/\s+dye stain concentrate\s*$/i, "")
+      .replace(/\s+dye (quart|gallon)\s*$/i, "")
+      .replace(/\s+dye\s*$/i, "")
+      .trim();
+    return `${text} dye`.replace(/\s+/g, " ").trim();
+  }
+  return text;
+}
+
 function matchColorant(text) {
   const hit = findByCode(text) || findByName(text);
-  return hit ? { code: hit.code, name: hit.name } : null;
+  return hit ? { code: hit.code, name: productLabel(hit.name) } : null;
 }
 
 module.exports = {
   COLORANTS,
   matchColorant,
+  productLabel,
 };
