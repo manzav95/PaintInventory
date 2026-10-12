@@ -313,16 +313,21 @@ async function listFormulas(pool, query) {
     params.push(`%${species.toLowerCase()}%`);
     where.push(`LOWER(wood_species) LIKE $${params.length}`);
   }
+  const nameOrder = "LOWER(COALESCE(NULLIF(TRIM(formula_number), ''), color_name))";
   const order =
-    sort === "oldest"
+    sort === "oldest" || sort === "newest-up"
       ? "created_at ASC"
       : sort === "alpha"
-        ? "LOWER(COALESCE(NULLIF(TRIM(formula_number), ''), color_name)) ASC, LOWER(color_name) ASC"
-        : sort === "number"
-          ? "CASE WHEN formula_number ~ '^[0-9]+$' THEN formula_number::bigint END DESC NULLS LAST, LOWER(formula_number) DESC"
-          : sort === "updated"
-            ? "updated_at DESC"
-            : "created_at DESC";
+        ? `${nameOrder} ASC, LOWER(color_name) ASC`
+        : sort === "alpha-up"
+          ? `${nameOrder} DESC, LOWER(color_name) DESC`
+          : sort === "number"
+            ? "CASE WHEN formula_number ~ '^[0-9]+$' THEN formula_number::bigint END DESC NULLS LAST, LOWER(formula_number) DESC"
+            : sort === "updated"
+              ? "updated_at DESC"
+              : sort === "updated-up"
+                ? "updated_at ASC"
+                : "created_at DESC";
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const count = await pool.query(
     `SELECT COUNT(*)::int AS n FROM stain_formulas ${whereSql}`,

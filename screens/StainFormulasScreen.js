@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   IconButton,
   SegmentedButtons,
+  Menu,
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
@@ -167,9 +168,13 @@ export default function StainFormulasScreen({
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [classification, setClassification] = useState("custom");
   const [species, setSpecies] = useState("");
+  const [woodMenu, setWoodMenu] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [sort, setSort] = useState(defaultSort("custom"));
-  const [view, setView] = useState("list");
+  const [sortPick, setSortPick] = useState(null);
+  const [sortDir, setSortDir] = useState("down");
+  const sort = sortPick
+    ? (sortDir === "up" ? `${sortPick}-up` : sortPick)
+    : defaultSort(classification);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -435,7 +440,7 @@ export default function StainFormulasScreen({
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      {!embeddedInShell ? <PageHeader title="Stain Formulas" onBack={onBack} /> : null}
+      {!embeddedInShell ? <PageHeader title="Formulas" onBack={onBack} /> : null}
       <ScrollView
         contentContainerStyle={styles.page}
         scrollEventThrottle={200}
@@ -461,14 +466,15 @@ export default function StainFormulasScreen({
           value={classification}
           onValueChange={(value) => {
             const nextSort = defaultSort(value);
-            setSort(nextSort);
+            setSortPick(null);
+            setSortDir("down");
             showCached(value, nextSort);
             setClassification(value);
           }}
           style={styles.gap}
           buttons={[
-            { value: "custom", label: "Custom" },
-            { value: "standard", label: "Standard" },
+            { value: "custom", label: "Custom Stain" },
+            { value: "standard", label: "Standard Stain" },
             { value: "paint", label: "Paint Processes" },
           ]}
         />
@@ -476,46 +482,71 @@ export default function StainFormulasScreen({
           {advanced ? "Hide Advanced Search" : "Advanced Search"}
         </AppButton>
         {advanced ? (
-          <View style={styles.gap}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chips}>
-                <AppButton compact mode={species ? "outlined" : "contained"} onPress={() => setSpecies("")}>
-                  Any Wood
-                </AppButton>
-                {SPECIES.map((name) => (
-                  <AppButton
-                    key={name}
-                    compact
-                    mode={species === name ? "contained" : "outlined"}
-                    onPress={() => setSpecies(name)}
-                  >
-                    {name}
-                  </AppButton>
-                ))}
-              </View>
-            </ScrollView>
-            <View style={styles.toolbar}>
-              <SegmentedButtons
-                value={sort}
-                onValueChange={setSort}
-                style={{ flex: 1 }}
-                buttons={[
-                  { value: "newest", label: "Newest" },
-                  { value: "oldest", label: "Oldest" },
-                  { value: "alpha", label: "A–Z" },
-                  { value: "updated", label: "Updated" },
-                ]}
-              />
-              {wide ? (
-                <SegmentedButtons
-                  value={view}
-                  onValueChange={setView}
-                  buttons={[
-                    { value: "list", label: "List" },
-                    { value: "grid", label: "Grid" },
+          <View style={styles.filterRow}>
+            <Menu
+              visible={woodMenu}
+              onDismiss={() => setWoodMenu(false)}
+              anchor={
+                <Pressable
+                  onPress={() => setWoodMenu(true)}
+                  style={[
+                    styles.woodMenu,
+                    {
+                      borderColor: theme.colors.outlineVariant,
+                      backgroundColor: theme.dark ? "rgba(255,255,255,0.04)" : "rgba(15,22,36,0.04)",
+                    },
                   ]}
+                >
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "600" }}>{species || "Any Wood"}</Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant, marginLeft: 8 }}>▾</Text>
+                </Pressable>
+              }
+            >
+              <Menu.Item
+                title="Any Wood"
+                onPress={() => {
+                  setSpecies("");
+                  setWoodMenu(false);
+                }}
+              />
+              {SPECIES.map((name) => (
+                <Menu.Item
+                  key={name}
+                  title={name}
+                  onPress={() => {
+                    setSpecies(name);
+                    setWoodMenu(false);
+                  }}
                 />
-              ) : null}
+              ))}
+            </Menu>
+            <View style={styles.chips}>
+              {[
+                ["newest", "Newest"],
+                ["alpha", "A–Z"],
+                ["updated", "Updated"],
+              ].map(([key, label]) => (
+                <AppButton
+                  key={key}
+                  compact
+                  mode={sortPick === key ? "contained" : "outlined"}
+                  onPress={() => {
+                    if (sortPick !== key) {
+                      setSortPick(key);
+                      setSortDir("down");
+                      return;
+                    }
+                    if (sortDir === "down") {
+                      setSortDir("up");
+                      return;
+                    }
+                    setSortPick(null);
+                    setSortDir("down");
+                  }}
+                >
+                  {sortPick === key ? `${label} ${sortDir === "down" ? "↓" : "↑"}` : label}
+                </AppButton>
+              ))}
             </View>
           </View>
         ) : null}
@@ -982,57 +1013,48 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.outlineVariant },
         ]}
       >
+        <AppButton compact mode="text" icon="arrow-left" onPress={onBack} style={styles.backLine}>Back To Search</AppButton>
         <View style={styles.stickyTitleRow}>
-          <View style={{ flex: 1, paddingRight: 12 }}>
-            <Text style={[styles.title, { color: theme.colors.onSurface }]} numberOfLines={1}>
+          <View style={styles.headerCenter}>
+            <Text style={[styles.title, { color: theme.colors.onSurface }]}>
               {colorTitle}
             </Text>
             {colorSubtitle ? (
-              <Text style={{ color: theme.dark ? "#9aa4b2" : "#8b939e", fontStyle: "italic" }} numberOfLines={1}>
+              <Text style={[styles.headerDescription, { color: theme.dark ? "#9aa4b2" : "#8b939e" }]}>
                 {colorSubtitle}
               </Text>
             ) : null}
           </View>
           {headerPhotoUri ? (
-            <Pressable onPress={() => setZoom(headerPhotoUri)}>
+            <Pressable onPress={() => setZoom(headerPhotoUri)} style={styles.headerPhotoSlot}>
               <Image source={{ uri: headerPhotoUri }} style={styles.headerPhoto} resizeMode="cover" />
             </Pressable>
           ) : null}
         </View>
+        <View style={styles.headerActions}>
+          {id ? <AppButton compact mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : null}
+          {isAdmin && id ? (
+            <AppButton compact mode="outlined" icon="download" onPress={() => setDownloadOpen(true)}>
+              Download
+            </AppButton>
+          ) : null}
+          {isAdmin && !(creating && seedRef.current?.duplicate) ? (
+            <AppButton
+              compact
+              mode={editing ? "contained" : "outlined"}
+              onPress={() => (editing ? save() : setEditing(true))}
+              style={styles.headerEdit}
+            >
+              {editing ? "Save" : "Edit"}
+            </AppButton>
+          ) : null}
+        </View>
       </View>
       <ScrollView contentContainerStyle={styles.page}>
-        {wide ? (
-          <View style={styles.toolbar}>
-            <AppButton mode="text" icon="arrow-left" onPress={onBack}>Back To Search</AppButton>
-            {creating && onReject ? <AppButton mode="outlined" onPress={onReject}>Reject</AppButton> : null}
-            {id ? <AppButton mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : null}
-            {isAdmin && !(creating && seedRef.current?.duplicate) ? (
-              <AppButton mode={editing ? "contained" : "outlined"} onPress={() => (editing ? save() : setEditing(true))}>
-                {editing ? "Save" : "Edit"}
-              </AppButton>
-            ) : null}
-            {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
-              <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
-            ) : null}
-          </View>
-        ) : (
-          <View>
-            <AppButton mode="text" icon="arrow-left" onPress={onBack} style={styles.backLine}>Back To Search</AppButton>
-            <View style={styles.actionRow}>
-              {creating && onReject ? (
-                <AppButton mode="outlined" onPress={onReject}>Reject</AppButton>
-              ) : id ? <AppButton mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : <View />}
-              {isAdmin && !(creating && seedRef.current?.duplicate) ? (
-                <AppButton mode={editing ? "contained" : "outlined"} onPress={() => (editing ? save() : setEditing(true))}>
-                  {editing ? "Save" : "Edit"}
-                </AppButton>
-              ) : null}
-            </View>
-            {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
-              <AppButton mode="contained" onPress={() => save("approved")} style={styles.backLine}>Approve</AppButton>
-            ) : null}
-          </View>
-        )}
+        {creating && onReject ? <AppButton mode="outlined" onPress={onReject}>Reject</AppButton> : null}
+        {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
+          <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
+        ) : null}
         <Text style={{ color: model.reviewStatus === "pending" ? "#e07a00" : model.reviewStatus === "needs_review" ? theme.colors.error : theme.colors.onSurfaceVariant, fontWeight: model.reviewStatus === "pending" ? "800" : "400" }}>
           {model.reviewStatus === "pending" ? "Pending · " : model.reviewStatus === "needs_review" ? "Needs Review · " : ""}
           {classificationLabel(model.classification)}
@@ -1329,13 +1351,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         {(formula.images || []).length === 0 && !(creating && (seedRef.current?.images || []).length) ? (
           <Text style={{ color: theme.colors.onSurfaceVariant }}>No Reference Photo.</Text>
         ) : null}
-        {isAdmin && id ? (
-          <View style={{ marginTop: 12 }}>
-            <AppButton mode="outlined" icon="download" onPress={() => setDownloadOpen(true)}>
-              Download
-            </AppButton>
-          </View>
-        ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Production Notes & History</Text>
         {isAdmin ? (
           <View style={styles.card}>
@@ -1460,7 +1475,12 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
   },
-  stickyTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  stickyTitleRow: { position: "relative", alignItems: "center", justifyContent: "center", minHeight: 72 },
+  headerCenter: { alignItems: "center", paddingHorizontal: 108, width: "100%" },
+  headerDescription: { fontSize: 16, lineHeight: 22, fontStyle: "italic", textAlign: "center", marginTop: 2 },
+  headerPhotoSlot: { position: "absolute", right: 0, top: 0 },
+  headerActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 4 },
+  headerEdit: { marginLeft: "auto" },
   headerPhoto: { width: 96, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
   busyCover: {
     position: Platform.OS === "web" ? "fixed" : "absolute",
@@ -1481,12 +1501,21 @@ const styles = StyleSheet.create({
   backLine: { alignSelf: "flex-start" },
   actionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  filterRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  woodMenu: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
   card: { borderWidth: 1, borderRadius: radius.md || 8, padding: 12, marginTop: 8 },
   listCard: { flexDirection: "row", alignItems: "center" },
   cardThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   gridCard: { width: "48%" },
-  title: { fontSize: 26, fontWeight: "800" },
+  title: { fontSize: 40, fontWeight: "800", lineHeight: 46, textAlign: "center" },
   section: { fontSize: 18, fontWeight: "800", marginTop: 16 },
   metaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   detailDivider: { height: 1, width: "100%", marginTop: 16, marginBottom: 4 },

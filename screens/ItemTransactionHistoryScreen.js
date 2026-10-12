@@ -247,28 +247,38 @@ export default function ItemTransactionHistoryScreen({
   const isDesktop = isWeb && width >= 700;
   const [activeTab, setActiveTab] = useState("checks");
   const [range, setRange] = useState("3");
-  const [logs, setLogs] = useState([]);
-  const [usageLogs, setUsageLogs] = useState([]);
+  const [allLogs, setAllLogs] = useState([]);
+  const [allUsage, setAllUsage] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const cutoff = useMemo(() => cutoffForRange(range), [range]);
   const periodLabel = rangeLabel(range);
+  const logs = useMemo(() => {
+    if (cutoff == null) return allLogs;
+    return allLogs.filter((log) => {
+      const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+      return t >= cutoff;
+    });
+  }, [allLogs, cutoff]);
+  const usageLogs = useMemo(() => {
+    if (cutoff == null) return allUsage;
+    const cutoffIso = new Date(cutoff).toISOString().slice(0, 10);
+    return allUsage.filter((row) => {
+      const d = String(row.entry_date || "").slice(0, 10);
+      return !d || d >= cutoffIso;
+    });
+  }, [allUsage, cutoff]);
 
   const loadChecks = useCallback(async () => {
     const itemId = item?.id != null ? String(item.id) : "";
     const all = await AuditService.list(10000, { itemId });
     let filtered = (Array.isArray(all) ? all : [])
       .filter((log) => String(log.itemId) === itemId)
-      .filter((log) => {
-        if (cutoff == null) return true;
-        const t = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-        return t >= cutoff;
-      })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     if (!isAdmin) filtered = filterToStandardUserVisible(filtered);
-    setLogs(filtered);
-  }, [item?.id, isAdmin, cutoff]);
+    setAllLogs(filtered);
+  }, [item?.id, isAdmin]);
 
   const loadUsage = useCallback(async () => {
     const itemId = item?.id != null ? String(item.id) : "";
@@ -281,21 +291,13 @@ export default function ItemTransactionHistoryScreen({
       color_name: colorName || undefined,
       ...(isAdmin ? {} : { excludeAdmin: true }),
     });
-    const cutoffIso =
-      cutoff == null ? null : new Date(cutoff).toISOString().slice(0, 10);
-    const filtered = (Array.isArray(list) ? list : [])
-      .filter((row) => {
-        if (!cutoffIso) return true;
-        const d = String(row.entry_date || "").slice(0, 10);
-        return !d || d >= cutoffIso;
-      })
-      .sort((a, b) => {
-        const ta = `${a.entry_date || ""} ${a.entry_time || ""}`;
-        const tb = `${b.entry_date || ""} ${b.entry_time || ""}`;
-        return tb.localeCompare(ta);
-      });
-    setUsageLogs(filtered);
-  }, [item?.id, item?.name, item?.color, isAdmin, cutoff]);
+    const filtered = (Array.isArray(list) ? list : []).sort((a, b) => {
+      const ta = `${a.entry_date || ""} ${a.entry_time || ""}`;
+      const tb = `${b.entry_date || ""} ${b.entry_time || ""}`;
+      return tb.localeCompare(ta);
+    });
+    setAllUsage(filtered);
+  }, [item?.id, item?.name, item?.color, isAdmin]);
 
   const loadAll = useCallback(
     async (isRefresh = false) => {
@@ -305,8 +307,8 @@ export default function ItemTransactionHistoryScreen({
         await Promise.all([loadChecks(), loadUsage()]);
       } catch (e) {
         console.error("ItemTransactionHistoryScreen load:", e);
-        setLogs([]);
-        setUsageLogs([]);
+        setAllLogs([]);
+        setAllUsage([]);
       } finally {
         setLoading(false);
         setRefreshing(false);

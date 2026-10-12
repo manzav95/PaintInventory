@@ -422,7 +422,7 @@ export default function App() {
         orders: 'Purchase Orders',
         placeOrder: 'Place Order',
         stockPlanning: 'Stock & week order',
-        stainFormulas: 'Stain Formulas',
+        stainFormulas: 'Formulas',
         messages: 'Messages',
         list: 'Inventory',
         qrscan: 'Check In / Check Out',

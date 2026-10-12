@@ -208,7 +208,7 @@ export default function AppSidebar({
             onPress={() => onNavigate("lineup")}
           />
           <NavButton
-            label="Stain Formulas"
+            label="Formulas"
             icon="palette-swatch"
             active={currentScreen === "stainFormulas"}
             onPress={() => onNavigate("stainFormulas")}
