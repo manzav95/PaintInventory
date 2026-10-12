@@ -239,18 +239,6 @@ function registerStainFormulaRoutes(app, db) {
     }
   });
 
-  app.post("/api/stain-formulas/approve-all", async (req, res) => {
-    try {
-      const session = await requireAdmin(req, res);
-      if (!session) return;
-      const result = await store.approveAllFormulas(pool, session.userName);
-      res.json(result);
-    } catch (error) {
-      console.error("stain approve all:", error);
-      res.status(500).json({ error: "Failed to approve formulas" });
-    }
-  });
-
   app.post("/api/stain-formulas", async (req, res) => {
     try {
       const session = await requireAdmin(req, res);

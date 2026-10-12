@@ -538,35 +538,6 @@ export default function StainFormulasScreen({
             <AppButton mode="outlined" icon="upload" loading={importing} onPress={importFiles}>
               Import Formulas
             </AppButton>
-            <AppButton
-              mode="outlined"
-              icon="check-all"
-              onPress={async () => {
-                const ok = await confirmAction(
-                  "Approve all",
-                  "Mark every formula approved?",
-                  { confirmLabel: "Approve All", destructive: false },
-                );
-                if (!ok) return;
-                setImporting(true);
-                try {
-                  const result = await StainFormulaService.approveAll();
-                  listCache.current.clear();
-                  await load(true);
-                  const count = result?.count || 0;
-                  showToast({
-                    title: count ? "Approved" : "Nothing to approve",
-                    message: count ? `${count} formula${count === 1 ? "" : "s"} approved.` : "Every formula is already approved.",
-                  });
-                } catch (error) {
-                  showToast({ type: "error", title: "Could not approve formulas", message: error.message });
-                } finally {
-                  setImporting(false);
-                }
-              }}
-            >
-              Approve All
-            </AppButton>
           </View>
         ) : null}
         {loading && rows.length === 0 ? <ActivityIndicator style={{ marginTop: 24 }} /> : null}

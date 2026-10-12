@@ -623,17 +623,6 @@ async function insertSteps(client, formulaId, steps) {
   }
 }
 
-async function approveAllFormulas(pool, userName) {
-  const result = await pool.query(
-    `UPDATE stain_formulas
-     SET review_status = 'approved', updated_by = $1, updated_at = NOW()
-     WHERE review_status IS DISTINCT FROM 'approved'
-     RETURNING id`,
-    [userName || "unknown"],
-  );
-  return { success: true, count: result.rowCount || 0 };
-}
-
 async function findFormulaByNumber(pool, formulaNumber, excludeId) {
   const name = String(formulaNumber || "").trim();
   if (!name) return null;
@@ -916,7 +905,6 @@ module.exports = {
   listFormulas,
   getFormula,
   saveFormula,
-  approveAllFormulas,
   findFormulaByNumber,
   duplicateFormulaError,
   findPossibleDuplicates,
