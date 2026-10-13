@@ -154,6 +154,110 @@ function pickFiles(accept, multiple) {
   });
 }
 
+function AdjustmentImport({ seed, theme, onCancel, onDone }) {
+  const [query, setQuery] = useState(seed.suggestedNumber || "");
+  const [hits, setHits] = useState([]);
+  const [chosen, setChosen] = useState(null);
+  const [note, setNote] = useState(seed.note || "");
+  const [steps, setSteps] = useState(seed.steps || []);
+  const [busy, setBusy] = useState(false);
+  const photo = seed.images?.[0]?.dataBase64
+    ? `data:${seed.images[0].mime || "image/jpeg"};base64,${seed.images[0].dataBase64}`
+    : seed.sourceBase64
+      ? `data:image/jpeg;base64,${seed.sourceBase64}`
+      : "";
+
+  useEffect(() => {
+    const text = query.trim();
+    if (!text) {
+      setHits([]);
+      return undefined;
+    }
+    let cancel = false;
+    const timer = setTimeout(async () => {
+      try {
+        const data = await StainFormulaService.list({ q: text, classification: "custom", limit: 8 });
+        if (cancel) return;
+        const rows = data.formulas || data.rows || [];
+        setHits(rows);
+        const exact = rows.find((row) => String(row.formulaNumber) === text);
+        if (exact) setChosen(exact);
+      } catch (error) {
+        if (!cancel) showToast({ type: "error", title: "Search failed", message: error.message });
+      }
+    }, 250);
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  const addToStain = async () => {
+    if (!chosen?.id || busy) return;
+    setBusy(true);
+    try {
+      const saved = await StainFormulaService.addAdjustment(chosen.id, {
+        steps,
+        note,
+        sourceFile: seed.sourceBase64
+          ? { filename: seed.filename || "toner.jpg", dataBase64: seed.sourceBase64 }
+          : undefined,
+      });
+      showToast({ title: "Added to formula", message: saved.formulaNumber || chosen.formulaNumber });
+      onDone(saved);
+    } catch (error) {
+      showToast({ type: "error", title: "Could not add this step", message: error.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ScrollView contentContainerStyle={styles.page}>
+      <Text style={[styles.title, { color: theme.colors.onSurface, fontSize: 28, lineHeight: 34 }]}>Add Toner or Glaze</Text>
+      <Text style={{ color: theme.colors.onSurfaceVariant }}>
+        This photo is a fix for an existing custom stain. Confirm the stain, or search if the number is wrong.
+      </Text>
+      {photo ? <Image source={{ uri: photo }} style={[styles.headerPhoto, { width: 160, height: 120, marginTop: 8 }]} resizeMode="cover" /> : null}
+      {steps.map((step, index) => (
+        <View key={`${step.processName}-${index}`} style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+          <Text style={{ color: theme.colors.onSurface, fontWeight: "800" }}>{step.processName || "Step"}</Text>
+          {(step.ingredients || []).map((ing, ingIndex) => (
+            ing.uncertain ? (
+              <View key={ingIndex} style={styles.ingRow}>
+                <TextInput mode="outlined" label="Qty" value={String(ing.quantityText || "")} onChangeText={(value) => setSteps((current) => current.map((item, stepIndex) => stepIndex === index ? { ...item, ingredients: item.ingredients.map((row, i) => i === ingIndex ? { ...row, quantityText: value } : row) } : item))} style={styles.qtyField} />
+                <TextInput mode="outlined" label="Unit" value={ing.unit || ""} onChangeText={(value) => setSteps((current) => current.map((item, stepIndex) => stepIndex === index ? { ...item, ingredients: item.ingredients.map((row, i) => i === ingIndex ? { ...row, unit: value } : row) } : item))} style={styles.unitField} />
+                <TextInput mode="outlined" label="Colorant" value={ing.name || ""} onChangeText={(value) => setSteps((current) => current.map((item, stepIndex) => stepIndex === index ? { ...item, ingredients: item.ingredients.map((row, i) => i === ingIndex ? { ...row, name: value, uncertain: false } : row) } : item))} style={styles.nameField} />
+              </View>
+            ) : (
+              <Text key={ingIndex} style={{ color: theme.colors.onSurface }}>
+                {[ing.quantityText, ing.unit, ing.name].filter(Boolean).join(" ")}
+              </Text>
+            )
+          ))}
+        </View>
+      ))}
+      <TextInput mode="outlined" label="Note for the sheet" value={note} onChangeText={setNote} multiline style={{ marginTop: 8 }} />
+      <TextInput mode="outlined" label="Custom stain" value={query} onChangeText={setQuery} style={{ marginTop: 8 }} />
+      {hits.map((row) => {
+        const selected = chosen?.id === row.id;
+        return (
+          <Pressable key={row.id} onPress={() => setChosen(row)} style={[styles.card, { borderColor: selected ? "#1976d2" : theme.colors.outlineVariant }]}>
+            <Text style={{ color: theme.colors.onSurface, fontWeight: "800" }}>{row.formulaNumber}</Text>
+            {row.colorName ? <Text style={{ color: theme.colors.onSurfaceVariant }}>{row.colorName}</Text> : null}
+          </Pressable>
+        );
+      })}
+      <View style={styles.toolbar}>
+        <AppButton mode="outlined" onPress={onCancel}>Cancel</AppButton>
+        <AppButton mode="contained" disabled={!chosen || busy} loading={busy} onPress={addToStain}>
+          {chosen ? `Add to ${chosen.formulaNumber}` : "Choose a stain"}
+        </AppButton>
+      </View>
+    </ScrollView>
+  );
+}
+
 export default function StainFormulasScreen({
   userName = "",
   isAdmin = false,
@@ -369,7 +473,21 @@ export default function StainFormulasScreen({
         if (key) seen.add(key);
         return item;
       });
-      const [first, ...rest] = queued.map(asComposer);
+      const [first, ...rest] = queued.map((item, index) => (
+        item.adjustment
+          ? {
+              adjustment: true,
+              token: `adjust-${item.filename || "photo"}-${index}-${Date.now()}`,
+              steps: item.draft?.steps || [],
+              note: item.note || "",
+              suggestedNumber: item.suggestedNumber || item.draft?.formulaNumber || "",
+              filename: item.filename || "",
+              sourceBase64: item.sourceBase64 || "",
+              images: item.images || [],
+              warnings: item.warnings || [],
+            }
+          : asComposer(item, index)
+      ));
       setSelectedId(null);
       setComposer({ ...first, queue: rest });
     } catch (error) {
@@ -378,6 +496,37 @@ export default function StainFormulasScreen({
       setImporting(false);
     }
   };
+
+  if (composer?.adjustment) {
+    return (
+      <AdjustmentImport
+        key={composer.token}
+        seed={composer}
+        theme={theme}
+        onCancel={() => {
+          const queue = composer.queue || [];
+          if (queue.length) {
+            const [next, ...rest] = queue;
+            setComposer({ ...next, queue: rest });
+            return;
+          }
+          setComposer(null);
+        }}
+        onDone={(formula) => {
+          const queue = composer.queue || [];
+          if (queue.length) {
+            const [next, ...rest] = queue;
+            setComposer({ ...next, queue: rest });
+            return;
+          }
+          setComposer(null);
+          if (formula?.id) setSelectedId(formula.id);
+          listCache.current.clear();
+          load(true);
+        }}
+      />
+    );
+  }
 
   if (composer) {
     return (
@@ -702,6 +851,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [openNotes, setOpenNotes] = useState({});
   const [busy, setBusy] = useState(false);
+  const [colorantReview, setColorantReview] = useState(false);
+  const [colorantEdits, setColorantEdits] = useState([]);
 
   const runBusy = async (work) => {
     if (busy) return undefined;
@@ -727,6 +878,22 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         reviewStatus: next.reviewStatus || "approved",
       });
       setDraft({ ...next, warnings: seedRef.current?.warnings || [] });
+      const unknown = [];
+      (next.steps || []).forEach((step, stepIndex) => {
+        (step.ingredients || []).forEach((ing, ingIndex) => {
+          if (!ing.uncertain) return;
+          unknown.push({
+            stepIndex,
+            ingIndex,
+            processName: step.processName || `Step ${step.stepNumber}`,
+            quantityText: String(ing.quantityText || ""),
+            unit: ing.unit || "",
+            name: ing.name || "",
+          });
+        });
+      });
+      setColorantEdits(unknown);
+      setColorantReview(unknown.length > 0);
       setEditing(true);
       setLoading(false);
       return;
@@ -1410,6 +1577,60 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         )) : (
           <Text style={{ color: theme.colors.onSurfaceVariant }}>No edits yet. The first save after this version starts the history.</Text>
         )}
+        <Modal visible={colorantReview} transparent animationType="fade" onRequestClose={() => setColorantReview(false)}>
+          <Pressable style={styles.downloadOverlay} onPress={() => setColorantReview(false)}>
+            <Pressable
+              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest, maxWidth: 560 }]}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <Text style={[styles.downloadTitle, { color: theme.colors.onSurface }]}>Check these colorants</Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
+                These were not on the shop list. Edit the name if the reading is wrong, or leave them out.
+              </Text>
+              <ScrollView style={{ maxHeight: 360 }}>
+                {colorantEdits.map((row, index) => (
+                  <View key={`${row.stepIndex}-${row.ingIndex}`} style={{ marginBottom: 10 }}>
+                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{row.processName}</Text>
+                    <View style={styles.ingRow}>
+                      <TextInput mode="outlined" label="Qty" value={row.quantityText} onChangeText={(value) => setColorantEdits((current) => current.map((item, i) => i === index ? { ...item, quantityText: value } : item))} style={styles.qtyField} />
+                      <TextInput mode="outlined" label="Unit" value={row.unit} onChangeText={(value) => setColorantEdits((current) => current.map((item, i) => i === index ? { ...item, unit: value } : item))} style={styles.unitField} />
+                      <TextInput mode="outlined" label="Colorant" value={row.name} onChangeText={(value) => setColorantEdits((current) => current.map((item, i) => i === index ? { ...item, name: value } : item))} style={styles.nameField} />
+                    </View>
+                  </View>
+                ))}
+              </ScrollView>
+              <View style={styles.toolbar}>
+                <AppButton mode="outlined" onPress={() => {
+                  const drop = new Set(colorantEdits.map((row) => `${row.stepIndex}:${row.ingIndex}`));
+                  setDraft((current) => ({
+                    ...current,
+                    steps: (current.steps || []).map((step, stepIndex) => ({
+                      ...step,
+                      ingredients: (step.ingredients || []).filter((_, ingIndex) => !drop.has(`${stepIndex}:${ingIndex}`)),
+                    })),
+                  }));
+                  setColorantReview(false);
+                }}>Leave Out</AppButton>
+                <AppButton mode="contained" onPress={() => {
+                  setDraft((current) => ({
+                    ...current,
+                    steps: (current.steps || []).map((step, stepIndex) => ({
+                      ...step,
+                      ingredients: (step.ingredients || []).flatMap((ing, ingIndex) => {
+                        const edit = colorantEdits.find((row) => row.stepIndex === stepIndex && row.ingIndex === ingIndex);
+                        if (!edit) return [ing];
+                        const name = String(edit.name || "").trim();
+                        if (!name) return [];
+                        return [{ ...ing, name, quantityText: edit.quantityText, unit: edit.unit, uncertain: false }];
+                      }),
+                    })),
+                  }));
+                  setColorantReview(false);
+                }}>Use These Names</AppButton>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
         <Modal visible={downloadOpen} transparent animationType="fade" onRequestClose={() => setDownloadOpen(false)}>
           <Pressable style={styles.downloadOverlay} onPress={() => setDownloadOpen(false)}>
             <Pressable

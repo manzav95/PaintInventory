@@ -62,6 +62,12 @@ const StainFormulaService = {
       body: JSON.stringify(note),
     });
   },
+  addAdjustment(id, body) {
+    return _fetch(`/api/stain-formulas/${id}/adjustments`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
   linkColor(id, number) {
     return _fetch(`/api/stain-formulas/${id}/links`, {
       method: "POST",

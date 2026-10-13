@@ -87,6 +87,8 @@ function materialFromWood(woodType) {
 
 function filenameNumbers(filename) {
   const base = String(filename || "").replace(/\.[^.]+$/, "");
+  // Camera rolls are IMG_3719, DSC_1234, and so on. That counter is not a formula number.
+  if (/^(img|dsc|dji|pxl|photo|image|picture|scan|screenshot)[-_ ]?\d/i.test(base)) return [];
   const found = [];
   const re = /#?(\d{3,6})(?!\d)/g;
   let match = re.exec(base);

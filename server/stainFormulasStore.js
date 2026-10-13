@@ -525,6 +525,26 @@ async function setPrimaryImage(pool, formulaId, imageId) {
   return { success: true };
 }
 
+async function appendFormulaSteps(pool, formulaId, steps, userName, note) {
+  const current = await getFormula(pool, formulaId);
+  if (!current) return { success: false, error: "Not found" };
+  const extra = (Array.isArray(steps) ? steps : []).filter((step) => String(step.processName || "").trim() || (step.ingredients || []).length);
+  if (!extra.length) return { success: false, error: "No steps to add" };
+  const noteText = String(note || "").trim();
+  const start = (current.steps || []).reduce((max, step) => Math.max(max, Number(step.stepNumber) || 0), 0);
+  const added = extra.map((step, index) => ({
+    ...step,
+    stepNumber: start + index + 1,
+    importantNotes: [step.importantNotes, step.notes, noteText].map((item) => String(item || "").trim()).filter((item, i, list) => item && list.indexOf(item) === i).join("\n"),
+    important: true,
+  }));
+  return saveFormula(pool, {
+    ...current,
+    steps: [...(current.steps || []), ...added],
+    linkedNumbers: current.linkedNumbers || [],
+  }, userName, formulaId);
+}
+
 async function unlinkColors(pool, left, right) {
   const pair = pairKey(left, right);
   if (!pair) return { success: false, error: "Invalid link" };
@@ -916,6 +936,7 @@ module.exports = {
   seedDemoFormula,
   linkColors,
   unlinkColors,
+  appendFormulaSteps,
   setPrimaryImage,
   SPECIES,
 };

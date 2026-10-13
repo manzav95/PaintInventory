@@ -77,6 +77,25 @@ async function parseOne(pool, filename, buffer) {
     const parsed = parseHandwrittenFormula(recognized, filename);
     const useful = parsed.draft.steps.length > 0 || (parsed.draft.formulaNumber && parsed.draft.formulaDate);
     if (useful) {
+      const photo = {
+        filename,
+        mime: /\.png$/i.test(filename) ? "image/png" : "image/jpeg",
+        dataBase64: buffer.toString("base64"),
+      };
+      if (parsed.adjustment) {
+        return {
+          filename,
+          ok: true,
+          adjustment: true,
+          suggestedNumber: parsed.adjustment.suggestedNumber || "",
+          note: parsed.adjustment.note || "",
+          warnings: parsed.warnings,
+          draft: parsed.draft,
+          duplicates: [],
+          images: [photo],
+          sourceBase64: photo.dataBase64,
+        };
+      }
       const existing = parsed.draft.formulaNumber
         ? await store.findFormulaByNumber(pool, parsed.draft.formulaNumber)
         : null;
@@ -87,7 +106,8 @@ async function parseOne(pool, filename, buffer) {
         warnings: existing ? [store.duplicateFormulaError(existing)] : parsed.warnings,
         draft: parsed.draft,
         duplicates: [],
-        sourceBase64: buffer.toString("base64"),
+        images: [photo],
+        sourceBase64: photo.dataBase64,
       };
     }
   }
@@ -554,6 +574,43 @@ function registerStainFormulaRoutes(app, db) {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete image" });
+    }
+  });
+
+  app.post("/api/stain-formulas/:id/adjustments", async (req, res) => {
+    try {
+      const session = await requireAdmin(req, res);
+      if (!session) return;
+      const formulaId = Number(req.params.id);
+      const saved = await store.appendFormulaSteps(
+        pool,
+        formulaId,
+        req.body?.steps || [],
+        session.userName,
+        req.body?.note || "",
+      );
+      if (!saved.success) return res.status(saved.error === "Not found" ? 404 : 400).json(saved);
+      const file = req.body?.sourceFile;
+      if (file?.dataBase64) {
+        const decoded = decodeUpload(file);
+        if (!decoded.error && (isImage(decoded.filename) || /^image\//.test(String(file.mime || "")))) {
+          const mime = /\.png$/i.test(decoded.filename) ? "image/png" : "image/jpeg";
+          const existing = await pool.query(
+            `SELECT id FROM stain_formula_images WHERE formula_id = $1 LIMIT 1`,
+            [formulaId],
+          );
+          await pool.query(
+            `INSERT INTO stain_formula_images
+             (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
+             VALUES ($1, $2, $3, $4, $5, $6, 50)`,
+            [formulaId, "Toner or glaze photo", mime, decoded.buffer, existing.rowCount === 0, session.userName],
+          );
+        }
+      }
+      res.json(await store.getFormula(pool, formulaId));
+    } catch (error) {
+      console.error("stain adjustment:", error);
+      res.status(500).json({ error: "Failed to add the toner or glaze" });
     }
   });
 
