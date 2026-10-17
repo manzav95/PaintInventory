@@ -1075,6 +1075,11 @@ export default function InventoryListScreen({
   // Filter and sort inventory (search + optional stock filter + book filter + recycle due)
   const filteredAndSortedInventory = useMemo(() => {
     const min = minQuantity ?? 30;
+    const trimmedSearch = searchQuery.trim();
+    const customNumberSearch =
+      bookFilter === "standard" &&
+      looksLikeColorNumber(trimmedSearch) &&
+      trimmedSearch.replace(/\D/g, "").length >= 2;
     let filtered = inventory.filter((item) => {
       const locationDisplay = formatItemLocationDisplay(item);
       const matchesSearch = itemMatchesInventorySearch(item, searchQuery, {
@@ -1096,7 +1101,11 @@ export default function InventoryListScreen({
       if (stockFilter === "lowStock")
         return qty > 0 && qty < (item.minQuantity ?? min);
       const itemType = (item.type || "").toLowerCase();
-      if (bookFilter === "standard" && CUSTOM_TYPES.includes(itemType))
+      if (
+        bookFilter === "standard" &&
+        CUSTOM_TYPES.includes(itemType) &&
+        !customNumberSearch
+      )
         return false;
       if (bookFilter === "custom" && !CUSTOM_TYPES.includes(itemType))
         return false;
@@ -1104,7 +1113,8 @@ export default function InventoryListScreen({
       if (
         !showZeroCustoms &&
         CUSTOM_TYPES.includes(itemType) &&
-        qty === 0
+        qty === 0 &&
+        !(bookFilter === "standard" && customNumberSearch)
       ) {
         return false;
       }
@@ -1831,6 +1841,19 @@ export default function InventoryListScreen({
                     </Pressable>
                   );
                 })()}
+                {!isCustomInventoryView &&
+                isCustomType(item) &&
+                String(item.color_label || "").trim() ? (
+                  <Text
+                    style={[
+                      styles.tableColorLabel,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {String(item.color_label).trim()}
+                  </Text>
+                ) : null}
                 {isCustomInventoryView ? (
                   <RecycleDateUnderName
                     item={item}
@@ -2866,7 +2889,8 @@ export default function InventoryListScreen({
                                           >
                                             {item.name || "Unnamed"}
                                           </Text>
-                                          {isCustomInventoryView &&
+                                          {(isCustomInventoryView ||
+                                            isCustomType(item)) &&
                                           String(item.color_label || "").trim() ? (
                                             <Text
                                               style={[

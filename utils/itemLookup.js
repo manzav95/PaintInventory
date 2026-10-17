@@ -123,6 +123,19 @@ function colorNumbersEqual(query, candidate) {
   return false;
 }
 
+/** Search may match the start of a color number (44 or 441 → 4415). Scans stay exact. */
+function colorNumberMatchesSearch(query, candidate) {
+  if (colorNumbersEqual(query, candidate)) return true;
+  const qDigits = digitsOnly(query);
+  const cDigits = digitsOnly(candidate);
+  if (qDigits.length < 2 || qDigits.length >= cDigits.length) return false;
+  if (qDigits.length > 6 || cDigits.length > 6) return false;
+  const q = String(parseInt(qDigits, 10));
+  const c = String(parseInt(cDigits, 10));
+  if (!q || q === "NaN" || !c || c === "NaN") return false;
+  return c.startsWith(q);
+}
+
 /**
  * Exact ID / external_code match only (case-insensitive). No fuzzy, prefix, or includes.
  */
@@ -236,19 +249,19 @@ export function itemMatchesInventorySearch(item, query, extras = {}) {
   // --- Color numbers: exact only ---
   if (looksLikeColorNumber(raw)) {
     const qDigits = digitsOnly(raw);
-    if (qDigits.length < 3) return false;
+    if (qDigits.length < 2) return false;
     if (
       CONTAINER_SIZE_BARCODES.has(qDigits) ||
       CONTAINER_SIZE_BARCODES.has(String(parseInt(qDigits, 10)))
     ) {
       return false;
     }
-    if (isNumericColorCandidate(id) && colorNumbersEqual(raw, id)) return true;
-    if (isNumericColorCandidate(ext) && colorNumbersEqual(raw, ext)) return true;
-    if (isNumericColorCandidate(name) && colorNumbersEqual(raw, name)) {
+    if (isNumericColorCandidate(id) && colorNumberMatchesSearch(raw, id)) return true;
+    if (isNumericColorCandidate(ext) && colorNumberMatchesSearch(raw, ext)) return true;
+    if (isNumericColorCandidate(name) && colorNumberMatchesSearch(raw, name)) {
       return true;
     }
-    if (isNumericColorCandidate(label) && colorNumbersEqual(raw, label)) {
+    if (isNumericColorCandidate(label) && colorNumberMatchesSearch(raw, label)) {
       return true;
     }
     return false;
