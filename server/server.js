@@ -336,24 +336,34 @@ app.put('/api/items/:id', async (req, res) => {
 
       // Determine action type for audit log
       let auditActionType = 'update';
-      
-      // If action type was explicitly set (check_in/check_out/receiving/recycled), use it
-      if (
+      const quantityChanged =
+        newQuantity !== undefined &&
+        oldQuantity !== undefined &&
+        Number(newQuantity) !== Number(oldQuantity);
+      const isMainAdmin = ['admin', 'admin123'].includes(
+        String(auditUserName || '').toLowerCase().trim(),
+      );
+      const typedAction =
         actionType === 'check_in' ||
         actionType === 'check_out' ||
         actionType === 'receiving' ||
         actionType === 'recycled' ||
-        actionType === 'location_change'
-      ) {
+        actionType === 'location_change' ||
+        actionType === 'qty_adjust';
+      
+      // If action type was explicitly set (check_in/check_out/receiving/recycled), use it
+      if (typedAction) {
         auditActionType = actionType;
         console.log('Setting audit action to:', auditActionType, 'for item:', id);
       } else if (locationChanged && newQuantity === undefined) {
         auditActionType = 'location_change';
+      } else if (isMainAdmin && quantityChanged) {
+        // Main admin changing on-hand gallons means the count was off.
+        auditActionType = 'qty_adjust';
       } else if (newQuantity !== undefined && oldQuantity !== undefined) {
         // Otherwise, check if this is a manual quantity adjustment
         // Manual adjustment: quantity changed but other fields might have changed too
         // (admin editing item details)
-        const quantityChanged = newQuantity !== oldQuantity;
         const otherFieldsChanged = (updates.name && updates.name !== currentItem?.name) ||
                                    locationChanged ||
                                    (updates.description && updates.description !== currentItem?.description);
@@ -1696,6 +1706,7 @@ app.get('/api/feedback/status', async (req, res) => {
 
 // Start server
 require('./stainFormulaRoutes').registerStainFormulaRoutes(app, db);
+require('./overviewRoutes').registerOverviewRoutes(app, db);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`CURE API server running on http://0.0.0.0:${PORT}`);

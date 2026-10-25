@@ -574,6 +574,18 @@ class Database {
     `);
     console.log("Waste tracking table ready");
     await client.query(`
+      CREATE TABLE IF NOT EXISTS production_schedules (
+        id SERIAL PRIMARY KEY,
+        uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+        uploaded_by TEXT NOT NULL DEFAULT '',
+        filename TEXT NOT NULL DEFAULT '',
+        csv_text TEXT NOT NULL DEFAULT '',
+        rows jsonb NOT NULL DEFAULT '[]'::jsonb,
+        week_totals jsonb NOT NULL DEFAULT '{}'::jsonb
+      )
+    `);
+    console.log("Production schedules table ready");
+    await client.query(`
       DO $$ BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns

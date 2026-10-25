@@ -20,6 +20,7 @@ export const SCREEN_TITLES = {
   wasteTracking: "Waste Tracking",
   lineup: "Lineup",
   reports: "Reports",
+  overview: "Overview",
   settings: "Settings",
   qrscan: "Check In / Out",
   checkinout: "Check In / Out",

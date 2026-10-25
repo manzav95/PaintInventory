@@ -223,6 +223,12 @@ export default function AppSidebar({
                 onPress={() => onNavigate("messages")}
               />
               <NavButton
+                label="Overview"
+                icon="clipboard-text-search"
+                active={currentScreen === "overview"}
+                onPress={() => onNavigate("overview")}
+              />
+              <NavButton
                 label="Reports"
                 icon="chart-line"
                 active={currentScreen === "reports"}

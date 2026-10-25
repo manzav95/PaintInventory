@@ -185,6 +185,7 @@ export default function DashboardScreen({
   onOpenWasteTracking,
   onOpenLineup,
   onOpenCheckInOut,
+  onOpenOverview,
   showCheckInOutNav = true,
 }) {
   const theme = useTheme();
@@ -1719,7 +1720,23 @@ export default function DashboardScreen({
       </Modal>
 
       {embeddedInShell && (
-        <DashboardGreeting isAdmin={isAdmin} userName={userName} />
+        <View style={styles.greetingRow}>
+          <DashboardGreeting
+            isAdmin={isAdmin}
+            userName={userName}
+            style={{ marginBottom: 0 }}
+          />
+          {isAdmin && !isMobileLayout && onOpenOverview ? (
+            <AppButton
+              mode="contained"
+              icon="clipboard-text-search"
+              compact
+              onPress={onOpenOverview}
+            >
+              Overview
+            </AppButton>
+          ) : null}
+        </View>
       )}
 
       {/* Quick actions — mobile only (sidebar covers this on desktop) */}
@@ -2892,6 +2909,14 @@ const styles = StyleSheet.create({
   },
   myActivityActionsWrap: {
     width: "100%",
+  },
+  greetingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 4,
   },
   sectionEyebrow: {
     fontSize: 11,

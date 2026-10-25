@@ -915,28 +915,15 @@ export default function UpcomingOrdersScreen({
                     ]}
                   >
                     <View style={styles.lineItemLeft}>
-                      <View style={styles.lineItemNameRow}>
-                        <Text
-                          style={[
-                            styles.lineItemName,
-                            { color: theme.colors.onSurface, flex: 1 },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {getItemName(line.itemId)}
-                        </Text>
-                        {typeLabel ? (
-                          <Text
-                            style={[
-                              styles.lineTypeLabel,
-                              { color: typeColor },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {typeLabel}
-                          </Text>
-                        ) : null}
-                      </View>
+                      <Text
+                        style={[
+                          styles.lineItemName,
+                          { color: theme.colors.onSurface },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {getItemName(line.itemId)}
+                      </Text>
                       {(line.job_name || "").trim() ? (
                         <Text
                           style={[
@@ -961,6 +948,15 @@ export default function UpcomingOrdersScreen({
                         </Text>
                       )}
                     </View>
+                    <Text
+                      style={[
+                        styles.lineTypeLabel,
+                        { color: typeLabel ? typeColor : "transparent" },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {typeLabel || "—"}
+                    </Text>
                     <Text
                       style={[
                         styles.lineItemQty,
@@ -2162,15 +2158,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
   },
-  lineItemNameRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
   lineTypeLabel: {
+    width: 104,
     fontSize: 11,
     fontWeight: "800",
     flexShrink: 0,
+    textAlign: "left",
+    paddingTop: 2,
   },
   poNumber: {
     fontSize: 17,
@@ -2202,6 +2196,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
+    gap: 12,
     paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 8,
@@ -2209,6 +2204,7 @@ const styles = StyleSheet.create({
   },
   lineItemLeft: {
     flex: 1,
+    minWidth: 0,
   },
   lineItemName: {
     fontSize: 14,
@@ -2222,7 +2218,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   lineItemQty: {
+    width: 72,
     fontSize: 14,
+    flexShrink: 0,
+    textAlign: "right",
   },
   receivedModalOverlay: {
     flex: 1,

@@ -32,6 +32,7 @@ import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
 import confirmAction from "../utils/confirmAction";
 import { assessMaterialUsageQty } from "../utils/materialUsageAnomaly";
+import { maybeConfirmBooth2StainAsDye } from "../utils/materialUsageBoothConfirm";
 import {
   assessMissingCheckout,
   buildLastCheckoutMap,
@@ -1041,12 +1042,22 @@ export default function MaterialUsageScreen({
       });
       return;
     }
+    const editBooth = payload?.booth || editRow.booth;
+    let editMaterialType = payload?.material_type || editRow.material_type;
+    editMaterialType = await maybeConfirmBooth2StainAsDye(
+      editBooth,
+      editMaterialType,
+    );
+    const editPayload = {
+      ...payload,
+      material_type: editMaterialType,
+    };
     const anomaly = assessMaterialUsageQty({
-      qtyGallons: payload?.qty_gallons,
-      materialType: payload?.material_type || editRow.material_type,
-      booth: payload?.booth || editRow.booth,
-      colorName: payload?.color_name || editRow.color_name,
-      itemId: payload?.item_id || editRow.item_id,
+      qtyGallons: editPayload?.qty_gallons,
+      materialType: editMaterialType,
+      booth: editBooth,
+      colorName: editPayload?.color_name || editRow.color_name,
+      itemId: editPayload?.item_id || editRow.item_id,
       logs,
     });
     if (anomaly) {
@@ -1060,8 +1071,8 @@ export default function MaterialUsageScreen({
     setEditSaving(true);
     try {
       const savePayload = isAdmin
-        ? payload
-        : { ...payload, user_name: editRow.user_name || userName };
+        ? editPayload
+        : { ...editPayload, user_name: editRow.user_name || userName };
       await MaterialUsageService.update(editRow.id, savePayload, {
         requestingUser: userName,
         isAdmin,
@@ -1209,9 +1220,10 @@ export default function MaterialUsageScreen({
     const colorName = resolvedItem
       ? formatMaterialPickerLabel(resolvedItem)
       : customTrim;
-    const materialType = resolvedItem
+    let materialType = resolvedItem
       ? (resolvedItem.type || "").toLowerCase() || null
       : parseCustomMaterialInput(customTrim).type;
+    materialType = await maybeConfirmBooth2StainAsDye(booth, materialType);
     const entry = {
       entry_date: entryDate,
       entry_time: entryTime,

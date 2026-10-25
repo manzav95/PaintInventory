@@ -64,6 +64,7 @@ import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
 import LineupScreen from './screens/LineupScreen';
 import ReportsScreen from './screens/ReportsScreen';
+import OverviewScreen from './screens/OverviewScreen';
 import LineupService from './services/lineupService';
 import AppShell from './components/AppShell';
 import AppSidebar from './components/AppSidebar';
@@ -106,6 +107,7 @@ const WEB_SCREEN_HASH = {
   wasteTracking: '/waste-tracking',
   lineup: '/lineup',
   reports: '/reports',
+  overview: '/overview',
   settings: '/settings',
 };
 
@@ -124,6 +126,7 @@ const WEB_HASH_SCREEN = {
   '/waste-tracking': 'wasteTracking',
   '/lineup': 'lineup',
   '/reports': 'reports',
+  '/overview': 'overview',
   '/settings': 'settings',
 };
 
@@ -134,6 +137,7 @@ const ADMIN_WEB_SCREENS = new Set([
   'orders',
   'messages',
   'reports',
+  'overview',
 ]);
 
 function normalizeWebHash(raw) {
@@ -340,7 +344,7 @@ export default function App() {
     if (isSales && screen !== 'list' && screen !== 'settings' && screen !== 'login') {
       return;
     }
-    if ((screen === 'reports' || screen === 'messages') && !isAdmin) {
+    if ((screen === 'reports' || screen === 'messages' || screen === 'overview') && !isAdmin) {
       return;
     }
     if (screen === 'materialUsage') {
@@ -401,7 +405,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (currentScreen === 'reports' && userName && !isAdmin) {
+    if (
+      (currentScreen === 'reports' ||
+        currentScreen === 'messages' ||
+        currentScreen === 'overview') &&
+      userName &&
+      !isAdmin
+    ) {
       setCurrentScreen('home');
     }
   }, [currentScreen, userName, isAdmin]);
@@ -428,6 +438,7 @@ export default function App() {
         qrscan: 'Check In / Check Out',
         add: 'Add Item',
         reports: 'Reports',
+        overview: 'Overview',
         settings: 'Settings',
         home: 'Dashboard',
       };
@@ -1401,11 +1412,23 @@ export default function App() {
     let result;
     try {
     if (isExistingItem) {
+      const prevQty = Number(selectedItem?.quantity);
+      const nextQty = Number(item.quantity);
+      const qtyChanged =
+        Number.isFinite(prevQty) &&
+        Number.isFinite(nextQty) &&
+        prevQty !== nextQty;
       const updates = {
         name: item.name,
         quantity: item.quantity,
         location: item.location,
         userName: actorName,
+        ...(qtyChanged && isAdminAccount(userName)
+          ? {
+              _actionType: 'qty_adjust',
+              _quantityChange: nextQty - prevQty,
+            }
+          : {}),
         ...(Object.prototype.hasOwnProperty.call(item, 'is_mixing') && {
           is_mixing: item.is_mixing,
         }),
@@ -1796,7 +1819,7 @@ export default function App() {
       return;
     }
     await runWithLoading('Updating quantity...', async () => {
-      const result = await InventoryService.updateQuantity(itemId, change, actorName, null);
+      const result = await InventoryService.updateQuantity(itemId, change, actorName, 'qty_adjust');
       if (result.success) {
         await loadInventory();
         if (selectedItem && selectedItem.id === itemId) {
@@ -1865,6 +1888,17 @@ export default function App() {
         return (
           <ReportsScreen
             embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+          />
+        );
+      case 'overview':
+        if (!isAdmin) {
+          return null;
+        }
+        return (
+          <OverviewScreen
+            embeddedInShell={embeddedInShell}
+            isAdmin={isAdmin}
             onBack={() => navigateTo('home')}
           />
         );
@@ -2168,6 +2202,7 @@ export default function App() {
           onOpenWasteTracking={() => navigateTo('wasteTracking')}
           onOpenLineup={() => navigateTo('lineup')}
           onOpenCheckInOut={() => navigateTo('qrscan')}
+          onOpenOverview={isAdmin ? () => navigateTo('overview') : undefined}
           onItemSelect={
             isAdmin
               ? (item) => {

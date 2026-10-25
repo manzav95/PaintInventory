@@ -337,7 +337,7 @@ export default function SimpleLineChart({
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: "100%", flex: 1, minHeight: 0 },
+  wrap: { width: "100%" },
   title: { fontSize: 15, fontWeight: "700", marginBottom: 8 },
   headerSlot: {
     minHeight: 40,
