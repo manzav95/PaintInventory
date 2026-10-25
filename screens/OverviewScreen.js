@@ -112,6 +112,114 @@ function BulletList({ items, color, theme }) {
   );
 }
 
+function wastePct(waste, mixed) {
+  const m = Number(mixed) || 0;
+  const w = Number(waste) || 0;
+  if (m <= 0) return w > 0 ? 100 : 0;
+  return Math.round((w / m) * 1000) / 10;
+}
+
+function MixWasteChart({ weekUsage, weekWaste, monthUsage, monthWaste, theme }) {
+  const rows = [
+    { key: "paint", label: "Paint" },
+    { key: "primer", label: "Primer" },
+    { key: "clear", label: "Clear" },
+  ];
+  const mixColor = theme.colors.primary;
+  const wasteColor = theme.colors.error;
+  return (
+    <View style={styles.mixGrid}>
+      {rows.map((row) => {
+        const weekMix = Number(weekUsage?.[row.key]) || 0;
+        const weekW = Number(weekWaste?.[row.key]) || 0;
+        const monthMix = Number(monthUsage?.[row.key]) || 0;
+        const monthW = Number(monthWaste?.[row.key]) || 0;
+        const typeColor = getMaterialTypeColor(row.key, theme);
+        return (
+          <View key={row.key} style={styles.mixItem}>
+            <Text style={[styles.mixItemTitle, { color: typeColor }]}>
+              {row.label}
+            </Text>
+            <MixWastePeriod
+              label="Week"
+              mixed={weekMix}
+              waste={weekW}
+              mixColor={mixColor}
+              wasteColor={wasteColor}
+              theme={theme}
+            />
+            <MixWastePeriod
+              label="Month"
+              mixed={monthMix}
+              waste={monthW}
+              mixColor={mixColor}
+              wasteColor={wasteColor}
+              theme={theme}
+            />
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function MixWastePeriod({
+  label,
+  mixed,
+  waste,
+  mixColor,
+  wasteColor,
+  theme,
+}) {
+  const max = Math.max(mixed, waste, 0.1);
+  const mixW = mixed > 0 ? Math.max(4, (mixed / max) * 100) : 0;
+  const wasteW = waste > 0 ? Math.max(4, (waste / max) * 100) : 0;
+  const pct = wastePct(waste, mixed);
+  return (
+    <View style={styles.mixPeriod}>
+      <Text style={[styles.mixPeriodLabel, { color: theme.colors.onSurfaceVariant }]}>
+        {label}
+      </Text>
+      <View style={styles.mixBarRow}>
+        <View
+          style={[
+            styles.mixBarTrack,
+            { backgroundColor: theme.colors.surfaceVariant },
+          ]}
+        >
+          <View
+            style={[
+              styles.mixBarFill,
+              { width: `${mixW}%`, backgroundColor: mixColor },
+            ]}
+          />
+        </View>
+        <Text style={[styles.mixBarValue, { color: theme.colors.onSurface }]}>
+          {gal(mixed)} mixed
+        </Text>
+      </View>
+      <View style={styles.mixBarRow}>
+        <View
+          style={[
+            styles.mixBarTrack,
+            { backgroundColor: theme.colors.surfaceVariant },
+          ]}
+        >
+          <View
+            style={[
+              styles.mixBarFill,
+              { width: `${wasteW}%`, backgroundColor: wasteColor },
+            ]}
+          />
+        </View>
+        <Text style={[styles.mixBarValue, { color: wasteColor }]}>
+          {gal(waste)} waste · {pct}%
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function OutlineCard({ title, kicker, accent, theme, children, style }) {
   return (
     <Card
@@ -217,6 +325,11 @@ export default function OverviewScreen({
 
   const metrics = useMemo(() => {
     if (!thisWeek) return [];
+    const mixedCoat =
+      (Number(thisWeek.usage?.paint) || 0) +
+      (Number(thisWeek.usage?.primer) || 0) +
+      (Number(thisWeek.usage?.clear) || 0);
+    const notSprayedPct = wastePct(thisWeek.waste?.total, mixedCoat);
     return [
       {
         id: "usage",
@@ -231,10 +344,10 @@ export default function OverviewScreen({
         color: theme.colors.error,
       },
       {
-        id: "paint",
-        label: "Paint this week",
-        value: `${gal(thisWeek.usage?.paint)} gal`,
-        color: getMaterialTypeColor("paint", theme),
+        id: "wastePct",
+        label: "Not sprayed %",
+        value: `${notSprayedPct}%`,
+        color: theme.colors.error,
       },
       {
         id: "countoff",
@@ -419,6 +532,20 @@ export default function OverviewScreen({
               })}
             </View>
 
+            <OutlineCard
+              title="Mixed vs waste"
+              kicker="Paint, primer, clear"
+              theme={theme}
+            >
+              <MixWasteChart
+                weekUsage={thisWeek?.usage}
+                weekWaste={thisWeek?.waste}
+                monthUsage={data?.thisMonth?.usage}
+                monthWaste={data?.thisMonth?.waste}
+                theme={theme}
+              />
+            </OutlineCard>
+
             <OutlineCard title="Trends" theme={theme}>
               <View style={styles.chartStack}>
                 {charts.map((chart) => (
@@ -556,6 +683,50 @@ const styles = StyleSheet.create({
   bulletText: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  mixGrid: {
+    gap: 14,
+    width: "100%",
+  },
+  mixItem: {
+    gap: 6,
+    width: "100%",
+  },
+  mixItemTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  mixPeriod: {
+    gap: 4,
+    marginTop: 4,
+  },
+  mixPeriodLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  mixBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  mixBarTrack: {
+    flex: 1,
+    minWidth: 0,
+    height: 10,
+    borderRadius: 5,
+    overflow: "hidden",
+  },
+  mixBarFill: {
+    height: 10,
+    borderRadius: 5,
+  },
+  mixBarValue: {
+    width: 128,
+    fontSize: 12,
+    fontWeight: "600",
+    flexShrink: 0,
   },
   chartStack: {
     gap: 16,

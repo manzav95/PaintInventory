@@ -469,13 +469,20 @@ async function getOverview(pool) {
   const today = todayPacificIso();
   const thisMonday = weekMondayIso(today);
   const fromMonday = addDaysIso(thisMonday, -7 * (WEEK_COUNT - 1));
-  const fromDate = fromMonday;
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const fromDate = monthStart < fromMonday ? monthStart : fromMonday;
+  const weekEnd = addDaysIso(thisMonday, 6);
   const mondays = [];
   for (let i = 0; i < WEEK_COUNT; i += 1) {
     mondays.push(addDaysIso(fromMonday, 7 * i));
   }
   const byMonday = {};
   for (const m of mondays) byMonday[m] = emptyWeek(m);
+  const thisMonth = {
+    key: today.slice(0, 7),
+    usage: emptyUsage(),
+    waste: emptyWaste(),
+  };
 
   const usageRes = await pool.query(
     `SELECT entry_date, material_type, qty_gallons, booth
@@ -483,20 +490,25 @@ async function getOverview(pool) {
      WHERE entry_date >= $1
        AND entry_date <= $2
        AND (user_name IS NULL OR LOWER(TRIM(COALESCE(user_name, ''))) NOT IN ('admin123', 'admin'))`,
-    [fromDate, addDaysIso(thisMonday, 6)],
+    [fromDate, weekEnd],
   );
   for (const row of usageRes.rows) {
-    const monday = weekMondayIso(row.entry_date);
-    const week = byMonday[monday];
-    if (!week) continue;
     const gal = Number(row.qty_gallons) || 0;
     const bucket = usageBucket(row.material_type);
-    week.usage[bucket] = round1(week.usage[bucket] + gal);
-    week.usage.total = round1(week.usage.total + gal);
-    const booth = String(row.booth || "").trim();
-    if (booth === "Booth 2" && bucket === "stain") {
-      week.booth2Stain.count += 1;
-      week.booth2Stain.gallons = round1(week.booth2Stain.gallons + gal);
+    const monday = weekMondayIso(row.entry_date);
+    const week = byMonday[monday];
+    if (week) {
+      week.usage[bucket] = round1(week.usage[bucket] + gal);
+      week.usage.total = round1(week.usage.total + gal);
+      const booth = String(row.booth || "").trim();
+      if (booth === "Booth 2" && bucket === "stain") {
+        week.booth2Stain.count += 1;
+        week.booth2Stain.gallons = round1(week.booth2Stain.gallons + gal);
+      }
+    }
+    if (String(row.entry_date || "").slice(0, 7) === thisMonth.key) {
+      thisMonth.usage[bucket] = round1(thisMonth.usage[bucket] + gal);
+      thisMonth.usage.total = round1(thisMonth.usage.total + gal);
     }
   }
 
@@ -504,24 +516,26 @@ async function getOverview(pool) {
     `SELECT entry_date, paint_gallons, clear_toner_gallons, primer_gallons, acetone_gallons
      FROM waste_tracking
      WHERE entry_date >= $1 AND entry_date <= $2`,
-    [fromDate, addDaysIso(thisMonday, 6)],
+    [fromDate, weekEnd],
   );
   for (const row of wasteRes.rows) {
-    const monday = weekMondayIso(row.entry_date);
-    const week = byMonday[monday];
-    if (!week) continue;
     const paint = Number(row.paint_gallons) || 0;
     const clear = Number(row.clear_toner_gallons) || 0;
     const primer = Number(row.primer_gallons) || 0;
     const acetone = Number(row.acetone_gallons) || 0;
-    week.waste.paint = round1(week.waste.paint + paint);
-    week.waste.clear = round1(week.waste.clear + clear);
-    week.waste.primer = round1(week.waste.primer + primer);
-    week.waste.acetone = round1(week.waste.acetone + acetone);
-    week.waste.coatings = round1(
-      week.waste.paint + week.waste.clear + week.waste.primer,
-    );
-    week.waste.total = week.waste.coatings;
+    const addWaste = (target) => {
+      target.paint = round1(target.paint + paint);
+      target.clear = round1(target.clear + clear);
+      target.primer = round1(target.primer + primer);
+      target.acetone = round1(target.acetone + acetone);
+      target.coatings = round1(target.paint + target.clear + target.primer);
+      target.total = target.coatings;
+    };
+    const monday = weekMondayIso(row.entry_date);
+    if (byMonday[monday]) addWaste(byMonday[monday].waste);
+    if (String(row.entry_date || "").slice(0, 7) === thisMonth.key) {
+      addWaste(thisMonth.waste);
+    }
   }
 
   const adjRes = await pool.query(
@@ -685,6 +699,7 @@ async function getOverview(pool) {
     weeks,
     thisWeek,
     lastWeek,
+    thisMonth,
     priorAvg,
     talkingPoints,
     adjustmentsThis: {
