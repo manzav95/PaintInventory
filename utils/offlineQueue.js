@@ -97,7 +97,13 @@ export async function syncPendingQuantity(userNameFallback) {
           entry.change,
           userName,
           "receiving",
-          extras,
+          {
+            ...extras,
+            orderId: entry.orderId,
+            ...(receiveResult.order?.po_number
+              ? { poNumber: String(receiveResult.order.po_number).trim() }
+              : {}),
+          },
         );
       } else {
         result = await InventoryService.updateQuantity(

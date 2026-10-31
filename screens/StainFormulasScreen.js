@@ -87,6 +87,14 @@ function classificationLabel(value) {
   return "Custom Stain";
 }
 
+function formulaColorCode(formula) {
+  const raw = String(formula?.formulaNumber || "").trim();
+  const digits = raw.match(/\d{3,6}/);
+  if (digits) return digits[0];
+  const cleaned = raw.replace(/[^\w.-]+/g, "");
+  return cleaned || "formula";
+}
+
 function titleWords(value) {
   return String(value || "")
     .split(/(\s+)/)
@@ -292,6 +300,7 @@ export default function StainFormulasScreen({
   const moreLock = useRef(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pageTick, setPageTick] = useState(0);
+  const [listZoom, setListZoom] = useState(null);
   const speciesFilter = advanced ? species : "";
 
   useEffect(() => {
@@ -445,7 +454,12 @@ export default function StainFormulasScreen({
   };
 
   const importFiles = async (picked) => {
-    const files = Array.isArray(picked) ? picked : await pickFiles(".xlsx,.xlsm,.xls,.pdf,.png,.jpg,.jpeg,.zip", true);
+    const files = Array.isArray(picked)
+      ? picked
+      : await pickFiles(
+          ".xlsx,.xlsm,.xls,.docx,.pdf,.png,.jpg,.jpeg,.zip",
+          true,
+        );
     if (!files.length) return;
     setImporting(true);
     try {
@@ -724,9 +738,8 @@ export default function StainFormulasScreen({
         {!loading && rows.length === 0 ? <AppEmptyState title="No formulas match." /> : null}
         <View style={wide ? styles.grid : null}>
           {rows.map((row) => (
-            <Pressable
+            <View
               key={row.id}
-              onPress={() => setSelectedId(row.id)}
               style={[
                 styles.card,
                 styles.listCard,
@@ -734,7 +747,10 @@ export default function StainFormulasScreen({
                 { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface },
               ]}
             >
-              <View style={{ flex: 1, paddingRight: 8 }}>
+              <Pressable
+                onPress={() => setSelectedId(row.id)}
+                style={{ flex: 1, paddingRight: 8 }}
+              >
                 <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 28, lineHeight: 32 }}>
                   {row.formulaNumber || row.colorName || "—"}
                 </Text>
@@ -752,9 +768,18 @@ export default function StainFormulasScreen({
                 ) : row.reviewStatus === "needs_review" ? (
                   <Text style={{ color: theme.colors.error, marginTop: 4 }}>Needs Review</Text>
                 ) : null}
-              </View>
-              <FormulaThumb formulaId={row.id} imageId={row.primaryImageId} />
-            </Pressable>
+              </Pressable>
+              <FormulaThumb
+                formulaId={row.id}
+                imageId={row.primaryImageId}
+                onPress={(uri) =>
+                  setListZoom({
+                    uri,
+                    title: row.formulaNumber || row.colorName || "Formula",
+                  })
+                }
+              />
+            </View>
           ))}
         </View>
         {rows.length > 0 && rows.length < total ? (
@@ -767,6 +792,19 @@ export default function StainFormulasScreen({
         ) : null}
         {loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : null}
       </ScrollView>
+      <Modal visible={!!listZoom} transparent animationType="fade" onRequestClose={() => setListZoom(null)}>
+        <Pressable style={styles.lightbox} onPress={() => setListZoom(null)}>
+          <View style={styles.lightboxFrame}>
+            {listZoom?.uri ? (
+              <Image source={{ uri: listZoom.uri }} style={styles.lightboxImg} resizeMode="contain" />
+            ) : null}
+            <View style={styles.lightboxBar}>
+              <Text style={styles.lightboxBarText}>{listZoom?.title || ""}</Text>
+            </View>
+          </View>
+          <Text style={{ color: "#fff", marginTop: 12 }}>Tap To Close</Text>
+        </Pressable>
+      </Modal>
       {importing ? (
         <View style={styles.busyCover}>
           <ActivityIndicator size="large" color="#fff" />
@@ -796,7 +834,7 @@ function FormulaListSentinel({ active, pageTick, onReach }) {
   return <View ref={host} style={{ height: 24 }} />;
 }
 
-function FormulaThumb({ formulaId, imageId }) {
+function FormulaThumb({ formulaId, imageId, onPress }) {
   const [uri, setUri] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -811,7 +849,24 @@ function FormulaThumb({ formulaId, imageId }) {
     };
   }, [formulaId, imageId]);
   if (!imageId || !uri) return null;
-  return <Image source={{ uri }} style={styles.cardThumb} resizeMode="cover" />;
+  const img = (
+    <Image
+      source={{ uri }}
+      style={styles.cardThumb}
+      resizeMode="cover"
+      pointerEvents="none"
+    />
+  );
+  if (!onPress) return img;
+  return (
+    <Pressable
+      onPress={() => onPress(uri)}
+      accessibilityRole="imagebutton"
+      accessibilityLabel="View formula photo"
+    >
+      {img}
+    </Pressable>
+  );
 }
 
 function blankDraft() {
@@ -1072,8 +1127,12 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
       const loaded = kind === "excel"
         ? await StainFormulaService.fetchExcel(id)
         : await loadPdf();
-      const fallback = `${String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula"}.${kind === "excel" ? "xlsx" : "pdf"}`;
-      await saveDownload(loaded.blob, loaded.filename || fallback);
+      const headerName = String(loaded.filename || "").trim();
+      const headerExt = (headerName.match(/\.([a-z0-9]+)$/i) || [])[1] || "";
+      const ext = kind === "excel"
+        ? (/^(xlsm|xlsx|xls)$/i.test(headerExt) ? headerExt.toLowerCase() : "xlsm")
+        : "pdf";
+      await saveDownload(loaded.blob, `${formulaColorCode(formula)}.${ext}`);
     } catch (error) {
       showToast({
         type: "error",
@@ -1086,7 +1145,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const emailPdf = async () => {
     try {
       const { blob } = await loadPdf();
-      const filename = `${String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula"}.pdf`;
+      const filename = `${formulaColorCode(formula)}.pdf`;
       if (Platform.OS === "web" && typeof document !== "undefined") {
         const file = new File([blob], filename, { type: "application/pdf" });
         if (typeof navigator !== "undefined" && navigator.share) {

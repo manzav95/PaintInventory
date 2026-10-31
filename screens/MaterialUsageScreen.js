@@ -70,10 +70,12 @@ import {
 import { getMaterialTypeColor } from "../utils/materialTypes";
 import { formatCurrency, usageRowDollars } from "../utils/pricing";
 import {
-  isMaterialUsageEligibleItem,
   formatMaterialPickerLabel,
   getMaterialInputAccent,
   resolvePaintItemFromNumericInput,
+  buildMaterialUsageSuggestions,
+  isSyntheticDyeSuggestion,
+  customColorFromSyntheticDye,
 } from "../utils/materialUsageItems";
 import {
   colors,
@@ -595,34 +597,14 @@ export default function MaterialUsageScreen({
     return map;
   }, [auditLogs, logs, inventory]);
 
-  const materialSuggestions = useMemo(() => {
-    if (selectedItem) return [];
-    const eligible = inventory.filter(isMaterialUsageEligibleItem);
-    const q = (colorQuery || "").trim().toLowerCase();
-    const filtered = q
-      ? eligible.filter(
-          (i) =>
-            (i.name || "").toLowerCase().includes(q) ||
-            (i.id || "").toLowerCase().includes(q) ||
-            String(i.color_label || "")
-              .toLowerCase()
-              .includes(q),
-        )
-      : eligible;
-    return filtered.sort((a, b) => {
-      const aName = (a.name || a.id || "").toLowerCase();
-      const bName = (b.name || b.id || "").toLowerCase();
-      if (q) {
-        const aStarts = aName.startsWith(q) ? 0 : 1;
-        const bStarts = bName.startsWith(q) ? 0 : 1;
-        if (aStarts !== bStarts) return aStarts - bStarts;
-      }
-      const ta = lastActivityByItemId[String(a.id)] || 0;
-      const tb = lastActivityByItemId[String(b.id)] || 0;
-      if (tb !== ta) return tb - ta;
-      return aName.localeCompare(bName);
-    });
-  }, [inventory, colorQuery, selectedItem, lastActivityByItemId]);
+  const materialSuggestions = useMemo(
+    () =>
+      buildMaterialUsageSuggestions(inventory, colorQuery, {
+        selectedItem,
+        lastActivityByItemId,
+      }),
+    [inventory, colorQuery, selectedItem, lastActivityByItemId],
+  );
 
   const showMaterialSuggestions = materialFocused && !selectedItem;
   const filteredLogs = useMemo(() => {
@@ -1561,9 +1543,15 @@ export default function MaterialUsageScreen({
                     <Pressable
                       key={item.id}
                       onPress={() => {
-                        setSelectedItem(item);
-                        setCustomColor("");
-                        setColorQuery("");
+                        if (isSyntheticDyeSuggestion(item)) {
+                          setCustomColor(customColorFromSyntheticDye(item));
+                          setSelectedItem(null);
+                          setColorQuery("");
+                        } else {
+                          setSelectedItem(item);
+                          setCustomColor("");
+                          setColorQuery("");
+                        }
                         setMaterialFocused(false);
                       }}
                       style={({ pressed }) => [

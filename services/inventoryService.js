@@ -361,9 +361,13 @@ class InventoryService {
   async updateItem(itemId, updates, userName) {
     try {
       const encodedId = encodeURIComponent(itemId);
+      const who =
+        (userName && String(userName).trim()) ||
+        (updates && updates.userName && String(updates.userName).trim()) ||
+        "";
       const updateData = {
         ...updates,
-        userName,
+        ...(who ? { userName: who } : {}),
       };
       
       const result = await _fetch(`/api/items/${encodedId}`, {
@@ -460,6 +464,12 @@ class InventoryService {
 
       if (extras?.transactionId) {
         updateData._transactionId = String(extras.transactionId).trim();
+      }
+      if (extras?.orderId != null && String(extras.orderId).trim() !== "") {
+        updateData._orderId = extras.orderId;
+      }
+      if (extras?.poNumber != null && String(extras.poNumber).trim() !== "") {
+        updateData._poNumber = String(extras.poNumber).trim();
       }
       
       const result = await this.updateItem(itemId, updateData, userName);

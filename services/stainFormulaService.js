@@ -19,6 +19,23 @@ async function _fetch(endpoint, options = {}) {
   return data ?? response;
 }
 
+function filenameFromDisposition(response) {
+  const text = String(response?.headers?.get("content-disposition") || "");
+  const star = text.match(/filename\*\s*=\s*UTF-8''([^;]+)/i);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      /* ignore malformed filename* */
+    }
+  }
+  const quoted = text.match(/filename\s*=\s*"([^"]+)"/i);
+  if (quoted?.[1]) return quoted[1].trim();
+  const bare = text.match(/filename\s*=\s*([^;]+)/i);
+  if (bare?.[1]) return bare[1].trim().replace(/^["']|["']$/g, "");
+  return "";
+}
+
 function toQuery(params) {
   const search = new URLSearchParams();
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -109,9 +126,7 @@ const StainFormulaService = {
     });
     if (!response.ok) throw new Error("Could not build the formula PDF");
     const blob = await response.blob();
-    const disposition = response.headers.get("content-disposition") || "";
-    const match = disposition.match(/filename="([^"]+)"/);
-    return { blob, filename: match?.[1] || "formula.pdf" };
+    return { blob, filename: filenameFromDisposition(response) };
   },
   async fetchExcel(formulaId) {
     const response = await fetch(`${API_URL}/api/stain-formulas/${formulaId}/excel`, {
@@ -119,9 +134,7 @@ const StainFormulaService = {
     });
     if (!response.ok) throw new Error("Could not build the formula Excel");
     const blob = await response.blob();
-    const disposition = response.headers.get("content-disposition") || "";
-    const match = disposition.match(/filename="([^"]+)"/);
-    return { blob, filename: match?.[1] || "formula.xlsx" };
+    return { blob, filename: filenameFromDisposition(response) };
   },
   async downloadSource(formulaId, fileId, filename) {
     const response = await fetch(
@@ -134,7 +147,7 @@ const StainFormulaService = {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = filename || "formula";
+    link.download = filenameFromDisposition(response) || filename || "formula";
     link.click();
     URL.revokeObjectURL(url);
   },

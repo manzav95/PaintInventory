@@ -1095,6 +1095,10 @@ export default function App() {
         const extras = {
           transactionId,
           currentItem: scannedItem,
+          orderId,
+          ...(receiveResult.order?.po_number
+            ? { poNumber: String(receiveResult.order.po_number).trim() }
+            : {}),
           ...(options?.location != null &&
             String(options.location).trim() !== '' && {
               location: String(options.location).trim(),
@@ -1470,7 +1474,7 @@ export default function App() {
           hide_from_material_usage: !!item.hide_from_material_usage,
         }),
       };
-      result = await InventoryService.updateItem(idForApi, updates);
+      result = await InventoryService.updateItem(idForApi, updates, actorName);
     } else {
       result = await InventoryService.addItem({
         ...item,
@@ -2203,6 +2207,7 @@ export default function App() {
           onOpenLineup={() => navigateTo('lineup')}
           onOpenCheckInOut={() => navigateTo('qrscan')}
           onOpenOverview={isAdmin ? () => navigateTo('overview') : undefined}
+          orders={receiveOrdersCache ?? []}
           onItemSelect={
             isAdmin
               ? (item) => {

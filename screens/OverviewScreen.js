@@ -7,7 +7,7 @@ import {
   Platform,
   useWindowDimensions,
 } from "react-native";
-import { Card, Text, useTheme, ActivityIndicator } from "react-native-paper";
+import { Card, Text, useTheme, ActivityIndicator, SegmentedButtons } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
@@ -119,7 +119,14 @@ function wastePct(waste, mixed) {
   return Math.round((w / m) * 1000) / 10;
 }
 
-function MixWasteChart({ weekUsage, weekWaste, monthUsage, monthWaste, theme }) {
+function MixWasteChart({
+  weekUsage,
+  weekWaste,
+  monthUsage,
+  monthWaste,
+  weekLabel = "Week",
+  theme,
+}) {
   const rows = [
     { key: "paint", label: "Paint" },
     { key: "primer", label: "Primer" },
@@ -141,7 +148,7 @@ function MixWasteChart({ weekUsage, weekWaste, monthUsage, monthWaste, theme }) 
               {row.label}
             </Text>
             <MixWastePeriod
-              label="Week"
+              label={weekLabel}
               mixed={weekMix}
               waste={weekW}
               mixColor={mixColor}
@@ -266,6 +273,7 @@ export default function OverviewScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [weekTab, setWeekTab] = useState("this");
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -316,31 +324,46 @@ export default function OverviewScreen({
   const thisWeek = data?.thisWeek;
   const lastWeek = data?.lastWeek;
   const priorAvg = data?.priorAvg;
+  const viewingLast = weekTab === "last";
+  const selectedWeek = viewingLast ? lastWeek : thisWeek;
+  const comparePrev = viewingLast ? data?.weekBeforeLast : lastWeek;
+  const compareAvg = viewingLast ? data?.lastWeekPriorAvg : priorAvg;
+  const selectedAdjustments = viewingLast
+    ? data?.adjustmentsLast
+    : data?.adjustmentsThis;
+  const nowLabel = viewingLast ? "last week" : "this week";
+  const prevLabel = viewingLast ? "the week before" : "last week";
+  const weekRangeLabel = viewingLast
+    ? data?.lastWeekLabel || lastWeek?.label
+    : data?.weekLabel;
   const chartLabels = weeks.map((w) => w.label.replace(/ – .*/, "") || w.monday);
   const chartHeight = isWide ? 200 : 168;
   const talkGroups = useMemo(
-    () => groupTalkingPoints(data?.talkingPoints),
-    [data?.talkingPoints],
+    () =>
+      groupTalkingPoints(
+        viewingLast ? data?.lastWeekTalkingPoints : data?.talkingPoints,
+      ),
+    [viewingLast, data?.talkingPoints, data?.lastWeekTalkingPoints],
   );
 
   const metrics = useMemo(() => {
-    if (!thisWeek) return [];
+    if (!selectedWeek) return [];
     const mixedCoat =
-      (Number(thisWeek.usage?.paint) || 0) +
-      (Number(thisWeek.usage?.primer) || 0) +
-      (Number(thisWeek.usage?.clear) || 0);
-    const notSprayedPct = wastePct(thisWeek.waste?.total, mixedCoat);
+      (Number(selectedWeek.usage?.paint) || 0) +
+      (Number(selectedWeek.usage?.primer) || 0) +
+      (Number(selectedWeek.usage?.clear) || 0);
+    const notSprayedPct = wastePct(selectedWeek.waste?.total, mixedCoat);
     return [
       {
         id: "usage",
-        label: "Mixed this week",
-        value: `${gal(thisWeek.usage?.total)} gal`,
+        label: viewingLast ? "Mixed last week" : "Mixed this week",
+        value: `${gal(selectedWeek.usage?.total)} gal`,
         color: theme.colors.primary,
       },
       {
         id: "waste",
         label: "Not sprayed",
-        value: `${gal(thisWeek.waste?.total)} gal`,
+        value: `${gal(selectedWeek.waste?.total)} gal`,
         color: theme.colors.error,
       },
       {
@@ -351,12 +374,12 @@ export default function OverviewScreen({
       },
       {
         id: "countoff",
-        label: "Count-off this week",
-        value: String(data?.adjustmentsThis?.count || 0),
+        label: viewingLast ? "Count-off last week" : "Count-off this week",
+        value: String(selectedAdjustments?.count || 0),
         color: colors.semantic.lowStockValue || "#ff9800",
       },
     ];
-  }, [thisWeek, data?.adjustmentsThis?.count, theme]);
+  }, [selectedWeek, selectedAdjustments?.count, theme, viewingLast]);
 
   const compareItems = [
     ["Paint", "paint", "usage"],
@@ -366,59 +389,108 @@ export default function OverviewScreen({
     ["Clear", "clear", "usage"],
     ["Waste (not sprayed)", "total", "waste"],
   ].map(([label, key, group]) => {
-    const now = Number(thisWeek?.[group]?.[key]) || 0;
-    const last = Number(lastWeek?.[group]?.[key]) || 0;
-    const avg = Number(priorAvg?.[group]?.[key]) || 0;
+    const now = Number(selectedWeek?.[group]?.[key]) || 0;
+    const last = Number(comparePrev?.[group]?.[key]) || 0;
+    const avg = Number(compareAvg?.[group]?.[key]) || 0;
     return {
       title: label,
-      body: `${gal(now)} this week · ${gal(last)} last week · ${gal(avg)} 4-wk avg`,
+      body: `${gal(now)} ${nowLabel} · ${gal(last)} ${prevLabel} · ${gal(avg)} 4-wk avg`,
     };
   });
 
   const countOffItems = useMemo(() => {
     const items = [
       {
-        title: "This week",
-        body: `${data?.adjustmentsThis?.count || 0} corrections, ${gal(data?.adjustmentsThis?.absGallons)} gal moved (net ${signedGal(data?.adjustmentsThis?.netGallons)})`,
+        title: viewingLast ? "Last week" : "This week",
+        body: `${selectedAdjustments?.count || 0} corrections, ${gal(selectedAdjustments?.absGallons)} gal moved (net ${signedGal(selectedAdjustments?.netGallons)})`,
       },
       {
         title: "All-time",
         body: `${data?.adjustmentsAll?.count || 0} corrections, ${gal(data?.adjustmentsAll?.absGallons)} gal moved`,
       },
     ];
-    for (const item of data?.adjustmentsThis?.items || []) {
+    for (const item of selectedAdjustments?.items || []) {
       items.push({
         title: item.name,
         body: `${signedGal(item.delta)} gal · ${item.count} ${item.count === 1 ? "correction" : "corrections"} · ${item.itemId || ""}`,
       });
     }
     return items;
-  }, [data]);
+  }, [data?.adjustmentsAll, selectedAdjustments, viewingLast]);
 
   const scheduleItems = useMemo(() => {
     const items = [];
-    if (thisWeek?.schedule?.jobs) {
+    if (selectedWeek?.schedule?.jobs) {
       items.push({
-        title: "This week",
-        body: `${thisWeek.schedule.jobs} jobs — paint ${thisWeek.schedule.paint}, stain ${thisWeek.schedule.stain}, dye ${thisWeek.schedule.dye}, primer ${thisWeek.schedule.primer}, clear ${thisWeek.schedule.clear}`,
+        title: viewingLast ? "Last week" : "This week",
+        body: `${selectedWeek.schedule.jobs} jobs — paint ${selectedWeek.schedule.paint}, stain ${selectedWeek.schedule.stain}, dye ${selectedWeek.schedule.dye}, primer ${selectedWeek.schedule.primer}, clear ${selectedWeek.schedule.clear}`,
       });
     } else {
       items.push({
-        title: "This week",
-        body: "No schedule loaded yet. Upload a CSV to explain paint vs stain swings.",
+        title: viewingLast ? "Last week" : "This week",
+        body: viewingLast
+          ? "No schedule loaded for last week."
+          : "No schedule loaded yet. Upload a CSV to explain paint vs stain swings.",
       });
     }
     for (const file of (data?.scheduleFiles || []).slice(0, 5)) {
       items.push({ title: file.filename, body: "Uploaded schedule" });
     }
     return items;
-  }, [thisWeek, data?.scheduleFiles]);
+  }, [selectedWeek, data?.scheduleFiles, viewingLast]);
 
+  const wasteColor = theme.colors.error;
   const charts = [
     {
-      title: "Paint mixed (gal)",
-      data: weeks.map((w) => Number(w.usage?.paint) || 0),
-      color: getMaterialTypeColor("paint", theme),
+      title: "Paint (gal)",
+      series: [
+        {
+          key: "mixed",
+          label: "Mixed",
+          data: weeks.map((w) => Number(w.usage?.paint) || 0),
+          color: getMaterialTypeColor("paint", theme),
+        },
+        {
+          key: "waste",
+          label: "Waste",
+          data: weeks.map((w) => Number(w.waste?.paint) || 0),
+          color: wasteColor,
+        },
+      ],
+    },
+    {
+      title: "Primer (gal)",
+      series: [
+        {
+          key: "mixed",
+          label: "Mixed",
+          data: weeks.map((w) => Number(w.usage?.primer) || 0),
+          color: getMaterialTypeColor("primer", theme),
+        },
+        {
+          key: "waste",
+          label: "Waste",
+          data: weeks.map((w) => Number(w.waste?.primer) || 0),
+          color: wasteColor,
+        },
+      ],
+    },
+    {
+      title: "Clear (gal)",
+      series: [
+        {
+          key: "mixed",
+          label: "Mixed",
+          data: weeks.map((w) => Number(w.usage?.clear) || 0),
+          color: getMaterialTypeColor("clear", theme),
+        },
+        {
+          key: "waste",
+          label: "Waste",
+          data: weeks.map((w) => Number(w.waste?.clear) || 0),
+          color: wasteColor,
+        },
+      ],
     },
     {
       title: "Stain mixed (gal)",
@@ -429,11 +501,6 @@ export default function OverviewScreen({
       title: "Dye mixed (gal)",
       data: weeks.map((w) => Number(w.usage?.dye) || 0),
       color: getMaterialTypeColor("dye", theme),
-    },
-    {
-      title: "Waste not sprayed (gal)",
-      data: weeks.map((w) => Number(w.waste?.total) || 0),
-      color: theme.colors.error,
     },
   ];
 
@@ -483,13 +550,22 @@ export default function OverviewScreen({
           }
         />
 
+        <SegmentedButtons
+          value={weekTab}
+          onValueChange={setWeekTab}
+          style={styles.weekTabs}
+          buttons={[
+            { value: "this", label: "This week" },
+            { value: "last", label: "Last week" },
+          ]}
+        />
         <AppText variant="sectionTitle" style={{ color: theme.colors.onSurface }}>
-          This week · {data?.weekLabel || "—"}
+          {viewingLast ? "Last week" : "This week"} · {weekRangeLabel || "—"}
         </AppText>
         <AppText variant="caption" tone="muted" style={styles.weekHint}>
-          Compared with last week and the average of the previous 4 weeks. Mixed
-          is what went into the booths. Waste (not sprayed) is paint, primer,
-          and clear only — acetone is left out.
+          Compared with {prevLabel} and the average of the previous 4 weeks.
+          Mixed is what went into the booths. Waste (not sprayed) is paint,
+          primer, and clear only — acetone is left out.
         </AppText>
 
         {loading && !data ? (
@@ -518,7 +594,13 @@ export default function OverviewScreen({
                   <OutlineCard
                     key={group.key}
                     title={group.title}
-                    kicker={group.kicker}
+                    kicker={
+                      group.key === "info"
+                        ? viewingLast
+                          ? "Last week"
+                          : "This week"
+                        : group.kicker
+                    }
                     accent={accent}
                     theme={theme}
                   >
@@ -538,21 +620,27 @@ export default function OverviewScreen({
               theme={theme}
             >
               <MixWasteChart
-                weekUsage={thisWeek?.usage}
-                weekWaste={thisWeek?.waste}
+                weekUsage={selectedWeek?.usage}
+                weekWaste={selectedWeek?.waste}
                 monthUsage={data?.thisMonth?.usage}
                 monthWaste={data?.thisMonth?.waste}
+                weekLabel={viewingLast ? "Last week" : "Week"}
                 theme={theme}
               />
             </OutlineCard>
 
-            <OutlineCard title="Trends" theme={theme}>
+            <OutlineCard
+              title="Trends"
+              kicker="Mixed vs waste"
+              theme={theme}
+            >
               <View style={styles.chartStack}>
                 {charts.map((chart) => (
                   <View key={chart.title} style={styles.chartSlot}>
                     <SimpleLineChart
                       title={chart.title}
-                      data={chart.data}
+                      data={chart.data || []}
+                      series={chart.series}
                       labels={chartLabels}
                       color={chart.color}
                       valueSuffix=""
@@ -563,7 +651,14 @@ export default function OverviewScreen({
               </View>
             </OutlineCard>
 
-            <OutlineCard title="This week vs recent weeks (mixed)" theme={theme}>
+            <OutlineCard
+              title={
+                viewingLast
+                  ? "Last week vs recent weeks (mixed)"
+                  : "This week vs recent weeks (mixed)"
+              }
+              theme={theme}
+            >
               <BulletList
                 items={compareItems}
                 color={theme.colors.primary}
@@ -575,16 +670,14 @@ export default function OverviewScreen({
               title="Count was off"
               kicker="ADMIN qty changes"
               accent={
-                (data?.adjustmentsThis?.count || 0) > 0
-                  ? lookAccent
-                  : undefined
+                (selectedAdjustments?.count || 0) > 0 ? lookAccent : undefined
               }
               theme={theme}
             >
               <BulletList
                 items={countOffItems}
                 color={
-                  (data?.adjustmentsThis?.count || 0) > 0
+                  (selectedAdjustments?.count || 0) > 0
                     ? lookAccent
                     : theme.colors.primary
                 }
@@ -624,6 +717,7 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   scrollWide: { maxWidth: 900, alignSelf: "center" },
+  weekTabs: { marginBottom: 4 },
   weekHint: { marginBottom: space[2] },
   statusRow: {
     flexDirection: "row",

@@ -5,6 +5,7 @@ const { parseStainExcelBuffer, filenameNumbers, classificationFromNumber, workbo
 const { parseHandwrittenFormula, ocrHandwrittenFormula } = require("./handwrittenFormula");
 const { workbookToPdf } = require("./stainFormulaPdf");
 const { fillMasterBlank } = require("./stainFormulaSheet");
+const { parseTypedDocx } = require("./stainFormulaDocx");
 
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -25,6 +26,10 @@ function isExcel(filename) {
 
 function isImage(filename) {
   return /\.(png|jpe?g|webp)$/i.test(filename);
+}
+
+function isDocx(filename) {
+  return /\.docx$/i.test(filename);
 }
 
 async function parseOne(pool, filename, buffer) {
@@ -64,6 +69,27 @@ async function parseOne(pool, filename, buffer) {
         mime: image.mime,
         dataBase64: image.bytes.toString("base64"),
       })),
+      sourceBase64: buffer.toString("base64"),
+    };
+  }
+  if (isDocx(filename)) {
+    const parsed = await parseTypedDocx(buffer, filename);
+    const existing = parsed.draft?.formulaNumber
+      ? await store.findFormulaByNumber(pool, parsed.draft.formulaNumber)
+      : null;
+    const duplicates =
+      !existing && parsed.draft
+        ? await store.findPossibleDuplicates(pool, parsed.draft)
+        : [];
+    return {
+      filename,
+      ok: !existing && !!parsed.ok,
+      duplicate: !!existing,
+      warnings: existing
+        ? [store.duplicateFormulaError(existing)]
+        : parsed.warnings || [],
+      draft: parsed.draft,
+      duplicates,
       sourceBase64: buffer.toString("base64"),
     };
   }
@@ -173,7 +199,9 @@ async function parseOne(pool, filename, buffer) {
   return {
     filename,
     ok: false,
-    warnings: ["Use an Excel file (.xlsx, .xlsm, .xls), PDF, PNG, or JPG."],
+    warnings: [
+      "Use an Excel file (.xlsx, .xlsm, .xls), Word file (.docx), PDF, PNG, or JPG.",
+    ],
     draft: null,
     duplicates: [],
   };
@@ -194,7 +222,14 @@ async function expandZip(filename, buffer) {
     if (!entry || entry.dir) continue;
     const base = name.split("/").pop();
     if (!base || base.startsWith(".")) continue;
-    if (!isExcel(base) && !isImage(base) && !/\.pdf$/i.test(base)) continue;
+    if (
+      !isExcel(base) &&
+      !isDocx(base) &&
+      !isImage(base) &&
+      !/\.pdf$/i.test(base)
+    ) {
+      continue;
+    }
     const content = await entry.async("nodebuffer");
     if (content.length > MAX_BYTES) {
       files.push({ filename: base, error: "File is larger than 12 MB" });
@@ -379,7 +414,9 @@ function registerStainFormulaRoutes(app, db) {
           results: [{
             filename: decoded.filename,
             ok: false,
-            warnings: ["This Excel file could not be read. Type the formula in. The file is still kept."],
+            warnings: [
+              "This formula file could not be read. Type the formula in. The file is still kept.",
+            ],
             draft: (() => {
               const meta = {
                 formulaNumber: filenameNumbers(decoded.filename)[0] || "",
@@ -416,8 +453,20 @@ function registerStainFormulaRoutes(app, db) {
   });
 
   function downloadName(formula, ext) {
-    const base = String(formula.formulaNumber || "formula").replace(/[^\w.-]+/g, "") || "formula";
+    const raw = String(formula?.formulaNumber || "").trim();
+    const digits = raw.match(/\d{3,6}/);
+    const base = digits
+      ? digits[0]
+      : raw.replace(/[^\w.-]+/g, "") || "formula";
     return `${base}.${ext}`;
+  }
+
+  function setDownloadFilename(res, name) {
+    const safe = String(name || "formula").replace(/["\\\r\n]/g, "");
+    res.set(
+      "Content-Disposition",
+      `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
+    );
   }
 
   async function workbookBytes(formula) {
@@ -428,9 +477,11 @@ function registerStainFormulaRoutes(app, db) {
       [formula.id],
     );
     if (file.rows[0]) {
+      const orig = String(file.rows[0].filename || "");
+      const ext = /\.xlsm$/i.test(orig) ? "xlsm" : /\.xls$/i.test(orig) ? "xls" : "xlsx";
       return {
         bytes: file.rows[0].bytes,
-        filename: file.rows[0].filename || downloadName(formula, "xlsm"),
+        filename: downloadName(formula, ext),
         generated: false,
       };
     }
@@ -447,7 +498,7 @@ function registerStainFormulaRoutes(app, db) {
       const pdf = await workbookToPdf(workbook.bytes);
       const name = downloadName(formula, "pdf");
       res.set("Content-Type", "application/pdf");
-      res.set("Content-Disposition", `attachment; filename="${name}"`);
+      setDownloadFilename(res, name);
       res.send(pdf);
     } catch (error) {
       console.error("stain pdf:", error);
@@ -461,14 +512,14 @@ function registerStainFormulaRoutes(app, db) {
       const formula = await store.getFormula(pool, Number(req.params.id));
       if (!formula) return res.status(404).json({ error: "Not found" });
       const workbook = await workbookBytes(formula);
-      const name = String(workbook.filename).replace(/"/g, "") || downloadName(formula, "xlsx");
+      const name = String(workbook.filename || "").replace(/"/g, "") || downloadName(formula, "xlsx");
       res.set(
         "Content-Type",
         workbook.generated
           ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           : "application/vnd.ms-excel.sheet.macroEnabled.12",
       );
-      res.set("Content-Disposition", `attachment; filename="${name}"`);
+      setDownloadFilename(res, name);
       res.send(workbook.bytes);
     } catch (error) {
       console.error("stain excel:", error);
@@ -486,7 +537,7 @@ function registerStainFormulaRoutes(app, db) {
       const row = result.rows[0];
       if (!row) return res.status(404).json({ error: "File not found" });
       res.set("Content-Type", row.mime || "application/octet-stream");
-      res.set("Content-Disposition", `attachment; filename="${String(row.filename).replace(/"/g, "")}"`);
+      setDownloadFilename(res, String(row.filename).replace(/"/g, ""));
       res.send(row.bytes);
     } catch (error) {
       console.error("stain file:", error);

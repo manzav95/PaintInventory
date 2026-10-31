@@ -624,6 +624,10 @@ export default function InventoryListScreen({
           }
           const extras = {
             ...(currentItem ? { currentItem } : {}),
+            orderId: selectedReceiveOrder.id,
+            ...(selectedReceiveOrder.po_number
+              ? { poNumber: String(selectedReceiveOrder.po_number).trim() }
+              : {}),
             ...(location !== undefined ? { location } : {}),
           };
           const result = await InventoryService.updateQuantity(

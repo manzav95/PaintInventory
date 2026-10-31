@@ -23,10 +23,12 @@ import { AppEmptyState } from "./ui";
 import { displayUserName } from "../utils/displayUserName";
 import { BOOTH_OPTIONS } from "../services/materialUsageService";
 import {
-  isMaterialUsageEligibleItem,
   formatMaterialPickerLabel,
   getMaterialInputAccent,
   resolvePaintItemFromNumericInput,
+  buildMaterialUsageSuggestions,
+  isSyntheticDyeSuggestion,
+  customColorFromSyntheticDye,
 } from "../utils/materialUsageItems";
 import { space, radius } from "../theme/tokens";
 
@@ -145,33 +147,14 @@ export default function MaterialUsageEditPopover({
     ? formatMaterialPickerLabel(selectedItem)
     : customColor || colorQuery;
 
-  const materialSuggestions = useMemo(() => {
-    if (selectedItem) return [];
-    const eligible = (inventory || []).filter(isMaterialUsageEligibleItem);
-    const q = (colorQuery || "").trim().toLowerCase();
-    const filtered = q
-      ? eligible.filter(
-          (i) =>
-            (i.name || "").toLowerCase().includes(q) ||
-            (i.id || "").toLowerCase().includes(q) ||
-            String(i.color_label || "")
-              .toLowerCase()
-              .includes(q),
-        )
-      : eligible;
-    return filtered
-      .sort((a, b) => {
-        const aName = (a.name || a.id || "").toLowerCase();
-        const bName = (b.name || b.id || "").toLowerCase();
-        if (q) {
-          const aStarts = aName.startsWith(q) ? 0 : 1;
-          const bStarts = bName.startsWith(q) ? 0 : 1;
-          if (aStarts !== bStarts) return aStarts - bStarts;
-        }
-        return aName.localeCompare(bName);
-      })
-      .slice(0, 12);
-  }, [inventory, colorQuery, selectedItem]);
+  const materialSuggestions = useMemo(
+    () =>
+      buildMaterialUsageSuggestions(inventory, colorQuery, {
+        selectedItem,
+        limit: 12,
+      }),
+    [inventory, colorQuery, selectedItem],
+  );
 
   const showMaterialSuggestions = materialFocused && !selectedItem;
 
@@ -467,9 +450,15 @@ export default function MaterialUsageEditPopover({
                         <Pressable
                           key={item.id}
                           onPress={() => {
-                            setSelectedItem(item);
-                            setCustomColor("");
-                            setColorQuery("");
+                            if (isSyntheticDyeSuggestion(item)) {
+                              setCustomColor(customColorFromSyntheticDye(item));
+                              setSelectedItem(null);
+                              setColorQuery("");
+                            } else {
+                              setSelectedItem(item);
+                              setCustomColor("");
+                              setColorQuery("");
+                            }
                             setMaterialFocused(false);
                           }}
                           style={({ pressed }) => [

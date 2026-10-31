@@ -279,6 +279,8 @@ function buildTalkingPoints({
   adjustmentsThis,
   adjustmentsAll,
   daysIntoWeek = 7,
+  nowLabel = "this week",
+  prevLabel = "last week",
 }) {
   const points = [];
   const usageNow = thisWeek.usage;
@@ -310,18 +312,17 @@ function buildTalkingPoints({
         const jobsLast = scheduleLast[key] || 0;
         const jobChange = pctChange(jobsNow, jobsLast);
         if (jobsNow > jobsLast && jobChange >= 10) {
-          why = ` Production schedule has ${jobsNow} ${label.toLowerCase()} jobs this week vs ${jobsLast} last week, so the increase is expected.`;
+          why = ` Production schedule has ${jobsNow} ${label.toLowerCase()} jobs ${nowLabel} vs ${jobsLast} ${prevLabel}, so the increase is expected.`;
         } else if (jobsNow <= jobsLast) {
-          why = ` The production schedule does not show more ${label.toLowerCase()} work (${jobsNow} jobs vs ${jobsLast} last week) — ask the booths why ${label.toLowerCase()} volume climbed.`;
+          why = ` The production schedule does not show more ${label.toLowerCase()} work (${jobsNow} jobs vs ${jobsLast} ${prevLabel}) — ask the booths why ${label.toLowerCase()} volume climbed.`;
         }
       } else {
-        why =
-          " Upload this week's production schedule CSV if you want to check whether the extra work was planned.";
+        why = ` Upload ${nowLabel}'s production schedule CSV if you want to check whether the extra work was planned.`;
       }
       points.push({
         severity: vsAvg >= 30 || deltaAvg >= 8 ? "high" : "medium",
         title: `${label} consumption is up`,
-        body: `${label} usage is ${round1(now)} gal this week vs ${round1(avg)} gal average over the last 4 weeks (${vsAvg > 0 ? "+" : ""}${vsAvg}%, ${vsLast > 0 ? "+" : ""}${vsLast}% vs last week).${why}`,
+        body: `${label} usage is ${round1(now)} gal ${nowLabel} vs ${round1(avg)} gal average over the last 4 weeks (${vsAvg > 0 ? "+" : ""}${vsAvg}%, ${vsLast > 0 ? "+" : ""}${vsLast}% vs ${prevLabel}).${why}`,
       });
     } else if (
       daysIntoWeek >= 4 &&
@@ -331,7 +332,7 @@ function buildTalkingPoints({
       points.push({
         severity: "info",
         title: `${label} usage is down`,
-        body: `${label} is ${round1(now)} gal this week vs ${round1(avg)} gal average (−${Math.abs(vsAvg)}%). Confirm the line actually ran less ${label.toLowerCase()}, not that entries were missed.`,
+        body: `${label} is ${round1(now)} gal ${nowLabel} vs ${round1(avg)} gal average (−${Math.abs(vsAvg)}%). Confirm the line actually ran less ${label.toLowerCase()}, not that entries were missed.`,
       });
     }
   }
@@ -347,12 +348,12 @@ function buildTalkingPoints({
     if (scheduleThis && scheduleLast) {
       const schPaintNow = mixShare(scheduleThis.paint, scheduleThis.jobs);
       const schStainNow = mixShare(scheduleThis.stain, scheduleThis.jobs);
-      why = ` Schedule mix this week is ${schPaintNow}% paint jobs / ${schStainNow}% stain jobs.`;
+      why = ` Schedule mix ${nowLabel} is ${schPaintNow}% paint jobs / ${schStainNow}% stain jobs.`;
     }
     points.push({
       severity: "medium",
       title: "Paint vs stain mix shifted",
-      body: `Usage mix is ${paintShareNow}% paint / ${stainShareNow}% stain this week, vs ${paintShareAvg}% / ${stainShareAvg}% over the last 4 weeks.${why} Worth a quick check with mixing and the booths.`,
+      body: `Usage mix is ${paintShareNow}% paint / ${stainShareNow}% stain ${nowLabel}, vs ${paintShareAvg}% / ${stainShareAvg}% over the last 4 weeks.${why} Worth a quick check with mixing and the booths.`,
     });
   }
 
@@ -372,8 +373,8 @@ function buildTalkingPoints({
     }
     points.push({
       severity: wasteDelta >= 6 || wastePct >= 40 ? "high" : "medium",
-      title: "Excess waste this week",
-      body: `Paint, primer, and clear waste is ${round1(wasteNowCoat)} gal this week vs ${round1(wasteAvgCoat)} gal average (${wastePct > 0 ? "+" : ""}${wastePct}%). That is material mixed but not sprayed.${hot.length ? ` Biggest jumps: ${hot.join(", ")}.` : ""} Talk with the booths about leftover cups and gun dumps.`,
+      title: `Excess waste ${nowLabel}`,
+      body: `Paint, primer, and clear waste is ${round1(wasteNowCoat)} gal ${nowLabel} vs ${round1(wasteAvgCoat)} gal average (${wastePct > 0 ? "+" : ""}${wastePct}%). That is material mixed but not sprayed.${hot.length ? ` Biggest jumps: ${hot.join(", ")}.` : ""} Talk with the booths about leftover cups and gun dumps.`,
     });
   }
 
@@ -384,7 +385,7 @@ function buildTalkingPoints({
       points.push({
         severity: "high",
         title: "Waste is high versus what was mixed",
-        body: `${round1(mixedCoatings)} gal of paint, primer, and clear were mixed this week, and ${round1(wasteNowCoat)} gal (${ratio}%) went to waste — that is what was not sprayed. Acetone is left out of this comparison.`,
+        body: `${round1(mixedCoatings)} gal of paint, primer, and clear were mixed ${nowLabel}, and ${round1(wasteNowCoat)} gal (${ratio}%) went to waste — that is what was not sprayed. Acetone is left out of this comparison.`,
       });
     }
   }
@@ -406,20 +407,20 @@ function buildTalkingPoints({
     points.push({
       severity: high ? "high" : "medium",
       title: "Count was off",
-      body: `ADMIN changed on-hand gallons ${adjustmentsThis.count} ${adjustmentsThis.count === 1 ? "time" : "times"} this week (${round1(adjustmentsThis.absGallons)} gal absolute, net ${adjustmentsThis.netGallons > 0 ? "+" : ""}${round1(adjustmentsThis.netGallons)} gal), so the count was off.${top ? ` ${top}.` : ""} All-time: ${adjustmentsAll.count} count-off adjustments totaling ${round1(adjustmentsAll.absGallons)} gal moved.`,
+      body: `ADMIN changed on-hand gallons ${adjustmentsThis.count} ${adjustmentsThis.count === 1 ? "time" : "times"} ${nowLabel} (${round1(adjustmentsThis.absGallons)} gal absolute, net ${adjustmentsThis.netGallons > 0 ? "+" : ""}${round1(adjustmentsThis.netGallons)} gal), so the count was off.${top ? ` ${top}.` : ""} All-time: ${adjustmentsAll.count} count-off adjustments totaling ${round1(adjustmentsAll.absGallons)} gal moved.`,
     });
   } else if ((adjustmentsAll?.count || 0) > 0) {
     points.push({
       severity: "info",
-      title: "No count-off corrections this week",
-      body: `ADMIN did not change on-hand gallons this week. All-time: ${adjustmentsAll.count} count-off adjustments totaling ${round1(adjustmentsAll.absGallons)} gal moved.`,
+      title: `No count-off corrections ${nowLabel}`,
+      body: `ADMIN did not change on-hand gallons ${nowLabel}. All-time: ${adjustmentsAll.count} count-off adjustments totaling ${round1(adjustmentsAll.absGallons)} gal moved.`,
     });
   }
 
   if (!points.length) {
     points.push({
       severity: "info",
-      title: "Quiet week so far",
+      title: daysIntoWeek < 7 ? "Quiet week so far" : "Quiet week",
       body: "Usage and waste are in line with the last few weeks. Nothing jumps out to bring to the team yet.",
     });
   }
@@ -543,37 +544,38 @@ async function getOverview(pool) {
             a.details, a.timestamp, i.name AS item_name, i.type AS item_type
      FROM audit_log a
      LEFT JOIN items i ON i.id = a."itemId"
-     WHERE LOWER(TRIM(COALESCE(a."userName", ''))) IN ('admin', 'admin123')
-       AND (
-         a.action = 'qty_adjust'
-         OR (
-           COALESCE(a.action, '') NOT IN
-             ('check_in', 'check_out', 'receiving', 'recycled', 'location_change', 'add', 'delete')
-           AND COALESCE(
-             CASE
-               WHEN a.details IS NULL OR trim(a.details::text) = '' THEN ''
-               WHEN left(trim(a.details::text), 1) = '{' THEN a.details::jsonb->>'_actionType'
-               ELSE ''
-             END,
-             ''
-           ) NOT IN ('check_in', 'check_out', 'receiving', 'recycled', 'location_change')
-           AND a.details IS NOT NULL
-           AND left(trim(a.details::text), 1) = '{'
-           AND (
-             (a.details::jsonb ? 'oldQuantity' AND a.details::jsonb ? 'newQuantity')
-             OR (a.details::jsonb ? 'quantityChange')
-             OR (a.details::jsonb ? 'quantity')
-           )
-         )
-       )`
+     WHERE a.action = 'qty_adjust'
+        OR (
+          LOWER(TRIM(COALESCE(a."userName", ''))) IN ('admin', 'admin123')
+          AND COALESCE(a.action, '') NOT IN
+            ('check_in', 'check_out', 'receiving', 'recycled', 'location_change', 'add', 'delete')
+          AND COALESCE(
+            CASE
+              WHEN a.details IS NULL OR trim(a.details::text) = '' THEN ''
+              WHEN left(trim(a.details::text), 1) = '{' THEN a.details::jsonb->>'_actionType'
+              ELSE ''
+            END,
+            ''
+          ) NOT IN ('check_in', 'check_out', 'receiving', 'recycled', 'location_change')
+          AND a.details IS NOT NULL
+          AND left(trim(a.details::text), 1) = '{'
+          AND (
+            (a.details::jsonb ? 'oldQuantity' AND a.details::jsonb ? 'newQuantity')
+            OR (a.details::jsonb ? 'quantityChange')
+            OR (a.details::jsonb ? 'quantity')
+          )
+        )`
   );
 
-  const adjustmentsThisItems = [];
+  const lastMonday = addDaysIso(thisMonday, -7);
+  const adjItemMaps = {
+    [thisMonday]: {},
+    [lastMonday]: {},
+  };
   const adjustmentsAll = { count: 0, absGallons: 0, netGallons: 0 };
-  const itemWeek = {};
   for (const row of adjRes.rows) {
-    if (!isMainAdminName(row.user_name)) continue;
     const action = String(row.action || "").toLowerCase();
+    if (action !== "qty_adjust" && !isMainAdminName(row.user_name)) continue;
     if (
       action === "check_in" ||
       action === "check_out" ||
@@ -615,10 +617,11 @@ async function getOverview(pool) {
       week.adjustments.absGallons = round1(week.adjustments.absGallons + abs);
       week.adjustments.netGallons = round1(week.adjustments.netGallons + delta);
     }
-    if (monday === thisMonday) {
+    const itemMap = adjItemMaps[monday];
+    if (itemMap) {
       const key = String(row.item_id || row.item_name || "item");
-      if (!itemWeek[key]) {
-        itemWeek[key] = {
+      if (!itemMap[key]) {
+        itemMap[key] = {
           itemId: row.item_id,
           name: row.item_name || row.item_id || "Unknown",
           type: row.item_type || "",
@@ -627,14 +630,15 @@ async function getOverview(pool) {
           count: 0,
         };
       }
-      itemWeek[key].delta = round1(itemWeek[key].delta + delta);
-      itemWeek[key].abs = round1(itemWeek[key].abs + abs);
-      itemWeek[key].count += 1;
+      itemMap[key].delta = round1(itemMap[key].delta + delta);
+      itemMap[key].abs = round1(itemMap[key].abs + abs);
+      itemMap[key].count += 1;
     }
   }
-  adjustmentsThisItems.push(
-    ...Object.values(itemWeek).sort((a, b) => b.abs - a.abs),
-  );
+  const sortAdjItems = (map) =>
+    Object.values(map || {}).sort((a, b) => b.abs - a.abs);
+  const adjustmentsThisItems = sortAdjItems(adjItemMaps[thisMonday]);
+  const adjustmentsLastItems = sortAdjItems(adjItemMaps[lastMonday]);
 
   await ensureOverviewTables(pool);
   const schedRes = await pool.query(
@@ -665,9 +669,15 @@ async function getOverview(pool) {
 
   const weeks = mondays.map((m) => byMonday[m]);
   const thisWeek = weeks[weeks.length - 1];
-  const lastWeek = weeks[weeks.length - 2] || emptyWeek(addDaysIso(thisMonday, -7));
+  const lastWeek = weeks[weeks.length - 2] || emptyWeek(lastMonday);
+  const weekBeforeLast =
+    weeks[weeks.length - 3] || emptyWeek(addDaysIso(thisMonday, -14));
   const priorWeeks = weeks.slice(0, -1).slice(-4);
   const priorAvg = avgWeeks(priorWeeks.length ? priorWeeks : [lastWeek]);
+  const lastWeekPriorWeeks = weeks.slice(0, -2).slice(-4);
+  const lastWeekPriorAvg = avgWeeks(
+    lastWeekPriorWeeks.length ? lastWeekPriorWeeks : [weekBeforeLast],
+  );
   const daysIntoWeek = Math.max(
     0,
     Math.round(
@@ -690,21 +700,45 @@ async function getOverview(pool) {
     adjustmentsAll,
     daysIntoWeek,
   });
+  const lastWeekTalkingPoints = buildTalkingPoints({
+    thisWeek: lastWeek,
+    lastWeek: weekBeforeLast,
+    priorAvg: lastWeekPriorAvg,
+    scheduleThis: lastWeek.schedule.jobs ? lastWeek.schedule : null,
+    scheduleLast: weekBeforeLast.schedule.jobs ? weekBeforeLast.schedule : null,
+    booth2Stain: lastWeek.booth2Stain,
+    adjustmentsThis: {
+      ...lastWeek.adjustments,
+      items: adjustmentsLastItems,
+    },
+    adjustmentsAll,
+    daysIntoWeek: 7,
+    nowLabel: "last week",
+    prevLabel: "the week before",
+  });
 
   return {
     today,
     thisMonday,
     weekLabel: formatWeekRangeLabel(thisMonday),
+    lastWeekLabel: formatWeekRangeLabel(lastWeek.monday),
     inProgress: true,
     weeks,
     thisWeek,
     lastWeek,
+    weekBeforeLast,
     thisMonth,
     priorAvg,
+    lastWeekPriorAvg,
     talkingPoints,
+    lastWeekTalkingPoints,
     adjustmentsThis: {
       ...thisWeek.adjustments,
       items: adjustmentsThisItems,
+    },
+    adjustmentsLast: {
+      ...lastWeek.adjustments,
+      items: adjustmentsLastItems,
     },
     adjustmentsAll,
     scheduleFiles,

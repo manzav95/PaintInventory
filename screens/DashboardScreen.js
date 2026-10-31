@@ -163,6 +163,50 @@ function isRecycleDue(item) {
   return recycleDate.getTime() <= today.getTime();
 }
 
+function receivePoFromLog(log, orders = []) {
+  const details = log?.details || {};
+  const direct = String(details.po_number || details.poNumber || "").trim();
+  if (direct) return direct;
+  const orderId = details.orderId ?? details.order_id;
+  if (orderId != null && String(orderId).trim() !== "") {
+    const hit = (orders || []).find((order) => String(order.id) === String(orderId));
+    const po = String(hit?.po_number || "").trim();
+    if (po) return po;
+  }
+  const itemId = String(log?.itemId || "").trim();
+  if (!itemId || !(orders || []).length) return "";
+  const ts = log?.timestamp ? new Date(log.timestamp).getTime() : 0;
+  let best = "";
+  let bestDelta = Infinity;
+  let unique = "";
+  let uniqueCount = 0;
+  for (const order of orders) {
+    const po = String(order?.po_number || "").trim();
+    if (!po) continue;
+    const lines = order.lines || [];
+    const line = lines.find(
+      (row) =>
+        String(row.itemId || row.item_id || "") === itemId &&
+        Number(row.received_quantity || 0) > 0,
+    );
+    if (!line) continue;
+    uniqueCount += 1;
+    unique = po;
+    const receivedAt = line.received_at
+      ? new Date(line.received_at).getTime()
+      : 0;
+    const delta =
+      receivedAt && ts ? Math.abs(receivedAt - ts) : Number.MAX_SAFE_INTEGER / 2;
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = po;
+    }
+  }
+  if (best && bestDelta <= 2 * 60 * 60 * 1000) return best;
+  if (uniqueCount === 1) return unique;
+  return "";
+}
+
 export default function DashboardScreen({
   inventory,
   inventoryLoaded = true,
@@ -187,6 +231,7 @@ export default function DashboardScreen({
   onOpenCheckInOut,
   onOpenOverview,
   showCheckInOutNav = true,
+  orders = [],
 }) {
   const theme = useTheme();
   const isWeb = Platform.OS === "web";
@@ -873,7 +918,12 @@ export default function DashboardScreen({
       qty !== "-" && qty != null && qty !== ""
         ? `${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
         : "";
-    return `${actionLabel} ${qtyPart}${colorName}`.replace(/\s+/g, " ").trim();
+    const po =
+      resolveActionType(log) === "receiving"
+        ? receivePoFromLog(log, orders)
+        : "";
+    const poPart = po ? ` · PO ${po}` : "";
+    return `${actionLabel} ${qtyPart}${colorName}${poPart}`.replace(/\s+/g, " ").trim();
   };
 
   const mobileHistoryLogs = useMemo(() => {
@@ -1040,6 +1090,10 @@ export default function DashboardScreen({
     const typeLabel = materialType ? getMaterialTypeLabel(materialType) : "";
     const isPrimer =
       String(materialType).toLowerCase() === "primer";
+    const po =
+      resolveActionType(log) === "receiving"
+        ? receivePoFromLog(log, orders)
+        : "";
     return (
       <View
         key={`${log.id || log.timestamp}-${log.itemId}-${index}`}
@@ -1152,6 +1206,7 @@ export default function DashboardScreen({
                 ? ` ${formatHistoryQtyLabel(log, qty, { withGalUnit: true })} `
                 : " "}
               <Text style={{ fontWeight: "700" }}>{colorName}</Text>
+              {po ? ` · PO ${po}` : ""}
             </Text>
             {booth ? (
               <View

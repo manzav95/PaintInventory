@@ -41,7 +41,19 @@ export function isMaterialUsageEligibleItem(item) {
   return true;
 }
 
-/** Show "stain" after stain / custom_stain names when not already present. */
+const TYPE_WORD_RE = /\b(custom|stain|dye|toner|paint|primer|clear)\b/gi;
+
+/** Color name without stain/dye/type words — "Espresso Stain" → "espresso". */
+export function materialColorBase(name) {
+  return String(name || "")
+    .replace(TYPE_WORD_RE, " ")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/** Show "stain" / "dye" after those types when the name does not already say it. */
 export function formatMaterialPickerLabel(item) {
   const name = String(item?.name || item?.id || "").trim();
   if (!name) return "";
@@ -52,7 +64,118 @@ export function formatMaterialPickerLabel(item) {
   ) {
     return `${name} stain`;
   }
+  if (type === "dye" && !/\bdye\b/i.test(name)) {
+    return `${name} dye`;
+  }
   return name;
+}
+
+export function isSyntheticDyeSuggestion(item) {
+  return !!item?._syntheticDye;
+}
+
+export function customColorFromSyntheticDye(item) {
+  const base = String(item?._colorBase || item?.name || "").trim();
+  if (!base) return "dye";
+  return /\bdye\b/i.test(base) ? base : `${base} dye`;
+}
+
+function itemMatchesMaterialQuery(item, q) {
+  if (!q) return true;
+  const hay = [
+    item?.name,
+    item?.id,
+    item?.color_label,
+    formatMaterialPickerLabel(item),
+  ]
+    .map((v) => String(v || "").toLowerCase())
+    .join(" ");
+  return hay.includes(q);
+}
+
+/**
+ * Inventory matches for the material picker. Standard stains also surface
+ * the same color as dye (real dye item if it exists, otherwise a dye option).
+ */
+export function buildMaterialUsageSuggestions(
+  inventory,
+  query,
+  { selectedItem, lastActivityByItemId = {}, limit } = {},
+) {
+  if (selectedItem) return [];
+  const eligible = (inventory || []).filter(isMaterialUsageEligibleItem);
+  const q = String(query || "").trim().toLowerCase();
+  const filtered = q
+    ? eligible.filter((item) => itemMatchesMaterialQuery(item, q))
+    : eligible.slice();
+  const typeOnly = /^(stain|dye|toner|paint|primer|clear)$/.test(q);
+  if (q && !typeOnly) {
+    const typeBaseKey = (item) =>
+      `${String(item?.type || "").toLowerCase()}|${materialColorBase(item?.name)}`;
+    const seen = new Set(filtered.map(typeBaseKey));
+    const dyes = eligible.filter(
+      (item) => String(item.type || "").toLowerCase() === "dye",
+    );
+    const stains = filtered.filter((item) => {
+      const t = String(item.type || "").toLowerCase();
+      return t === "stain" || t === "custom_stain";
+    });
+    for (const stain of stains) {
+      const base = materialColorBase(stain.name);
+      if (!base || seen.has(`dye|${base}`)) continue;
+      const realDye = dyes.find((dye) => materialColorBase(dye.name) === base);
+      if (realDye) {
+        if (!filtered.some((item) => String(item.id) === String(realDye.id))) {
+          filtered.push(realDye);
+        }
+        seen.add(`dye|${base}`);
+        continue;
+      }
+      const title = String(stain.name || "")
+        .replace(/\bstain\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim() || String(stain.name || "").trim();
+      filtered.push({
+        id: `__dye__${stain.id}`,
+        name: title,
+        type: "dye",
+        _syntheticDye: true,
+        _colorBase: title,
+      });
+      seen.add(`dye|${base}`);
+    }
+  }
+  filtered.sort((a, b) => {
+    const aName = (a.name || a.id || "").toLowerCase();
+    const bName = (b.name || b.id || "").toLowerCase();
+    const aLabel = formatMaterialPickerLabel(a).toLowerCase();
+    const bLabel = formatMaterialPickerLabel(b).toLowerCase();
+    if (q) {
+      const aStarts =
+        aName.startsWith(q) || aLabel.startsWith(q) ? 0 : 1;
+      const bStarts =
+        bName.startsWith(q) || bLabel.startsWith(q) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+    }
+    const aBase = materialColorBase(a.name);
+    const bBase = materialColorBase(b.name);
+    if (aBase && bBase && aBase === bBase) {
+      const rank = (item) => {
+        const t = String(item?.type || "").toLowerCase();
+        if (t === "stain" || t === "custom_stain") return 0;
+        if (t === "dye") return 1;
+        return 2;
+      };
+      const d = rank(a) - rank(b);
+      if (d) return d;
+    }
+    const ta = lastActivityByItemId[String(a.id)] || 0;
+    const tb = lastActivityByItemId[String(b.id)] || 0;
+    if (tb !== ta) return tb - ta;
+    return aLabel.localeCompare(bLabel);
+  });
+  if (Number.isFinite(limit) && limit > 0) return filtered.slice(0, limit);
+  return filtered;
 }
 
 /**

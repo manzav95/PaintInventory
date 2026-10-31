@@ -21,7 +21,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  exposedHeaders: ["Content-Disposition"],
+}));
 app.use(bodyParser.json({ limit: '12mb' }));
 
 // Initialize database
@@ -237,7 +239,7 @@ app.put('/api/items/:id', async (req, res) => {
   try {
     const id = decodeURIComponent(req.params.id).trim();
     const updates = req.body;
-    const auditUserName = (updates && updates.userName && String(updates.userName).trim()) || 'unknown';
+    let auditUserName = (updates && updates.userName && String(updates.userName).trim()) || 'unknown';
     delete updates.id; // Don't allow ID change via this endpoint
 
     console.log('Updating item:', id, 'with updates:', Object.keys(updates));
@@ -249,6 +251,12 @@ app.put('/api/items/:id', async (req, res) => {
 
     // Extract action type flag (if present) and remove it from updates before saving
     const actionType = updates._actionType;
+    // qty_adjust is only sent when the main admin changes on-hand gallons.
+    // Older item-save requests dropped userName; still attribute those to Admin.
+    if (actionType === 'qty_adjust') {
+      const who = String(auditUserName || '').toLowerCase().trim();
+      if (!who || who === 'unknown') auditUserName = 'Admin';
+    }
     const quantityChange = updates._quantityChange;
     const transactionId =
       updates._transactionId != null
@@ -266,9 +274,13 @@ app.put('/api/items/:id', async (req, res) => {
 
     console.log('Extracted actionType:', actionType, 'quantityChange:', quantityChange, 'for item:', id);
 
+    const orderIdRaw = updates._orderId;
+    const poNumberRaw = updates._poNumber;
     delete updates._actionType;
     delete updates._quantityChange;
     delete updates._transactionId;
+    delete updates._orderId;
+    delete updates._poNumber;
 
     // Idempotency: claim this transaction id before mutating. If already
     // claimed, return success without changing quantity or writing another
@@ -404,6 +416,27 @@ app.put('/api/items/:id', async (req, res) => {
 
       if (transactionId) {
         auditDetails.transactionId = transactionId;
+      }
+      if (orderIdRaw != null && String(orderIdRaw).trim() !== "") {
+        const asNum = Number(orderIdRaw);
+        auditDetails.orderId = Number.isFinite(asNum) ? asNum : String(orderIdRaw).trim();
+      }
+      if (poNumberRaw != null && String(poNumberRaw).trim() !== "") {
+        auditDetails.po_number = String(poNumberRaw).trim();
+      }
+      if (
+        auditActionType === "receiving" &&
+        !auditDetails.po_number &&
+        auditDetails.orderId != null
+      ) {
+        try {
+          const order = await db.getOrderById(auditDetails.orderId);
+          if (order?.po_number) {
+            auditDetails.po_number = String(order.po_number).trim();
+          }
+        } catch (poErr) {
+          console.error("Could not attach PO number to receive audit:", poErr?.message || poErr);
+        }
       }
       
       console.log('Logging audit:', {
