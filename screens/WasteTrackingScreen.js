@@ -38,6 +38,8 @@ import {
   buildConversionChart,
   GALLONS_PER_INCH,
   todayPacificIso,
+  previousWorkdayPacific,
+  labeledWasteEntryDate,
   formatMonthDayYear,
   weekMondayIso,
   bundleWasteByWeek,
@@ -94,7 +96,7 @@ export default function WasteTrackingScreen({
   const { width } = useWindowDimensions();
   const isDesktop = isWeb && width >= DESKTOP_BREAKPOINT;
 
-  const [entryDate, setEntryDate] = useState(todayPacificIso());
+  const [entryDate, setEntryDate] = useState(previousWorkdayPacific());
   const [name, setName] = useState(userName || "");
   const [inches, setInches] = useState({
     paint: "",
@@ -286,8 +288,14 @@ export default function WasteTrackingScreen({
       return;
     }
 
+    const saveDate = labeledWasteEntryDate(entryDate);
+    const dateNote =
+      saveDate !== String(entryDate || "").slice(0, 10)
+        ? `Date: ${formatMonthDayYear(saveDate)} (morning dump · previous workday)`
+        : `Date: ${formatMonthDayYear(saveDate)}`;
+
     const summaryLines = [
-      `Date: ${formatMonthDayYear(entryDate)}`,
+      dateNote,
       `Name: ${trimmedName}`,
       `Paint: ${formatGallonsTenths(gallons.paint)} gal`,
       `Clear: ${formatGallonsTenths(gallons.clear_toner)} gal`,
@@ -304,7 +312,7 @@ export default function WasteTrackingScreen({
     if (!ok) return;
 
     const payload = {
-      entry_date: entryDate,
+      entry_date: saveDate,
       user_name: trimmedName,
       paint_inches: parseInches(inches.paint),
       clear_toner_inches: parseInches(inches.clear_toner),
@@ -333,7 +341,7 @@ export default function WasteTrackingScreen({
         primer: "",
         acetone: "",
       });
-      setEntryDate(todayPacificIso());
+      setEntryDate(previousWorkdayPacific());
       await loadRecords();
     } catch (e) {
       showToast({
@@ -349,7 +357,7 @@ export default function WasteTrackingScreen({
   const startEdit = (row) => {
     if (!isAdmin || !row?.id) return;
     setEditingId(row.id);
-    setEntryDate(row.entry_date || todayPacificIso());
+    setEntryDate(row.entry_date || previousWorkdayPacific());
     setName(row.user_name || "");
     setInches({
       paint:
@@ -383,19 +391,19 @@ export default function WasteTrackingScreen({
       primer: "",
       acetone: "",
     });
-    setEntryDate(todayPacificIso());
+    setEntryDate(previousWorkdayPacific());
     if (userName) setName(userName);
   };
 
   const handleRefresh = () => {
-    if (!editingId) setEntryDate(todayPacificIso());
+    if (!editingId) setEntryDate(previousWorkdayPacific());
     loadRecords(true);
   };
 
-  // Header / shell pull-to-refresh — reset date to today (when not editing).
+  // Header / shell pull-to-refresh — reset date to previous workday (when not editing).
   useEffect(() => {
     if (!formRefreshKey) return;
-    if (!editingId) setEntryDate(todayPacificIso());
+    if (!editingId) setEntryDate(previousWorkdayPacific());
     loadRecords(true);
     // editingId intentionally omitted — only react to shell refresh ticks
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -457,6 +465,14 @@ export default function WasteTrackingScreen({
             onChange={setEntryDate}
             style={styles.input}
           />
+          <Text
+            style={[styles.hint, { color: theme.colors.onSurfaceVariant }]}
+          >
+            Morning dump is counted as the previous workday
+            {entryDate === todayPacificIso()
+              ? ` (${formatMonthDayYear(previousWorkdayPacific())})`
+              : ""}.
+          </Text>
           <TextInput
             label="Name"
             value={name}

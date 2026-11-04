@@ -272,6 +272,7 @@ export default function StainFormulasScreen({
   embeddedInShell = false,
   onBack,
   formRefreshKey = 0,
+  initialFormulaId = null,
 }) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
@@ -290,7 +291,7 @@ export default function StainFormulasScreen({
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(initialFormulaId || null);
   const [importing, setImporting] = useState(false);
   const [composer, setComposer] = useState(null);
   const hasLoaded = useRef(false);
@@ -431,6 +432,10 @@ export default function StainFormulasScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (initialFormulaId) setSelectedId(initialFormulaId);
+  }, [initialFormulaId]);
 
   useEffect(() => {
     if (refreshSeen.current === formRefreshKey) return;
@@ -1477,6 +1482,49 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                     Add Colorant
                   </AppButton>
                 ) : null}
+                {!editing && (step.matchedBy || []).length ? (
+                  <View
+                    style={[
+                      styles.stepMatch,
+                      {
+                        borderColor: tone.color,
+                        backgroundColor: theme.colors.surface,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stepMatchLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Same {tone.label.toLowerCase()} as
+                    </Text>
+                    <View style={styles.stepMatchLinks}>
+                      {step.matchedBy.map((match) => (
+                        <Pressable
+                          key={String(match.formulaId)}
+                          onPress={() => onOpen(match.formulaId)}
+                          style={[
+                            styles.stepMatchChip,
+                            { borderColor: tone.color },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open matching formula ${match.formulaNumber || match.colorName}`}
+                        >
+                          <Text
+                            style={[
+                              styles.stepMatchNumber,
+                              { color: tone.color },
+                            ]}
+                          >
+                            {match.formulaNumber || match.colorName}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
                 {editing && showNote ? (
                   <View style={styles.importantCard}>
                     <Text style={styles.importantTag}>Important</Text>
@@ -1810,6 +1858,11 @@ const styles = StyleSheet.create({
   qtyField: { width: 72 },
   unitField: { width: 72 },
   nameField: { flex: 1, minWidth: 120 },
+  stepMatch: { borderWidth: 1, borderRadius: 8, padding: 8, marginTop: 4, marginBottom: 4 },
+  stepMatchLabel: { fontSize: 12, fontWeight: "700", marginBottom: 6 },
+  stepMatchLinks: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  stepMatchChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  stepMatchNumber: { fontSize: 13, fontWeight: "900" },
   importantCard: { backgroundColor: "#ffebee", borderColor: "#c62828", borderWidth: 1, borderRadius: 8, padding: 8, marginTop: 6 },
   importantTag: { color: "#b71c1c", fontWeight: "900", letterSpacing: 0.6, fontSize: 11 },
   photo: { width: 180, gap: 4 },

@@ -409,7 +409,8 @@ export default function DashboardScreen({
   };
 
   const customReceiveStack = (log) => {
-    if (resolveActionType(log) !== "receiving") return "";
+    const actionType = resolveActionType(log);
+    if (actionType !== "receiving" && actionType !== "check_in") return "";
     const item = inventory.find((i) => String(i.id) === String(log?.itemId));
     const custom = CUSTOM_TYPES.includes(String(item?.type || "").toLowerCase());
     const fromLog = String(log?.details?.location || log?.details?.newLocation || "").trim();

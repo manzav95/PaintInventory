@@ -63,6 +63,7 @@ import CheckInOutScreen from './screens/CheckInOutScreen';
 import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
 import LineupScreen from './screens/LineupScreen';
+import JobSearchScreen from './screens/JobSearchScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import OverviewScreen from './screens/OverviewScreen';
 import LineupService from './services/lineupService';
@@ -91,6 +92,7 @@ import LoginLogService from './services/loginLogService';
 
 const AUDIT_LOGS_CACHE_KEY = '@paint_inventory_audit_logs_v1';
 const AUDIT_LOGS_FETCH_LIMIT = 750;
+const RECEIVE_ORDERS_CACHE_KEY = '@paint_inventory_receive_orders_v1';
 
 /** Web addresses for screens that open on their own. Item detail and an in-progress check-in stay off the URL. */
 const WEB_SCREEN_HASH = {
@@ -102,6 +104,7 @@ const WEB_SCREEN_HASH = {
   stockPlanning: '/stock',
   orders: '/orders',
   stainFormulas: '/stain-formulas',
+  jobSearch: '/job-search',
   messages: '/messages',
   materialUsage: '/material-usage',
   wasteTracking: '/waste-tracking',
@@ -121,6 +124,7 @@ const WEB_HASH_SCREEN = {
   '/stock': 'stockPlanning',
   '/orders': 'orders',
   '/stain-formulas': 'stainFormulas',
+  '/job-search': 'jobSearch',
   '/messages': 'messages',
   '/material-usage': 'materialUsage',
   '/waste-tracking': 'wasteTracking',
@@ -217,6 +221,7 @@ export default function App() {
   const [recycleDueFilter, setRecycleDueFilter] = useState(false);
   const [lowStockFilter, setLowStockFilter] = useState(false);
   const [ordersInitialFilter, setOrdersInitialFilter] = useState(null); // null | 'existing' | 'back_orders' | 'late_orders' | 'completed'
+  const [formulaFocusId, setFormulaFocusId] = useState(null);
   const [inventoryViewState, setInventoryViewState] = useState({
     viewMode: 'inventory', // 'inventory' | 'colorBook'
     bookFilter: 'standard', // 'standard' | 'custom'
@@ -361,6 +366,11 @@ export default function App() {
     } else if (screen === 'orders') {
       setOrdersInitialFilter(null);
     }
+    if (Object.prototype.hasOwnProperty.call(options, 'formulaFocusId')) {
+      setFormulaFocusId(options.formulaFocusId);
+    } else if (screen === 'stainFormulas') {
+      setFormulaFocusId(null);
+    }
     setPreviousScreen(currentScreen);
     setCurrentScreen(screen);
   };
@@ -433,6 +443,7 @@ export default function App() {
         placeOrder: 'Place Order',
         stockPlanning: 'Stock & week order',
         stainFormulas: 'Formulas',
+        jobSearch: 'Job search',
         messages: 'Messages',
         list: 'Inventory',
         qrscan: 'Check In / Check Out',
@@ -714,23 +725,53 @@ export default function App() {
     }
   };
 
-  const refreshReceiveOrders = useCallback(async (force = false) => {
+  const refreshReceiveOrders = useCallback(async (force = false, showError = force) => {
     if (receiveOrdersLoading && !force) return;
     if (!force && receiveOrdersCache !== null) return;
     setReceiveOrdersLoading(true);
     try {
-      const list = await OrderService.getOrders(200);
-      setReceiveOrdersCache(Array.isArray(list) ? list : []);
+      const list = await OrderService.getOrders(200, { throwOnError: true });
+      const next = Array.isArray(list) ? list : [];
+      setReceiveOrdersCache(next);
+      AsyncStorage.setItem(RECEIVE_ORDERS_CACHE_KEY, JSON.stringify(next)).catch(
+        () => {},
+      );
       receiveOrdersFetchStarted.current = true;
     } catch (e) {
       console.error('Error prefetching receive PO list:', e);
-      if (force) {
+      if (showError) {
         Alert.alert('Error', e?.message || 'Could not load orders.');
       }
     } finally {
       setReceiveOrdersLoading(false);
     }
   }, [receiveOrdersCache, receiveOrdersLoading]);
+
+  // Show the last PO list immediately, then replace it with a fresh server copy.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(RECEIVE_ORDERS_CACHE_KEY);
+        if (!cancelled && raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setReceiveOrdersCache((prev) => (prev == null ? parsed : prev));
+          }
+        }
+      } catch (_) {
+        /* ignore corrupt cache */
+      }
+      if (!cancelled) {
+        refreshReceiveOrders(true, false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally once on mount — refreshReceiveOrders identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshAuditLogs = useCallback(async (force = false) => {
     if (auditLogsLoading && !force) return;
@@ -2108,7 +2149,21 @@ export default function App() {
             isAdmin={isAdmin}
             embeddedInShell={embeddedInShell}
             formRefreshKey={formRefreshKey}
+            initialFormulaId={formulaFocusId}
             onBack={() => navigateTo('home')}
+          />
+        );
+      case 'jobSearch':
+        if (isSales) return null;
+        return (
+          <JobSearchScreen
+            userName={actorName}
+            isAdmin={isAdmin}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo('home')}
+            onOpenFormula={(formulaId) =>
+              navigateTo('stainFormulas', { formulaFocusId: formulaId })
+            }
           />
         );
       case 'messages':

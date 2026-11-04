@@ -566,6 +566,13 @@ export default function OverviewScreen({
           Compared with {prevLabel} and the average of the previous 4 weeks.
           Mixed is what went into the booths. Waste (not sprayed) is paint,
           primer, and clear only — acetone is left out.
+          {viewingLast
+            ? ""
+            : ` Mixed and waste include completed days only${
+                data?.completedThrough
+                  ? `, through ${new Date(`${data.completedThrough}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                  : ""
+              }.`}
         </AppText>
 
         {loading && !data ? (

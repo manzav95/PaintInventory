@@ -468,11 +468,14 @@ function emptyWeek(monday) {
 
 async function getOverview(pool) {
   const today = todayPacificIso();
+  const completedThrough = addDaysIso(today, -1);
   const thisMonday = weekMondayIso(today);
   const fromMonday = addDaysIso(thisMonday, -7 * (WEEK_COUNT - 1));
   const monthStart = `${today.slice(0, 7)}-01`;
   const fromDate = monthStart < fromMonday ? monthStart : fromMonday;
   const weekEnd = addDaysIso(thisMonday, 6);
+  const queryEnd =
+    completedThrough && completedThrough < weekEnd ? completedThrough : weekEnd;
   const mondays = [];
   for (let i = 0; i < WEEK_COUNT; i += 1) {
     mondays.push(addDaysIso(fromMonday, 7 * i));
@@ -491,7 +494,7 @@ async function getOverview(pool) {
      WHERE entry_date >= $1
        AND entry_date <= $2
        AND (user_name IS NULL OR LOWER(TRIM(COALESCE(user_name, ''))) NOT IN ('admin123', 'admin'))`,
-    [fromDate, weekEnd],
+    [fromDate, queryEnd],
   );
   for (const row of usageRes.rows) {
     const gal = Number(row.qty_gallons) || 0;
@@ -517,7 +520,7 @@ async function getOverview(pool) {
     `SELECT entry_date, paint_gallons, clear_toner_gallons, primer_gallons, acetone_gallons
      FROM waste_tracking
      WHERE entry_date >= $1 AND entry_date <= $2`,
-    [fromDate, weekEnd],
+    [fromDate, queryEnd],
   );
   for (const row of wasteRes.rows) {
     const paint = Number(row.paint_gallons) || 0;
@@ -719,6 +722,7 @@ async function getOverview(pool) {
 
   return {
     today,
+    completedThrough,
     thisMonday,
     weekLabel: formatWeekRangeLabel(thisMonday),
     lastWeekLabel: formatWeekRangeLabel(lastWeek.monday),

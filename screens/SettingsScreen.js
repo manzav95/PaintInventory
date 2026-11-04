@@ -1012,10 +1012,31 @@ export default function SettingsScreen({
     </>
   );
 
+  const parseActivityDate = (ts) => {
+    if (!ts) return null;
+    const raw = String(ts).trim();
+    const glued = raw.match(
+      /^(\d{4}-\d{2}-\d{2})(?:[T\s]+)(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i,
+    );
+    if (glued) {
+      let hour = parseInt(glued[2], 10);
+      const minute = parseInt(glued[3], 10);
+      const second = glued[4] ? parseInt(glued[4], 10) : 0;
+      const ampm = (glued[5] || "").toUpperCase();
+      if (ampm === "PM" && hour !== 12) hour += 12;
+      if (ampm === "AM" && hour === 12) hour = 0;
+      const parsed = new Date(
+        `${glued[1]}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`,
+      );
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
   const formatActivityTime = (ts) => {
-    if (!ts) return "—";
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return String(ts);
+    const d = parseActivityDate(ts);
+    if (!d) return ts ? String(ts) : "—";
     return d.toLocaleString("en-US", {
       weekday: "short",
       month: "short",
@@ -1073,7 +1094,7 @@ export default function SettingsScreen({
         <View style={styles.activityList}>
           {activityRows.map((row) => {
             const accent = getActionColor(
-              row.kind === "login" ? "login" : row.action,
+              row.kind === "login" ? "login" : row.actionType || row.action,
               row.actionType ? { _actionType: row.actionType } : undefined,
             );
             return (

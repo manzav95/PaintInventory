@@ -1,0 +1,22 @@
+---
+description: Update What's New on every commit and bump v1.x by 0.01 on every GitHub push
+alwaysApply: true
+---
+
+# Version and What's New
+
+Displayed version is `v1.{build}` from `version.js` (`build: 80` → **v1.80**). Increasing `build` by 1 is **+0.01**.
+
+## Every git commit
+- Update `release-notes.json` `changes` with short shop-floor bullets for this release (the What's New / update screen every user sees).
+- Include `release-notes.json` in that same commit.
+- Do this even if the user did not mention version notes.
+- Hide internal-only lines by starting them with `admin` (those are stripped from the popup).
+
+## Every git push to GitHub
+- BEFORE `git push`, run `node scripts/bump-version.js` (v1.80 → v1.81).
+- Commit `version.js` (and `release-notes.json` if still dirty) with the rest of the push.
+- Never push without that bump. Never bump on `npm start` — only on GitHub push.
+
+## Note style
+Replace the previous list. Example: `"Job search shows recent jobs as cards you can tap."`

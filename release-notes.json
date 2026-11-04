@@ -1,6 +1,11 @@
 {
   "changes": [
-    "The stain formula page is now live.",
-    "Admins can create, edit, and delete formulas, and add images and notes."
+    "Job search looks up a job number and shows paint mixed, custom colors, formulas, lineup, and photos.",
+    "Recent jobs appear as cards on Job search — tap one to open it.",
+    "User activity check-in and check-out rows show the item name, and material usage times match the sign-in date format.",
+    "Waste dumped in the morning is counted as the previous workday.",
+    "Overview mixed and waste numbers only include completed days, not today.",
+    "Purchase orders keep the last loaded list on screen while they refresh.",
+    "Custom color check-in shows the stack location on the dashboard, and matching dye, stain, or toner steps are marked on formulas."
   ]
 }

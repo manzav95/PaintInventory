@@ -389,6 +389,118 @@ async function loadSteps(pool, formulaId) {
   }));
 }
 
+function comparableStepType(processName) {
+  const text = String(processName || "").toLowerCase();
+  if (text.includes("dye")) return "dye";
+  if (text.includes("toner")) return "toner";
+  if (text.includes("stain")) return "stain";
+  return "";
+}
+
+function comparableUnit(value) {
+  const unit = String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (unit === "g" || unit.startsWith("gram")) return "g";
+  if (unit === "oz" || unit.startsWith("ounce")) return "oz";
+  if (unit === "gal" || unit.startsWith("gallon")) return "gal";
+  if (unit === "lb" || unit === "lbs" || unit.startsWith("pound")) return "lb";
+  return unit;
+}
+
+function comparableQuantity(value) {
+  const text = String(value || "").trim();
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(text)) {
+    const number = Number(text);
+    if (Number.isFinite(number)) return String(number);
+  }
+  return text.toLowerCase().replace(/\s+/g, " ");
+}
+
+function stepSignature(step) {
+  const type = comparableStepType(step?.processName);
+  const ingredients = Array.isArray(step?.ingredients) ? step.ingredients : [];
+  if (!type || !ingredients.length) return "";
+  const normalized = ingredients
+    .map((ingredient) => [
+      String(productLabel(ingredient?.name || ""))
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim(),
+      comparableQuantity(ingredient?.quantityText),
+      comparableUnit(ingredient?.unit),
+    ])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return `${type}:${JSON.stringify(normalized)}`;
+}
+
+async function findStepMatches(pool, formulaId) {
+  const result = await pool.query(
+    `SELECT s.id AS step_id, s.formula_id, s.process_name,
+            f.formula_number, f.color_name,
+            i.id AS ingredient_id, i.name, i.quantity_text, i.unit
+     FROM stain_formula_steps s
+     JOIN stain_formulas f ON f.id = s.formula_id
+     LEFT JOIN stain_formula_ingredients i ON i.step_id = s.id
+     WHERE LOWER(COALESCE(s.process_name, '')) ~ '(dye|toner|stain)'
+     ORDER BY s.id, i.sort_index, i.id`,
+  );
+  const byStep = new Map();
+  result.rows.forEach((row) => {
+    if (!byStep.has(row.step_id)) {
+      byStep.set(row.step_id, {
+        id: row.step_id,
+        formulaId: Number(row.formula_id),
+        formulaNumber: row.formula_number,
+        colorName: row.color_name,
+        processName: row.process_name,
+        ingredients: [],
+      });
+    }
+    if (row.ingredient_id != null) {
+      byStep.get(row.step_id).ingredients.push({
+        name: row.name,
+        quantityText: row.quantity_text,
+        unit: row.unit,
+      });
+    }
+  });
+
+  const bySignature = new Map();
+  byStep.forEach((step) => {
+    const signature = stepSignature(step);
+    if (!signature) return;
+    if (!bySignature.has(signature)) bySignature.set(signature, []);
+    bySignature.get(signature).push(step);
+  });
+
+  const matches = {};
+  byStep.forEach((step) => {
+    if (step.formulaId !== Number(formulaId)) return;
+    const signature = stepSignature(step);
+    if (!signature) return;
+    const seen = new Set();
+    matches[step.id] = (bySignature.get(signature) || [])
+      .filter((other) => other.formulaId !== Number(formulaId))
+      .filter((other) => {
+        if (seen.has(other.formulaId)) return false;
+        seen.add(other.formulaId);
+        return true;
+      })
+      .map((other) => ({
+        formulaId: other.formulaId,
+        formulaNumber: other.formulaNumber,
+        colorName: other.colorName,
+      }))
+      .sort((a, b) =>
+        String(a.formulaNumber || "").localeCompare(
+          String(b.formulaNumber || ""),
+          undefined,
+          { numeric: true, sensitivity: "base" },
+        ),
+      );
+  });
+  return matches;
+}
+
 async function getFormula(pool, id) {
   const result = await pool.query(
     `SELECT f.*, (
@@ -403,6 +515,11 @@ async function getFormula(pool, id) {
   const formula = mapFormulaRow(result.rows[0]);
   if (!formula) return null;
   formula.steps = await loadSteps(pool, id);
+  const stepMatches = await findStepMatches(pool, id);
+  formula.steps = formula.steps.map((step) => ({
+    ...step,
+    matchedBy: stepMatches[step.id] || [],
+  }));
   const images = await pool.query(
     `SELECT id, caption, mime, is_primary, uploaded_by, created_at
      FROM stain_formula_images WHERE formula_id = $1
@@ -938,5 +1055,8 @@ module.exports = {
   unlinkColors,
   appendFormulaSteps,
   setPrimaryImage,
+  comparableStepType,
+  stepSignature,
+  findStepMatches,
   SPECIES,
 };

@@ -82,6 +82,31 @@ export function todayPacificIso(date = new Date()) {
   }).format(date);
 }
 
+/** Previous shop workday (Mon–Fri) for a Pacific YYYY-MM-DD. */
+export function previousWorkdayPacific(iso = todayPacificIso()) {
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "").slice(0, 10))
+    ? String(iso).slice(0, 10)
+    : todayPacificIso();
+  let d = addDaysIso(start, -1);
+  if (!d) return start;
+  const [y, mo, day] = d.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, mo - 1, day, 12)).getUTCDay();
+  if (dow === 0) return addDaysIso(d, -2);
+  if (dow === 6) return addDaysIso(d, -1);
+  return d;
+}
+
+/**
+ * Morning dump dated today is labeled as the previous workday.
+ * Explicit past dates are kept as entered.
+ */
+export function labeledWasteEntryDate(iso) {
+  const today = todayPacificIso();
+  const key = String(iso || "").trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key) && key !== today) return key;
+  return previousWorkdayPacific(today);
+}
+
 /**
  * Display dates as month/day/year (e.g. 07/22/2026).
  * Accepts YYYY-MM-DD or other parseable date strings.

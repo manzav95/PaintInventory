@@ -213,6 +213,12 @@ export default function AppSidebar({
             active={currentScreen === "stainFormulas"}
             onPress={() => onNavigate("stainFormulas")}
           />
+          <NavButton
+            label="Job search"
+            icon="text-box-search-outline"
+            active={currentScreen === "jobSearch"}
+            onPress={() => onNavigate("jobSearch")}
+          />
           {isAdmin && (
             <>
               <NavButton

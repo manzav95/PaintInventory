@@ -75,6 +75,57 @@ function calendarDateParts(d) {
   return { year: y, month: mo, day };
 }
 
+function addDaysIso(iso, days) {
+  const key = String(iso || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return "";
+  const [y, mo, day] = key.split("-").map(Number);
+  const utc = new Date(Date.UTC(y, mo - 1, day, 12));
+  utc.setUTCDate(utc.getUTCDate() + days);
+  return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** Morning dump is counted on the previous shop workday (Mon–Fri). */
+function previousWorkdayPacific(iso = todayReportIso()) {
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(String(iso || "").slice(0, 10))
+    ? String(iso).slice(0, 10)
+    : todayReportIso();
+  let d = addDaysIso(start, -1);
+  if (!d) return start;
+  const [y, mo, day] = d.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, mo - 1, day, 12)).getUTCDay();
+  if (dow === 0) return addDaysIso(d, -2);
+  if (dow === 6) return addDaysIso(d, -1);
+  return d;
+}
+
+/** Shop usage clock ("4:57 PM", "16:57") + calendar day → local parseable timestamp. */
+function materialUsageTimestamp(entryDate, entryTime) {
+  const date = String(entryDate || "").trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const time = String(entryTime || "12:00").trim();
+  const match = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  let hour = 12;
+  let minute = 0;
+  let second = 0;
+  if (match) {
+    hour = parseInt(match[1], 10);
+    minute = parseInt(match[2], 10);
+    second = match[3] ? parseInt(match[3], 10) : 0;
+    const ampm = (match[4] || "").toUpperCase();
+    if (ampm === "PM" && hour !== 12) hour += 12;
+    if (ampm === "AM" && hour === 12) hour = 0;
+  }
+  return `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+}
+
+/** Today's waste log is labeled as the previous workday. Other dates stay as entered. */
+function labeledWasteEntryDate(iso) {
+  const today = todayReportIso();
+  const key = String(iso || "").trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(key) && key !== today) return key;
+  return previousWorkdayPacific(today);
+}
+
 function weekMondayKey(d) {
   const parts = calendarDateParts(d);
   if (!parts) return "unknown";
@@ -509,6 +560,20 @@ class Database {
         last_seen_at TEXT NOT NULL,
         PRIMARY KEY (item_id, job_name)
       )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS job_photos (
+        id SERIAL PRIMARY KEY,
+        job_name TEXT NOT NULL,
+        caption TEXT NOT NULL DEFAULT '',
+        mime TEXT NOT NULL DEFAULT 'image/jpeg',
+        bytes BYTEA NOT NULL,
+        uploaded_by TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_job_photos_job_name ON job_photos (job_name)
     `);
     console.log("Orders tables ready");
 
@@ -1267,12 +1332,13 @@ class Database {
 
     const [auditRes, loginRes, muRes] = await Promise.all([
       this.pool.query(
-        `SELECT id, action, "itemId" AS item_id, "userName" AS user_name,
-                details, timestamp
-         FROM audit_log
-         WHERE ${nameMatchSql('"userName"')}
+        `SELECT a.id, a.action, a."itemId" AS item_id, i.name AS item_name,
+                a."userName" AS user_name, a.details, a.timestamp
+         FROM audit_log a
+         LEFT JOIN items i ON i.id = a."itemId"
+         WHERE ${nameMatchSql('a."userName"')}
            ${auditSince}
-         ORDER BY timestamp DESC
+         ORDER BY a.timestamp DESC
          LIMIT $${auditParams.length}`,
         auditParams,
       ),
@@ -1317,7 +1383,15 @@ class Database {
             ? Number(details.quantity)
             : null;
       const bits = [];
-      if (row.item_id) bits.push(`Item ${row.item_id}`);
+      const itemLabel = String(
+        details.name ||
+          details.itemName ||
+          details.item_name ||
+          row.item_name ||
+          "",
+      ).trim();
+      if (itemLabel) bits.push(itemLabel);
+      else if (row.item_id) bits.push(String(row.item_id));
       if (Number.isFinite(qty) && qty !== 0) {
         bits.push(`${Math.abs(qty)} gal`);
       }
@@ -1331,21 +1405,24 @@ class Database {
       if (details.job_name || details.jobName) {
         bits.push(`Job ${details.job_name || details.jobName}`);
       }
+      const title = String(actionType || row.action || "Update")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
       activities.push({
         id: `audit-${row.id}`,
         kind: "audit",
         timestamp: row.timestamp,
         action: row.action,
         actionType,
-        title: String(actionType || row.action || "Update")
-          .replace(/_/g, " ")
-          .replace(/\b\w/g, (c) => c.toUpperCase()),
+        title,
         detail: bits.join(" · "),
         itemId: row.item_id || null,
         searchText: [
+          title,
           row.action,
           actionType,
           row.item_id,
+          itemLabel,
           bits.join(" "),
           JSON.stringify(details),
         ]
@@ -1370,9 +1447,9 @@ class Database {
 
     for (const row of muRes.rows) {
       const ts =
-        row.entry_date && String(row.entry_date).trim()
-          ? `${String(row.entry_date).trim()}T${String(row.entry_time || "12:00").trim()}`
-          : row.created_at || null;
+        materialUsageTimestamp(row.entry_date, row.entry_time) ||
+        row.created_at ||
+        null;
       const gal = Number(row.qty_gallons) || 0;
       const bits = [
         row.color_name || row.item_id || "Material",
@@ -2310,13 +2387,7 @@ class Database {
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
-        entry.entry_date ||
-          new Intl.DateTimeFormat("en-CA", {
-            timeZone: "America/Los_Angeles",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          }).format(new Date()),
+        labeledWasteEntryDate(entry.entry_date),
         entry.user_name != null ? String(entry.user_name).trim() : "",
         paintIn,
         clearIn,
@@ -2402,13 +2473,7 @@ class Database {
        WHERE id = $11
        RETURNING *`,
       [
-        entry.entry_date ||
-          new Intl.DateTimeFormat("en-CA", {
-            timeZone: "America/Los_Angeles",
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit",
-          }).format(new Date()),
+        labeledWasteEntryDate(entry.entry_date),
         entry.user_name != null ? String(entry.user_name).trim() : "",
         paintIn,
         clearIn,

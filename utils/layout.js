@@ -29,6 +29,7 @@ export const SCREEN_TITLES = {
   history: "Transaction History",
   messages: "Messages",
   stainFormulas: "Formulas",
+  jobSearch: "Job search",
 };
 
 export function getScreenTitle(screen) {

@@ -17,6 +17,9 @@ export function getActionColor(action, details) {
     return map.checkOut;
   }
   if (action === "check_in") return map.checkIn;
+  if (action === "login" || action === "sign_in" || action === "signed_in") {
+    return map.checkIn;
+  }
   if (action === "check_out") return map.checkOut;
   if (action === "update" && details?._actionType === "receiving") {
     return map.adjust;
