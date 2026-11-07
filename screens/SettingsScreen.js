@@ -34,6 +34,7 @@ import { AppSurface, AppText } from "../components/ui";
 import { colors, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
+import SendUserMessageDialog from "../components/SendUserMessageDialog";
 import { getActionColor } from "../utils/actionColors";
 
 const MONTH_NAMES = [
@@ -218,6 +219,7 @@ export default function SettingsScreen({
   const [activityRows, setActivityRows] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityCount, setActivityCount] = useState(0);
+  const [messageUser, setMessageUser] = useState(null);
 
   // Desktop uses a persistent sidebar; land on a content panel (not a hub).
   useEffect(() => {
@@ -970,6 +972,13 @@ export default function SettingsScreen({
                   <AppButton
                     mode="text"
                     compact
+                    onPress={() => setMessageUser(u.user_name)}
+                  >
+                    Message
+                  </AppButton>
+                  <AppButton
+                    mode="text"
+                    compact
                     onPress={() => openUserActivity(u.user_name)}
                   >
                     Activity
@@ -1465,6 +1474,12 @@ export default function SettingsScreen({
           visible={loginHistoryOpen}
           onDismiss={() => setLoginHistoryOpen(false)}
         />
+        <SendUserMessageDialog
+          visible={!!messageUser}
+          initialToUser={messageUser || ""}
+          lockedToUser
+          onDismiss={() => setMessageUser(null)}
+        />
       </View>
     );
   }
@@ -1518,6 +1533,12 @@ export default function SettingsScreen({
       <LoginHistoryModal
         visible={loginHistoryOpen}
         onDismiss={() => setLoginHistoryOpen(false)}
+      />
+      <SendUserMessageDialog
+        visible={!!messageUser}
+        initialToUser={messageUser || ""}
+        lockedToUser
+        onDismiss={() => setMessageUser(null)}
       />
     </View>
   );

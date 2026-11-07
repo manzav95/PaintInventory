@@ -19,6 +19,7 @@ import { listFeedback, updateFeedbackStatus, subscribeFeedbackChanged } from "..
 import showToast from "../utils/showToast";
 import { radius } from "../theme/tokens";
 import { displayUserName } from "../utils/displayUserName";
+import SendUserMessageDialog from "../components/SendUserMessageDialog";
 
 function formatWhen(ts) {
   if (!ts) return "—";
@@ -48,6 +49,7 @@ export default function MessagesScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -133,6 +135,14 @@ export default function MessagesScreen({
         <PageHeader title="Messages" onBack={onBack} />
       ) : null}
       <View style={styles.inner}>
+        <AppButton
+          mode="contained"
+          icon="bell-ring-outline"
+          onPress={() => setComposeOpen(true)}
+          style={{ marginBottom: 12, alignSelf: "flex-start" }}
+        >
+          Send on-screen reminder
+        </AppButton>
         <SegmentedButtons
           value={filter}
           onValueChange={setFilter}
@@ -259,6 +269,10 @@ export default function MessagesScreen({
           </ScrollView>
         )}
       </View>
+      <SendUserMessageDialog
+        visible={composeOpen}
+        onDismiss={() => setComposeOpen(false)}
+      />
     </View>
   );
 }

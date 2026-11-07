@@ -726,6 +726,10 @@ class Database {
     `);
     console.log("App feedback table ready");
 
+    const userMessages = require("./userMessages");
+    await userMessages.ensureUserMessageTables(this.pool);
+    console.log("User messages table ready");
+
     const stainStore = require("./stainFormulasStore");
     await stainStore.ensureStainTables(this.pool);
     await stainStore.seedDemoFormula(this.pool);

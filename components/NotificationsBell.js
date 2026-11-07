@@ -45,6 +45,7 @@ export default function NotificationsBell({
   isAdmin = false,
   userName = "",
   pendingFeedbackCount = 0,
+  userMessageCount = 0,
   onOpenRecycleDue,
   onOpenBackOrders,
   onOpenLateOrders,
@@ -120,6 +121,19 @@ export default function NotificationsBell({
 
   const allNotifications = useMemo(() => {
     const items = [];
+    if (userMessageCount > 0) {
+      items.push({
+        id: "user_messages",
+        persist: true,
+        title: "Reminders",
+        count: userMessageCount,
+        color: colors.brand.accent,
+        detail:
+          userMessageCount === 1
+            ? "1 on-screen message waiting. Tap Got it when you have read it."
+            : `${userMessageCount} on-screen messages waiting. Tap Got it when you have read them.`,
+      });
+    }
     if (isAdmin && pendingFeedbackCount > 0 && onOpenMessages) {
       items.push({
         id: "messages",
@@ -216,6 +230,7 @@ export default function NotificationsBell({
     return items;
   }, [
     pendingFeedbackCount,
+    userMessageCount,
     wasteUnreadCount,
     recycleDueCount,
     backOrderCount,
@@ -232,7 +247,10 @@ export default function NotificationsBell({
   ]);
 
   const activeNotifications = useMemo(
-    () => allNotifications.filter((n) => !dismissedIds.includes(n.id)),
+    () =>
+      allNotifications.filter(
+        (n) => n.persist || !dismissedIds.includes(n.id),
+      ),
     [allNotifications, dismissedIds],
   );
 
@@ -284,7 +302,7 @@ export default function NotificationsBell({
   };
 
   const handleDismissToday = async () => {
-    const ids = allNotifications.map((n) => n.id);
+    const ids = allNotifications.filter((n) => !n.persist).map((n) => n.id);
     if (ids.includes("waste")) {
       try {
         await WasteTrackingService.markSeen();
@@ -530,7 +548,7 @@ export default function NotificationsBell({
             )}
 
             <View style={styles.modalActions}>
-              {hasUnderlyingAlerts && activeNotifications.length > 0 && (
+              {hasUnderlyingAlerts && activeNotifications.some((n) => !n.persist) && (
                 <AppButton mode="outlined" onPress={handleDismissToday} compact>
                   Clear for today
                 </AppButton>

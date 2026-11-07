@@ -1,11 +1,9 @@
 {
   "changes": [
-    "Job search looks up a job number and shows paint mixed, custom colors, formulas, lineup, and photos.",
-    "Recent jobs appear as cards on Job search — tap one to open it.",
-    "User activity check-in and check-out rows show the item name, and material usage times match the sign-in date format.",
-    "Waste dumped in the morning is counted as the previous workday.",
-    "Overview mixed and waste numbers only include completed days, not today.",
-    "Purchase orders keep the last loaded list on screen while they refresh.",
-    "Custom color check-in shows the stack location on the dashboard, and matching dye, stain, or toner steps are marked on formulas."
+    "Admin can send an on-screen reminder or note. It stays up until the person taps Got it.",
+    "Duplicate a formula and give it a new custom number when the same mix is used on different wood.",
+    "Copy a dye or other step and paste it into another formula.",
+    "Drag formula steps, or use the arrows, to change the order.",
+    "Matching dyes, stains, and toners list every other formula that uses the same mix, in a small gray box at the top of the step."
   ]
 }

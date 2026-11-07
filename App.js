@@ -21,6 +21,7 @@ import FadeIn from './components/FadeIn';
 import ToastHost from './components/ToastHost';
 import ConfirmHost from './components/ConfirmHost';
 import FeedbackHost from './components/FeedbackHost';
+import UserMessageHost from './components/UserMessageHost';
 import { promptFeedback, getUnreadFeedbackCount, markFeedbackSeen, subscribeFeedbackChanged } from './utils/feedback';
 // NFC support is available via NFCService, but NFC UI is currently hidden.
 import NFCService from './services/nfcService';
@@ -189,6 +190,7 @@ export default function App() {
   const isAdmin = isAdminUser && !previewStandardView;
   const actorName = isAdminAccount(userName) ? 'Admin' : (userName || 'unknown');
   const [pendingFeedbackCount, setPendingFeedbackCount] = useState(0);
+  const [userMessageCount, setUserMessageCount] = useState(0);
   const prevPendingFeedbackRef = useRef(null);
   const currentScreenRef = useRef(currentScreen);
   currentScreenRef.current = currentScreen;
@@ -2439,6 +2441,7 @@ export default function App() {
               isAdmin ? () => navigateTo('messages') : undefined
             }
             pendingFeedbackCount={pendingFeedbackCount}
+            userMessageCount={userMessageCount}
           />
           )
         }
@@ -2495,6 +2498,11 @@ export default function App() {
         <ToastHost />
         <ConfirmHost />
         <FeedbackHost />
+        <UserMessageHost
+          userName={userName}
+          paused={updateRequired}
+          onCountChange={setUserMessageCount}
+        />
         <UpdateRequiredModal
           visible={updateRequired}
           blocking

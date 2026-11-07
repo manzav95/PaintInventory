@@ -389,11 +389,19 @@ async function loadSteps(pool, formulaId) {
   }));
 }
 
-function comparableStepType(processName) {
+function comparableStepType(processName, ingredients) {
   const text = String(processName || "").toLowerCase();
   if (text.includes("dye")) return "dye";
   if (text.includes("toner")) return "toner";
+  if (text.includes("glaze")) return "glaze";
   if (text.includes("stain")) return "stain";
+  const names = (Array.isArray(ingredients) ? ingredients : [])
+    .map((ingredient) => String(ingredient?.name || "").toLowerCase())
+    .join(" ");
+  if (names.includes("dye") || names.includes("nerosol") || /\bd\d{2}\b/.test(names)) return "dye";
+  if (names.includes("toner")) return "toner";
+  if (names.includes("glaze")) return "glaze";
+  if (names.includes("stain")) return "stain";
   return "";
 }
 
@@ -415,32 +423,65 @@ function comparableQuantity(value) {
   return text.toLowerCase().replace(/\s+/g, " ");
 }
 
-function stepSignature(step) {
-  const type = comparableStepType(step?.processName);
+function splitQtyUnit(quantityText, unit) {
+  const rawUnit = comparableUnit(unit);
+  const text = String(quantityText || "").replace(/\s+/g, " ").trim();
+  if (rawUnit) {
+    const stripped = text.replace(new RegExp(`\\s*${rawUnit}s?\\s*$`, "i"), "").trim();
+    return { quantity: comparableQuantity(stripped || text), unit: rawUnit };
+  }
+  const match = text.match(/^([+-]?\d+(?:\.\d+)?)\s*([a-zA-Z]+)?$/);
+  if (match) {
+    return {
+      quantity: comparableQuantity(match[1]),
+      unit: comparableUnit(match[2] || ""),
+    };
+  }
+  return { quantity: comparableQuantity(text), unit: "" };
+}
+
+function usableIngredients(step) {
   const ingredients = Array.isArray(step?.ingredients) ? step.ingredients : [];
+  return ingredients.filter((ingredient) => {
+    const name = String(productLabel(ingredient?.name || ingredient?.rawLine || ""))
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!name) return false;
+    if (/picture file|\.pdf\b|\.jpe?g\b|\.png\b|need sample|make sure pump/i.test(name)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function stepSignature(step) {
+  const ingredients = usableIngredients(step);
+  const type = comparableStepType(step?.processName, ingredients);
   if (!type || !ingredients.length) return "";
   const normalized = ingredients
-    .map((ingredient) => [
-      String(productLabel(ingredient?.name || ""))
+    .map((ingredient) => {
+      const name = String(productLabel(ingredient?.name || ingredient?.rawLine || ""))
         .toLowerCase()
         .replace(/\s+/g, " ")
-        .trim(),
-      comparableQuantity(ingredient?.quantityText),
-      comparableUnit(ingredient?.unit),
-    ])
+        .trim();
+      const parts = splitQtyUnit(ingredient?.quantityText, ingredient?.unit);
+      return [name, parts.quantity, parts.unit];
+    })
+    .filter((row) => row[0])
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  if (!normalized.length) return "";
   return `${type}:${JSON.stringify(normalized)}`;
 }
 
 async function findStepMatches(pool, formulaId) {
   const result = await pool.query(
     `SELECT s.id AS step_id, s.formula_id, s.process_name,
-            f.formula_number, f.color_name,
-            i.id AS ingredient_id, i.name, i.quantity_text, i.unit
+            f.formula_number, f.color_name, f.wood_species, f.wood_type,
+            i.id AS ingredient_id, i.name, i.quantity_text, i.unit, i.raw_line
      FROM stain_formula_steps s
      JOIN stain_formulas f ON f.id = s.formula_id
      LEFT JOIN stain_formula_ingredients i ON i.step_id = s.id
-     WHERE LOWER(COALESCE(s.process_name, '')) ~ '(dye|toner|stain)'
      ORDER BY s.id, i.sort_index, i.id`,
   );
   const byStep = new Map();
@@ -451,6 +492,8 @@ async function findStepMatches(pool, formulaId) {
         formulaId: Number(row.formula_id),
         formulaNumber: row.formula_number,
         colorName: row.color_name,
+        woodSpecies: row.wood_species,
+        woodType: row.wood_type,
         processName: row.process_name,
         ingredients: [],
       });
@@ -460,6 +503,7 @@ async function findStepMatches(pool, formulaId) {
         name: row.name,
         quantityText: row.quantity_text,
         unit: row.unit,
+        rawLine: row.raw_line,
       });
     }
   });
@@ -489,6 +533,8 @@ async function findStepMatches(pool, formulaId) {
         formulaId: other.formulaId,
         formulaNumber: other.formulaNumber,
         colorName: other.colorName,
+        woodSpecies: other.woodSpecies,
+        woodType: other.woodType,
       }))
       .sort((a, b) =>
         String(a.formulaNumber || "").localeCompare(
@@ -518,7 +564,7 @@ async function getFormula(pool, id) {
   const stepMatches = await findStepMatches(pool, id);
   formula.steps = formula.steps.map((step) => ({
     ...step,
-    matchedBy: stepMatches[step.id] || [],
+    matchedBy: stepMatches[step.id] || stepMatches[Number(step.id)] || [],
   }));
   const images = await pool.query(
     `SELECT id, caption, mime, is_primary, uploaded_by, created_at
@@ -716,13 +762,13 @@ function cleanDraft(body) {
     ).filter(Boolean),
     isDemo: !!body.isDemo,
     steps: steps.map((step, index) => ({
-      stepNumber: Number(step.stepNumber),
+      stepNumber: index + 1,
       processName: String(step.processName || "").trim(),
       notes: "",
       important: !!(step.important || step.importantNotes || step.notes),
       importantNotes: [step.importantNotes, step.notes]
         .map((item) => String(item || "").trim())
-        .filter((item, index, list) => item && list.indexOf(item) === index)
+        .filter((item, idx, list) => item && list.indexOf(item) === idx)
         .join("\n"),
       sortIndex: index,
       ingredients: (step.ingredients || []).map((ing, i) => ({
@@ -734,7 +780,7 @@ function cleanDraft(body) {
         important: !!ing.important,
         sortIndex: i,
       })),
-    })).filter((step) => Number.isInteger(step.stepNumber)),
+    })),
   };
 }
 

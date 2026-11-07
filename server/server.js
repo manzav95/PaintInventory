@@ -1741,6 +1741,7 @@ app.get('/api/feedback/status', async (req, res) => {
 require('./stainFormulaRoutes').registerStainFormulaRoutes(app, db);
 require('./overviewRoutes').registerOverviewRoutes(app, db);
 require('./jobLookup').registerJobLookupRoutes(app, db);
+require('./userMessageRoutes').registerUserMessageRoutes(app, db);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`CURE API server running on http://0.0.0.0:${PORT}`);

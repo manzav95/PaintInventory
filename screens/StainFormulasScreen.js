@@ -28,6 +28,11 @@ import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
 import { space, radius } from "../theme/tokens";
 import { displayUserName } from "../utils/displayUserName";
+import {
+  copyFormulaStep,
+  peekFormulaStep,
+  subscribeFormulaStepClipboard,
+} from "../utils/formulaStepClipboard";
 
 const SPECIES = ["White Oak", "Maple", "Alder", "Walnut", "Cherry", "Beech", "Red Oak"];
 const FORMULA_PAGE_SIZE = 50;
@@ -62,18 +67,22 @@ function qtyLabel(ing) {
   return [qty, unit].filter(Boolean).join(" ");
 }
 
-function processTone(name) {
+function processTone(name, ingredients) {
   const text = String(name || "").trim().toLowerCase();
-  if (!text) return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
-  if (text.includes("dye")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
-  if (text.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
-  if (text.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
-  if (/\bprimer\b/.test(text)) return { color: "#ffffff", soft: "rgba(255, 255, 255, 0.12)", label: "Primer" };
-  if (/\bpaint\b/.test(text)) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Paint" };
-  if (text.includes("clear") || text.includes("sealer") || text.includes("top")) {
+  const mix = (Array.isArray(ingredients) ? ingredients : [])
+    .map((ing) => String(ing?.name || "").toLowerCase())
+    .join(" ");
+  const hay = `${text} ${mix}`.trim();
+  if (!hay) return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
+  if (hay.includes("dye") || hay.includes("nerosol")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
+  if (hay.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
+  if (hay.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
+  if (/\bprimer\b/.test(hay)) return { color: "#ffffff", soft: "rgba(255, 255, 255, 0.12)", label: "Primer" };
+  if (/\bpaint\b/.test(hay)) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Paint" };
+  if (hay.includes("clear") || hay.includes("sealer") || hay.includes("top")) {
     return { color: "#ef6c00", soft: "rgba(239, 108, 0, 0.16)", label: "Clear" };
   }
-  if (text.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
+  if (hay.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
   return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
 }
 
@@ -107,6 +116,42 @@ function woodLabel(value) {
   if (text === "veneer") return "Veneer";
   if (text === "solid") return "Solid";
   return titleWords(value);
+}
+
+function matchFormulaLabel(match) {
+  const number = formulaColorCode(match);
+  const wood = [String(match.woodSpecies || "").trim(), woodLabel(match.woodType)]
+    .filter((part) => {
+      const text = String(part || "").trim();
+      return text && text.toLowerCase() !== "unknown";
+    })
+    .join(" · ");
+  return wood ? `${number} · ${wood}` : number;
+}
+
+function matchPalette(theme) {
+  if (theme.dark) {
+    return {
+      border: "#c5cdd6",
+      background: "rgba(207, 216, 227, 0.16)",
+      label: "#e8edf2",
+      chipBorder: "#9aa4b2",
+      chipBg: "#3a424c",
+      chipText: "#f3f5f7",
+    };
+  }
+  return {
+    border: "#6b7280",
+    background: "#e5e7eb",
+    label: "#374151",
+    chipBorder: "#6b7280",
+    chipBg: "#d1d5db",
+    chipText: "#111827",
+  };
+}
+
+function renumberSteps(steps) {
+  return (steps || []).map((step, index) => ({ ...step, stepNumber: index + 1 }));
 }
 
 async function blobToBase64(blob) {
@@ -602,6 +647,10 @@ export default function StainFormulasScreen({
           load(true);
         }}
         onOpen={setSelectedId}
+        onDuplicate={(next) => {
+          setSelectedId(null);
+          setComposer(next);
+        }}
       />
     );
   }
@@ -895,7 +944,7 @@ function blankDraft() {
   };
 }
 
-function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embeddedInShell, onBack, onReject, onOpen, onCreated }) {
+function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embeddedInShell, onBack, onReject, onOpen, onCreated, onDuplicate }) {
   const creating = id == null;
   const seedRef = useRef(seed);
   const [formula, setFormula] = useState(null);
@@ -913,6 +962,10 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [busy, setBusy] = useState(false);
   const [colorantReview, setColorantReview] = useState(false);
   const [colorantEdits, setColorantEdits] = useState([]);
+  const [copiedStep, setCopiedStep] = useState(null);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupNumber, setDupNumber] = useState("");
+  const [dragIndex, setDragIndex] = useState(null);
 
   const runBusy = async (work) => {
     if (busy) return undefined;
@@ -982,6 +1035,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    peekFormulaStep().then(setCopiedStep);
+    return subscribeFormulaStepClipboard(setCopiedStep);
+  }, []);
 
   useEffect(() => {
     if (!editing) {
@@ -1090,6 +1148,108 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         };
       }),
     }));
+  };
+
+  const moveStep = (from, to) => {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from === to) return;
+    setDraft((current) => {
+      const steps = [...(current.steps || [])];
+      if (from < 0 || to < 0 || from >= steps.length || to >= steps.length) return current;
+      const [item] = steps.splice(from, 1);
+      steps.splice(to, 0, item);
+      return { ...current, steps: renumberSteps(steps) };
+    });
+  };
+
+  const copyStep = async (step) => {
+    try {
+      const saved = await copyFormulaStep(step);
+      setCopiedStep(saved);
+      showToast({
+        title: "Step copied",
+        message: saved.processName
+          ? `${saved.processName} is ready to paste into another formula.`
+          : "Paste this step into another formula.",
+      });
+    } catch (error) {
+      showToast({ type: "error", title: "Could not copy", message: error.message });
+    }
+  };
+
+  const pasteStep = async () => {
+    const step = copiedStep || (await peekFormulaStep());
+    if (!step) {
+      showToast({ title: "Nothing copied", message: "Copy a dye or other step first." });
+      return;
+    }
+    if (!editing) setEditing(true);
+    setDraft((current) => ({
+      ...current,
+      steps: renumberSteps([
+        ...(current.steps || []),
+        {
+          ...step,
+          ingredients: (step.ingredients || []).map((ing) => ({ ...ing })),
+        },
+      ]),
+    }));
+    showToast({
+      title: "Step pasted",
+      message: step.processName
+        ? `${step.processName} was added at the end. Drag it into place.`
+        : "Added at the end. Drag it into place.",
+    });
+  };
+
+  const confirmDuplicate = () => {
+    const number = dupNumber.trim();
+    if (!number) {
+      showToast({
+        type: "error",
+        title: "Custom number required",
+        message: "Enter the new formula number.",
+      });
+      return;
+    }
+    const source = formula || draft;
+    const steps = (source.steps || []).map((step) => ({
+      processName: step.processName || "",
+      notes: "",
+      important: !!step.important,
+      importantNotes: step.importantNotes || "",
+      ingredients: (step.ingredients || []).map((ing) => ({
+        name: ing.name || "",
+        quantityText: ing.quantityText || "",
+        unit: ing.unit || "",
+        rawLine: ing.rawLine || "",
+        important: !!ing.important,
+      })),
+    }));
+    setDupOpen(false);
+    onDuplicate?.({
+      token: `dup-${Date.now()}`,
+      copiedFrom: source.formulaNumber || source.colorName,
+      draft: {
+        ...blankDraft(),
+        formulaNumber: number,
+        colorName: source.colorName || "",
+        woodSpecies: source.woodSpecies || "",
+        woodType: source.woodType || "",
+        materialForm: source.materialForm || source.woodType || "unknown",
+        sheen: source.sheen || "",
+        doorStyle: source.doorStyle || "",
+        constructionStyle: source.constructionStyle || "",
+        glaze: source.glaze || "",
+        distressing: source.distressing || "",
+        specialNotes: source.specialNotes || "",
+        developer: source.developer || "",
+        salesperson: source.salesperson || "",
+        colorStatus: source.colorStatus || "",
+        classification: "custom",
+        reviewStatus: "approved",
+        steps: steps.length ? steps : blankDraft().steps,
+      },
+    });
   };
 
   const uploadPhoto = async () => {
@@ -1269,6 +1429,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
               Download
             </AppButton>
           ) : null}
+          {isAdmin && id && onDuplicate ? (
+            <AppButton compact mode="outlined" icon="content-copy" onPress={() => { setDupNumber(""); setDupOpen(true); }}>
+              Duplicate
+            </AppButton>
+          ) : null}
           {isAdmin && !(creating && seedRef.current?.duplicate) ? (
             <AppButton
               compact
@@ -1290,6 +1455,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           {model.reviewStatus === "pending" ? "Pending · " : model.reviewStatus === "needs_review" ? "Needs Review · " : ""}
           {classificationLabel(model.classification)}
         </Text>
+        {creating && seedRef.current?.copiedFrom ? (
+          <Text style={{ color: theme.colors.primary, fontWeight: "700", marginTop: 6 }}>
+            Copied from {seedRef.current.copiedFrom}. Change the wood if needed, then save.
+          </Text>
+        ) : null}
         {editing && isAdmin ? (
           <AppButton
             compact
@@ -1445,12 +1615,132 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula Steps</Text>
         <View style={wide ? styles.stepGrid : null}>
           {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex) => {
-            const tone = processTone(step.processName);
+            const tone = processTone(step.processName, step.ingredients);
             const noteText = [step.importantNotes, step.notes].filter(Boolean).join("\n");
             const showNote = !!noteText.trim() || !!openNotes[stepIndex];
+            const matches = step.matchedBy || [];
+            const matchColors = matchPalette(theme);
+            const stepCount = (editing ? model.steps || [] : stepsForView(model.steps)).length;
             return (
-              <View key={`${step.stepNumber}-${stepIndex}`} style={[styles.card, wide && styles.stepCard, { borderColor: tone.color, backgroundColor: tone.soft, borderLeftWidth: 6 }]}>
-                <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4 }}>{tone.label} · Step {step.stepNumber}</Text>
+              <View
+                key={`${step.stepNumber}-${stepIndex}`}
+                onDragOver={
+                  editing && Platform.OS === "web"
+                    ? (event) => {
+                        event.preventDefault?.();
+                      }
+                    : undefined
+                }
+                onDrop={
+                  editing && Platform.OS === "web"
+                    ? (event) => {
+                        event.preventDefault?.();
+                        const raw = event.dataTransfer?.getData?.("text/plain");
+                        const from = Number(raw !== "" && raw != null ? raw : dragIndex);
+                        moveStep(from, stepIndex);
+                        setDragIndex(null);
+                      }
+                    : undefined
+                }
+                style={[
+                  styles.card,
+                  wide && styles.stepCard,
+                  { borderColor: tone.color, backgroundColor: tone.soft, borderLeftWidth: 6 },
+                  dragIndex === stepIndex ? { opacity: 0.55 } : null,
+                ]}
+              >
+                {!editing && matches.length ? (
+                  <View
+                    style={[
+                      styles.stepMatch,
+                      {
+                        borderColor: matchColors.border,
+                        backgroundColor: matchColors.background,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.stepMatchLabel,
+                        { color: matchColors.label },
+                      ]}
+                    >
+                      Same {tone.label.toLowerCase()} on {matches.length} other formula{matches.length === 1 ? "" : "s"}
+                    </Text>
+                    <View style={styles.stepMatchLinks}>
+                      {matches.map((match) => (
+                        <Pressable
+                          key={String(match.formulaId)}
+                          onPress={() => onOpen(match.formulaId)}
+                          style={[
+                            styles.stepMatchChip,
+                            {
+                              borderColor: matchColors.chipBorder,
+                              backgroundColor: matchColors.chipBg,
+                            },
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open matching formula ${matchFormulaLabel(match)}`}
+                        >
+                          <Text
+                            style={[
+                              styles.stepMatchNumber,
+                              { color: matchColors.chipText },
+                            ]}
+                          >
+                            {matchFormulaLabel(match)}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+                <View style={styles.stepHead}>
+                  {editing ? (
+                    <View
+                      draggable
+                      onDragStart={(event) => {
+                        const dt = event.dataTransfer || event.nativeEvent?.dataTransfer;
+                        if (dt) {
+                          dt.effectAllowed = "move";
+                          dt.setData("text/plain", String(stepIndex));
+                        }
+                        setDragIndex(stepIndex);
+                      }}
+                      onDragEnd={() => setDragIndex(null)}
+                      style={[styles.dragHandle, Platform.OS === "web" ? { cursor: "grab" } : null]}
+                      accessibilityLabel="Drag to reorder"
+                    >
+                      <Text style={{ color: tone.color, fontWeight: "900", fontSize: 18 }}>⋮⋮</Text>
+                    </View>
+                  ) : null}
+                  <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4, flex: 1 }}>
+                    {tone.label} · Step {step.stepNumber}
+                  </Text>
+                  {editing ? (
+                    <>
+                      <IconButton
+                        icon="arrow-up"
+                        size={18}
+                        disabled={stepIndex === 0}
+                        onPress={() => moveStep(stepIndex, stepIndex - 1)}
+                        accessibilityLabel="Move step up"
+                      />
+                      <IconButton
+                        icon="arrow-down"
+                        size={18}
+                        disabled={stepIndex >= stepCount - 1}
+                        onPress={() => moveStep(stepIndex, stepIndex + 1)}
+                        accessibilityLabel="Move step down"
+                      />
+                    </>
+                  ) : null}
+                  {isAdmin ? (
+                    <AppButton compact mode="text" onPress={() => copyStep(step)}>
+                      Copy
+                    </AppButton>
+                  ) : null}
+                </View>
                 {editing ? (
                   <TextInput mode="outlined" label="Process" value={step.processName || ""} onChangeText={(v) => patchStep(stepIndex, { processName: v })} style={{ marginTop: 6, backgroundColor: theme.colors.surface }} />
                 ) : (
@@ -1481,49 +1771,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                   <AppButton compact mode="text" onPress={() => patchStep(stepIndex, { ingredients: [...(step.ingredients || []), { quantityText: "", unit: "g", name: "", rawLine: "", important: false }] })}>
                     Add Colorant
                   </AppButton>
-                ) : null}
-                {!editing && (step.matchedBy || []).length ? (
-                  <View
-                    style={[
-                      styles.stepMatch,
-                      {
-                        borderColor: tone.color,
-                        backgroundColor: theme.colors.surface,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.stepMatchLabel,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      Same {tone.label.toLowerCase()} as
-                    </Text>
-                    <View style={styles.stepMatchLinks}>
-                      {step.matchedBy.map((match) => (
-                        <Pressable
-                          key={String(match.formulaId)}
-                          onPress={() => onOpen(match.formulaId)}
-                          style={[
-                            styles.stepMatchChip,
-                            { borderColor: tone.color },
-                          ]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Open matching formula ${match.formulaNumber || match.colorName}`}
-                        >
-                          <Text
-                            style={[
-                              styles.stepMatchNumber,
-                              { color: tone.color },
-                            ]}
-                          >
-                            {match.formulaNumber || match.colorName}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </View>
                 ) : null}
                 {editing && showNote ? (
                   <View style={styles.importantCard}>
@@ -1558,8 +1805,22 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           })}
         </View>
         {editing ? (
-          <AppButton mode="outlined" onPress={() => setDraft({ ...draft, steps: [...(draft.steps || []), { stepNumber: (draft.steps || []).length + 1, processName: "", notes: "", ingredients: [] }] })}>
-            Add Step
+          <View style={styles.toolbar}>
+            <AppButton mode="outlined" onPress={() => setDraft({ ...draft, steps: [...(draft.steps || []), { stepNumber: (draft.steps || []).length + 1, processName: "", notes: "", ingredients: [] }] })}>
+              Add Step
+            </AppButton>
+            <AppButton
+              mode="outlined"
+              icon="content-paste"
+              disabled={!copiedStep}
+              onPress={pasteStep}
+            >
+              {copiedStep?.processName ? `Paste ${copiedStep.processName}` : "Paste step"}
+            </AppButton>
+          </View>
+        ) : isAdmin && copiedStep ? (
+          <AppButton mode="outlined" icon="content-paste" onPress={pasteStep}>
+            {copiedStep.processName ? `Paste ${copiedStep.processName}` : "Paste step"}
           </AppButton>
         ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Photos</Text>
@@ -1738,6 +1999,32 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             </Pressable>
           </Pressable>
         </Modal>
+        <Modal visible={dupOpen} transparent animationType="fade" onRequestClose={() => setDupOpen(false)}>
+          <Pressable style={styles.downloadOverlay} onPress={() => setDupOpen(false)}>
+            <Pressable
+              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+              onPress={(event) => event.stopPropagation()}
+            >
+              <View style={styles.downloadHeader}>
+                <Text style={[styles.downloadTitle, { color: theme.colors.onSurface }]}>Duplicate formula</Text>
+                <IconButton icon="close" size={20} onPress={() => setDupOpen(false)} accessibilityLabel="Close" />
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
+                Copies the steps into a new custom number. Change the wood on the next screen if it is different.
+              </Text>
+              <TextInput
+                mode="outlined"
+                label="New custom number"
+                value={dupNumber}
+                onChangeText={setDupNumber}
+                autoFocus
+              />
+              <AppButton mode="contained" onPress={confirmDuplicate} style={{ marginTop: 12 }}>
+                Duplicate
+              </AppButton>
+            </Pressable>
+          </Pressable>
+        </Modal>
         <Modal visible={downloadOpen} transparent animationType="fade" onRequestClose={() => setDownloadOpen(false)}>
           <Pressable style={styles.downloadOverlay} onPress={() => setDownloadOpen(false)}>
             <Pressable
@@ -1858,11 +2145,13 @@ const styles = StyleSheet.create({
   qtyField: { width: 72 },
   unitField: { width: 72 },
   nameField: { flex: 1, minWidth: 120 },
-  stepMatch: { borderWidth: 1, borderRadius: 8, padding: 8, marginTop: 4, marginBottom: 4 },
-  stepMatchLabel: { fontSize: 12, fontWeight: "700", marginBottom: 6 },
-  stepMatchLinks: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  stepMatchChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
-  stepMatchNumber: { fontSize: 13, fontWeight: "900" },
+  stepHead: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 4 },
+  dragHandle: { paddingHorizontal: 6, paddingVertical: 4 },
+  stepMatch: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginBottom: 8 },
+  stepMatchLabel: { fontSize: 10, fontWeight: "800", marginBottom: 4, letterSpacing: 0.3, textTransform: "uppercase" },
+  stepMatchLinks: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  stepMatchChip: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  stepMatchNumber: { fontSize: 11, fontWeight: "800" },
   importantCard: { backgroundColor: "#ffebee", borderColor: "#c62828", borderWidth: 1, borderRadius: 8, padding: 8, marginTop: 6 },
   importantTag: { color: "#b71c1c", fontWeight: "900", letterSpacing: 0.6, fontSize: 11 },
   photo: { width: 180, gap: 4 },
