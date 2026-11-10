@@ -1,9 +1,5 @@
 {
   "changes": [
-    "Admin can send an on-screen reminder or note. It stays up until the person taps Got it.",
-    "Duplicate a formula and give it a new custom number when the same mix is used on different wood.",
-    "Copy a dye or other step and paste it into another formula.",
-    "Drag formula steps, or use the arrows, to change the order.",
-    "Matching dyes, stains, and toners list every other formula that uses the same mix, in a small gray box at the top of the step."
+    "Formula steps are labeled from the process name only. A dye colorant in a stain or toner does not change the step to Dye."
   ]
 }

@@ -67,22 +67,18 @@ function qtyLabel(ing) {
   return [qty, unit].filter(Boolean).join(" ");
 }
 
-function processTone(name, ingredients) {
+function processTone(name) {
   const text = String(name || "").trim().toLowerCase();
-  const mix = (Array.isArray(ingredients) ? ingredients : [])
-    .map((ing) => String(ing?.name || "").toLowerCase())
-    .join(" ");
-  const hay = `${text} ${mix}`.trim();
-  if (!hay) return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
-  if (hay.includes("dye") || hay.includes("nerosol")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
-  if (hay.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
-  if (hay.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
-  if (/\bprimer\b/.test(hay)) return { color: "#ffffff", soft: "rgba(255, 255, 255, 0.12)", label: "Primer" };
-  if (/\bpaint\b/.test(hay)) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Paint" };
-  if (hay.includes("clear") || hay.includes("sealer") || hay.includes("top")) {
+  if (!text) return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
+  if (text.includes("dye")) return { color: "#8e24aa", soft: "rgba(142, 36, 170, 0.14)", label: "Dye" };
+  if (text.includes("toner")) return { color: "#f9a825", soft: "rgba(249, 168, 37, 0.18)", label: "Toner" };
+  if (text.includes("glaze")) return { color: "#e53935", soft: "rgba(229, 57, 53, 0.16)", label: "Glaze" };
+  if (/\bprimer\b/.test(text)) return { color: "#ffffff", soft: "rgba(255, 255, 255, 0.12)", label: "Primer" };
+  if (/\bpaint\b/.test(text)) return { color: "#1976d2", soft: "rgba(25, 118, 210, 0.14)", label: "Paint" };
+  if (text.includes("clear") || text.includes("sealer") || text.includes("top")) {
     return { color: "#ef6c00", soft: "rgba(239, 108, 0, 0.16)", label: "Clear" };
   }
-  if (hay.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
+  if (text.includes("stain")) return { color: "#2e7d32", soft: "rgba(46, 125, 50, 0.14)", label: "Stain" };
   return { color: "#9aa4b2", soft: "rgba(154, 164, 178, 0.12)", label: "Process" };
 }
 
@@ -1615,7 +1611,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula Steps</Text>
         <View style={wide ? styles.stepGrid : null}>
           {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex) => {
-            const tone = processTone(step.processName, step.ingredients);
+            const tone = processTone(step.processName);
             const noteText = [step.importantNotes, step.notes].filter(Boolean).join("\n");
             const showNote = !!noteText.trim() || !!openNotes[stepIndex];
             const matches = step.matchedBy || [];

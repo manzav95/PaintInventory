@@ -389,19 +389,12 @@ async function loadSteps(pool, formulaId) {
   }));
 }
 
-function comparableStepType(processName, ingredients) {
+function comparableStepType(processName) {
   const text = String(processName || "").toLowerCase();
   if (text.includes("dye")) return "dye";
   if (text.includes("toner")) return "toner";
   if (text.includes("glaze")) return "glaze";
   if (text.includes("stain")) return "stain";
-  const names = (Array.isArray(ingredients) ? ingredients : [])
-    .map((ingredient) => String(ingredient?.name || "").toLowerCase())
-    .join(" ");
-  if (names.includes("dye") || names.includes("nerosol") || /\bd\d{2}\b/.test(names)) return "dye";
-  if (names.includes("toner")) return "toner";
-  if (names.includes("glaze")) return "glaze";
-  if (names.includes("stain")) return "stain";
   return "";
 }
 
@@ -457,7 +450,7 @@ function usableIngredients(step) {
 
 function stepSignature(step) {
   const ingredients = usableIngredients(step);
-  const type = comparableStepType(step?.processName, ingredients);
+  const type = comparableStepType(step?.processName);
   if (!type || !ingredients.length) return "";
   const normalized = ingredients
     .map((ingredient) => {
