@@ -8,6 +8,7 @@ import {
   Pressable,
   Image,
   Modal,
+  Animated,
 } from "react-native";
 import {
   Text,
@@ -148,6 +149,19 @@ function matchPalette(theme) {
 
 function renumberSteps(steps) {
   return (steps || []).map((step, index) => ({ ...step, stepNumber: index + 1 }));
+}
+
+function isStepBlank(step) {
+  const title = String(step?.processName || "").trim();
+  const notes = [step?.notes, step?.importantNotes].filter(Boolean).join("").trim();
+  const colorants = (step?.ingredients || []).some((ing) =>
+    String(ing.name || ing.rawLine || ing.quantityText || "").trim(),
+  );
+  return !title && !notes && !colorants && !step?.important;
+}
+
+function pruneBlankSteps(steps) {
+  return renumberSteps((steps || []).filter((step) => !isStepBlank(step)));
 }
 
 async function blobToBase64(blob) {
@@ -940,9 +954,12 @@ function blankDraft() {
   };
 }
 
+const HEADER_COLLAPSE = 140;
+
 function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embeddedInShell, onBack, onReject, onOpen, onCreated, onDuplicate }) {
   const creating = id == null;
   const seedRef = useRef(seed);
+  const { width: windowWidth } = useWindowDimensions();
   const [formula, setFormula] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(creating);
@@ -951,7 +968,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [noteBody, setNoteBody] = useState("");
   const [noteCategory, setNoteCategory] = useState("general");
   const [editingNote, setEditingNote] = useState(null);
-  const [linkNumber, setLinkNumber] = useState("");
   const [zoom, setZoom] = useState(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [openNotes, setOpenNotes] = useState({});
@@ -961,7 +977,133 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [copiedStep, setCopiedStep] = useState(null);
   const [dupOpen, setDupOpen] = useState(false);
   const [dupNumber, setDupNumber] = useState("");
-  const [dragIndex, setDragIndex] = useState(null);
+  const [headerCompact, setHeaderCompact] = useState(false);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerInward = Math.min(64, Math.max(28, windowWidth * 0.1));
+  const headerTitleShift = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [0, headerInward],
+        extrapolate: "clamp",
+      }),
+    [scrollY, headerInward],
+  );
+  const headerPhotoShift = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [0, -headerInward],
+        extrapolate: "clamp",
+      }),
+    [scrollY, headerInward],
+  );
+  const headerTitleSize = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [40, 22],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerTitleLine = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [46, 26],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerDescSize = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [16, 13],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerDescLine = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [22, 18],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerPhotoW = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [96, 56],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerPhotoH = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [72, 42],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerActionsOp = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE * 0.85],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerActionsH = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE],
+        outputRange: [112, 0],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerUploadOp = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE * 0.55],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerUploadH = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, HEADER_COLLAPSE * 0.55],
+        outputRange: [36, 0],
+        extrapolate: "clamp",
+      }),
+    [scrollY],
+  );
+  const headerNavScale = useMemo(
+    () =>
+      wide
+        ? 1
+        : scrollY.interpolate({
+            inputRange: [0, HEADER_COLLAPSE],
+            outputRange: [1, 0.78],
+            extrapolate: "clamp",
+          }),
+    [scrollY, wide],
+  );
+
+  useEffect(() => {
+    scrollY.setValue(0);
+    setHeaderCompact(false);
+  }, [id, scrollY]);
 
   const runBusy = async (work) => {
     if (busy) return undefined;
@@ -1097,9 +1239,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         });
         return;
       }
+      const steps = pruneBlankSteps(draft.steps);
       if (creating) {
         const saved = await StainFormulaService.create({
           ...draft,
+          steps,
           reviewStatus: reviewStatus || draft.reviewStatus || "needs_review",
           warnings: (draft.warnings || []).map((item) => String(item || "").trim()).filter(Boolean),
           sourceFile: seedRef.current?.sourceBase64
@@ -1112,6 +1256,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
       }
       const saved = await StainFormulaService.update(id, {
         ...draft,
+        steps,
         reviewStatus: reviewStatus || draft.reviewStatus,
         warnings: (draft.warnings || []).map((item) => String(item || "").trim()).filter(Boolean),
       });
@@ -1157,6 +1302,26 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
     });
   };
 
+  const removeStep = async (stepIndex) => {
+    const step = (draft?.steps || [])[stepIndex];
+    if (!step) return;
+    if (!isStepBlank(step)) {
+      const label = step.processName || `Step ${step.stepNumber || stepIndex + 1}`;
+      const ok = await confirmAction(
+        "Delete step",
+        `Remove ${label} from this formula?`,
+        { confirmLabel: "Delete", destructive: true },
+      );
+      if (!ok) return;
+    }
+    setDraft((current) => {
+      const steps = [...(current.steps || [])];
+      if (stepIndex < 0 || stepIndex >= steps.length) return current;
+      steps.splice(stepIndex, 1);
+      return { ...current, steps: renumberSteps(steps) };
+    });
+  };
+
   const copyStep = async (step) => {
     try {
       const saved = await copyFormulaStep(step);
@@ -1192,8 +1357,8 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
     showToast({
       title: "Step pasted",
       message: step.processName
-        ? `${step.processName} was added at the end. Drag it into place.`
-        : "Added at the end. Drag it into place.",
+        ? `${step.processName} was added at the end. Use the arrows to move it.`
+        : "Added at the end. Use the arrows to move it.",
     });
   };
 
@@ -1260,6 +1425,21 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           isPrimary: !hasPhoto && index === 0,
         });
       }
+      await load();
+    });
+  };
+
+  const deletePrimaryPhoto = async () => {
+    const image =
+      (formula?.images || []).find((item) => item.isPrimary) || (formula?.images || [])[0];
+    if (!image?.id) return;
+    const ok = await confirmAction("Delete picture", "Remove this picture from the formula?", {
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    await runBusy(async () => {
+      await StainFormulaService.deleteImage(id, image.id);
       await load();
     });
   };
@@ -1370,26 +1550,20 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   }
 
   const model = editing ? draft : formula;
-  const related = (formula.family || []).filter(
-    (item) => String(item.formulaNumber) !== String(formula.formulaNumber),
-  );
-  const uploadedNumbers = new Set(related.map((item) => String(item.formulaNumber)));
-  (formula.linkedNumbers || []).forEach((number) => {
-    if (uploadedNumbers.has(String(number)) || String(number) === String(formula.formulaNumber)) return;
-    related.push({ formulaNumber: number, missing: true });
-  });
-
   const colorTitle = model.formulaNumber || model.colorName || "—";
   const colorSubtitle = model.colorName && model.colorName.toLowerCase() !== String(model.formulaNumber || "").trim().toLowerCase()
     ? model.colorName
     : "";
   const primaryImage = (formula.images || []).find((image) => image.isPrimary) || (formula.images || [])[0] || null;
-  const seedImage = creating ? (seedRef.current?.images || [])[0] : null;
+  const extraImages = (formula.images || []).filter((image) => image.id !== primaryImage?.id);
+  const seedImages = creating ? (seedRef.current?.images || []) : [];
+  const seedImage = seedImages[0] || null;
   const headerPhotoUri = primaryImage && photos[primaryImage.id]
     ? photos[primaryImage.id]
     : seedImage?.dataBase64
       ? `data:${seedImage.mime || "image/jpeg"};base64,${seedImage.dataBase64}`
       : "";
+  const extraSeedImages = headerPhotoUri ? seedImages.slice(1) : seedImages;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
@@ -1400,49 +1574,218 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           { backgroundColor: theme.colors.background, borderBottomColor: theme.colors.outlineVariant },
         ]}
       >
-        <AppButton compact mode="text" icon="arrow-left" onPress={onBack} style={styles.backLine}>Back To Search</AppButton>
+        <View style={styles.headerTopRow}>
+          <Animated.View
+            style={[
+              styles.headerNavBack,
+              { transform: [{ scale: headerNavScale }] },
+            ]}
+          >
+            <AppButton compact mode="text" icon="arrow-left" onPress={onBack} style={styles.backLine}>Back To Search</AppButton>
+          </Animated.View>
+          {isAdmin && !(creating && seedRef.current?.duplicate) ? (
+            <Animated.View
+              style={[
+                styles.headerNavEdit,
+                { transform: [{ scale: headerNavScale }] },
+              ]}
+            >
+              <AppButton
+                compact
+                mode={editing ? "contained" : "outlined"}
+                onPress={() => (editing ? save() : setEditing(true))}
+              >
+                {editing ? "Save" : "Edit"}
+              </AppButton>
+            </Animated.View>
+          ) : null}
+        </View>
         <View style={styles.stickyTitleRow}>
-          <View style={styles.headerCenter}>
-            <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+          <Animated.View
+            style={[
+              styles.headerCenter,
+              { transform: [{ translateX: headerTitleShift }] },
+            ]}
+          >
+            <Animated.Text
+              style={[
+                styles.title,
+                {
+                  color: theme.colors.onSurface,
+                  fontSize: headerTitleSize,
+                  lineHeight: headerTitleLine,
+                },
+              ]}
+            >
               {colorTitle}
-            </Text>
+            </Animated.Text>
             {colorSubtitle ? (
-              <Text style={[styles.headerDescription, { color: theme.dark ? "#9aa4b2" : "#8b939e" }]}>
+              <Animated.Text
+                style={[
+                  styles.headerDescription,
+                  {
+                    color: theme.dark ? "#9aa4b2" : "#8b939e",
+                    fontSize: headerDescSize,
+                    lineHeight: headerDescLine,
+                  },
+                ]}
+              >
                 {colorSubtitle}
-              </Text>
+              </Animated.Text>
+            ) : null}
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.headerPhotoSlot,
+              { width: headerPhotoW, transform: [{ translateX: headerPhotoShift }] },
+            ]}
+          >
+            <Animated.View
+              style={[
+                styles.headerPhotoBox,
+                { width: headerPhotoW, height: headerPhotoH },
+              ]}
+            >
+              {headerPhotoUri ? (
+                <Pressable
+                  onPress={() => setZoom(headerPhotoUri)}
+                  style={styles.headerPhotoFill}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel="View formula photo"
+                >
+                  <Animated.Image
+                    source={{ uri: headerPhotoUri }}
+                    style={{ width: headerPhotoW, height: headerPhotoH }}
+                    resizeMode="cover"
+                  />
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={isAdmin && !creating ? uploadPhoto : undefined}
+                  disabled={!isAdmin || creating}
+                  style={[
+                    styles.headerPhotoFill,
+                    styles.headerPhotoEmpty,
+                    {
+                      borderColor: theme.colors.outlineVariant,
+                      backgroundColor: theme.dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                    },
+                    Platform.OS === "web" && isAdmin && !creating ? { cursor: "pointer" } : null,
+                  ]}
+                  accessibilityRole={isAdmin && !creating ? "button" : "image"}
+                  accessibilityLabel={isAdmin && !creating ? "Upload photo" : "No formula photo"}
+                />
+              )}
+            </Animated.View>
+            {isAdmin && !creating ? (
+              <Animated.View
+                style={[
+                  styles.headerPhotoActions,
+                  { opacity: headerUploadOp, maxHeight: headerUploadH, overflow: "hidden" },
+                ]}
+                pointerEvents={headerCompact ? "none" : "auto"}
+              >
+                <IconButton
+                  icon="image-plus"
+                  size={18}
+                  onPress={uploadPhoto}
+                  accessibilityLabel="Upload photo"
+                  style={styles.headerPhotoIcon}
+                />
+                {primaryImage ? (
+                  <IconButton
+                    icon="delete-outline"
+                    size={18}
+                    onPress={deletePrimaryPhoto}
+                    accessibilityLabel="Delete photo"
+                    style={styles.headerPhotoIcon}
+                  />
+                ) : null}
+              </Animated.View>
+            ) : null}
+          </Animated.View>
+        </View>
+        <Animated.View
+          style={[styles.headerActionsFade, { opacity: headerActionsOp, maxHeight: headerActionsH }]}
+          pointerEvents={headerCompact ? "none" : "auto"}
+        >
+          <View style={styles.headerActions}>
+            {id ? <AppButton compact mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : null}
+            {isAdmin && id ? (
+              <AppButton compact mode="outlined" icon="download" onPress={() => setDownloadOpen(true)}>
+                Download
+              </AppButton>
+            ) : null}
+            {isAdmin && id && onDuplicate ? (
+              <AppButton compact mode="outlined" icon="content-copy" onPress={() => { setDupNumber(""); setDupOpen(true); }}>
+                Duplicate
+              </AppButton>
             ) : null}
           </View>
-          {headerPhotoUri ? (
-            <Pressable onPress={() => setZoom(headerPhotoUri)} style={styles.headerPhotoSlot}>
-              <Image source={{ uri: headerPhotoUri }} style={styles.headerPhoto} resizeMode="cover" />
-            </Pressable>
-          ) : null}
-        </View>
-        <View style={styles.headerActions}>
-          {id ? <AppButton compact mode="outlined" onPress={emailPdf}>Share Formula</AppButton> : null}
-          {isAdmin && id ? (
-            <AppButton compact mode="outlined" icon="download" onPress={() => setDownloadOpen(true)}>
-              Download
-            </AppButton>
-          ) : null}
-          {isAdmin && id && onDuplicate ? (
-            <AppButton compact mode="outlined" icon="content-copy" onPress={() => { setDupNumber(""); setDupOpen(true); }}>
-              Duplicate
-            </AppButton>
-          ) : null}
-          {isAdmin && !(creating && seedRef.current?.duplicate) ? (
-            <AppButton
-              compact
-              mode={editing ? "contained" : "outlined"}
-              onPress={() => (editing ? save() : setEditing(true))}
-              style={styles.headerEdit}
-            >
-              {editing ? "Save" : "Edit"}
-            </AppButton>
-          ) : null}
-        </View>
+        </Animated.View>
       </View>
-      <ScrollView contentContainerStyle={styles.page}>
+      <ScrollView
+        key={id || "new"}
+        style={styles.headerScroll}
+        contentContainerStyle={styles.page}
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          const y = event.nativeEvent.contentOffset?.y || 0;
+          scrollY.setValue(y);
+          setHeaderCompact(y > HEADER_COLLAPSE * 0.7);
+        }}
+      >
+        {extraSeedImages.length || extraImages.length ? (
+          <View style={styles.chips}>
+            {extraSeedImages.map((image, index) => (
+              <View key={`excel-${index}`} style={styles.photo}>
+                <Image source={{ uri: `data:${image.mime || "image/jpeg"};base64,${image.dataBase64}` }} style={styles.photoImg} resizeMode="cover" />
+                <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>From Excel</Text>
+              </View>
+            ))}
+            {extraImages.map((image) => (
+              <View key={image.id} style={styles.photo}>
+                {photos[image.id] ? (
+                  <Pressable onPress={() => setZoom(photos[image.id])}>
+                    <Image source={{ uri: photos[image.id] }} style={styles.photoImg} resizeMode="cover" />
+                  </Pressable>
+                ) : (
+                  <Text style={{ color: theme.colors.onSurfaceVariant }}>No Preview</Text>
+                )}
+                {isAdmin ? (
+                  <View style={styles.toolbar}>
+                    <AppButton
+                      compact
+                      mode="text"
+                      onPress={async () => {
+                        const saved = await runBusy(() => StainFormulaService.setPrimaryImage(id, image.id));
+                        if (!saved) return;
+                        setFormula(saved);
+                        setDraft(saved);
+                      }}
+                    >
+                      Use As Main
+                    </AppButton>
+                    <AppButton
+                      compact
+                      mode="text"
+                      onPress={async () => {
+                        const ok = await confirmAction("Delete picture", "Remove this picture from the formula?", { confirmLabel: "Delete", destructive: true });
+                        if (!ok) return;
+                        await runBusy(async () => {
+                          await StainFormulaService.deleteImage(id, image.id);
+                          await load();
+                        });
+                      }}
+                    >
+                      Remove
+                    </AppButton>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
         {creating && onReject ? <AppButton mode="outlined" onPress={onReject}>Reject</AppButton> : null}
         {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
           <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
@@ -1544,70 +1887,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             <Text style={{ color: theme.colors.onSurface, marginTop: 4 }}>{model.specialNotes}</Text>
           </View>
         ) : null}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Similar Colors</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }}>
-          Open a related color without leaving this page. A link works both ways, and removing it removes it from both colors.
-        </Text>
-        <View style={styles.chips}>
-          {related.map((item) => (
-            <View key={`${item.formulaNumber}-${item.id || "missing"}`} style={styles.toolbar}>
-              <AppButton
-                mode="outlined"
-                onPress={() => (item.id ? onOpen(item.id) : showToast({ title: `${item.formulaNumber} is not uploaded`, message: "The link is saved. The formula file is not in the library yet." }))}
-              >
-                {item.formulaNumber}
-                {item.woodSpecies ? ` · ${item.woodSpecies}` : ""}
-                {item.woodType ? ` · ${woodLabel(item.woodType)}` : item.missing ? " · Not Uploaded" : ""}
-              </AppButton>
-              {isAdmin ? (
-                <AppButton
-                  compact
-                  mode="text"
-                  textColor={theme.colors.error}
-                  onPress={async () => {
-                    const ok = await confirmAction(
-                      "Remove link",
-                      `Unlink ${item.formulaNumber} from this color? It will also disappear from ${item.formulaNumber}.`,
-                      { confirmLabel: "Remove Link", destructive: true },
-                    );
-                    if (!ok) return;
-                    try {
-                      const saved = await runBusy(() => StainFormulaService.unlinkColor(id, item.formulaNumber));
-                      if (!saved) return;
-                      setFormula(saved);
-                      setDraft(saved);
-                    } catch (error) {
-                      showToast({ type: "error", title: "Could not remove link", message: error.message });
-                    }
-                  }}
-                >
-                  Remove
-                </AppButton>
-              ) : null}
-            </View>
-          ))}
-        </View>
-        {isAdmin && !creating ? (
-          <View style={styles.toolbar}>
-            <TextInput mode="outlined" label="Link Color Number" value={linkNumber} onChangeText={setLinkNumber} style={{ minWidth: 180 }} />
-            <AppButton
-              mode="contained"
-              onPress={async () => {
-                try {
-                  const saved = await runBusy(() => StainFormulaService.linkColor(id, linkNumber.trim()));
-                  if (!saved) return;
-                  setFormula(saved);
-                  setDraft(saved);
-                  setLinkNumber("");
-                } catch (error) {
-                  showToast({ type: "error", title: "Could not link", message: error.message });
-                }
-              }}
-            >
-              Link
-            </AppButton>
-          </View>
-        ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula Steps</Text>
         <View style={wide ? styles.stepGrid : null}>
           {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex) => {
@@ -1620,29 +1899,10 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             return (
               <View
                 key={`${step.stepNumber}-${stepIndex}`}
-                onDragOver={
-                  editing && Platform.OS === "web"
-                    ? (event) => {
-                        event.preventDefault?.();
-                      }
-                    : undefined
-                }
-                onDrop={
-                  editing && Platform.OS === "web"
-                    ? (event) => {
-                        event.preventDefault?.();
-                        const raw = event.dataTransfer?.getData?.("text/plain");
-                        const from = Number(raw !== "" && raw != null ? raw : dragIndex);
-                        moveStep(from, stepIndex);
-                        setDragIndex(null);
-                      }
-                    : undefined
-                }
                 style={[
                   styles.card,
                   wide && styles.stepCard,
                   { borderColor: tone.color, backgroundColor: tone.soft, borderLeftWidth: 6 },
-                  dragIndex === stepIndex ? { opacity: 0.55 } : null,
                 ]}
               >
                 {!editing && matches.length ? (
@@ -1692,24 +1952,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                   </View>
                 ) : null}
                 <View style={styles.stepHead}>
-                  {editing ? (
-                    <View
-                      draggable
-                      onDragStart={(event) => {
-                        const dt = event.dataTransfer || event.nativeEvent?.dataTransfer;
-                        if (dt) {
-                          dt.effectAllowed = "move";
-                          dt.setData("text/plain", String(stepIndex));
-                        }
-                        setDragIndex(stepIndex);
-                      }}
-                      onDragEnd={() => setDragIndex(null)}
-                      style={[styles.dragHandle, Platform.OS === "web" ? { cursor: "grab" } : null]}
-                      accessibilityLabel="Drag to reorder"
-                    >
-                      <Text style={{ color: tone.color, fontWeight: "900", fontSize: 18 }}>⋮⋮</Text>
-                    </View>
-                  ) : null}
                   <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4, flex: 1 }}>
                     {tone.label} · Step {step.stepNumber}
                   </Text>
@@ -1729,7 +1971,25 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                         onPress={() => moveStep(stepIndex, stepIndex + 1)}
                         accessibilityLabel="Move step down"
                       />
+                      <IconButton
+                        icon="delete-outline"
+                        size={18}
+                        iconColor={theme.colors.error}
+                        onPress={() => removeStep(stepIndex)}
+                        accessibilityLabel="Delete step"
+                      />
                     </>
+                  ) : isAdmin ? (
+                    <IconButton
+                      icon="delete-outline"
+                      size={18}
+                      iconColor={theme.colors.error}
+                      onPress={() => {
+                        setEditing(true);
+                        removeStep(stepIndex);
+                      }}
+                      accessibilityLabel="Delete step"
+                    />
                   ) : null}
                   {isAdmin ? (
                     <AppButton compact mode="text" onPress={() => copyStep(step)}>
@@ -1818,69 +2078,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           <AppButton mode="outlined" icon="content-paste" onPress={pasteStep}>
             {copiedStep.processName ? `Paste ${copiedStep.processName}` : "Paste step"}
           </AppButton>
-        ) : null}
-        <Text style={[styles.section, { color: theme.colors.onSurface }]}>Photos</Text>
-        {creating && !(seedRef.current?.images || []).length ? (
-          <Text style={{ color: theme.colors.onSurfaceVariant }}>Save The Formula Before Adding Photos.</Text>
-        ) : null}
-        {!creating && isAdmin ? <AppButton mode="outlined" icon="image" onPress={uploadPhoto}>Upload Photo</AppButton> : null}
-        <View style={styles.chips}>
-          {creating ? (seedRef.current?.images || []).slice(headerPhotoUri ? 1 : 0).map((image, index) => (
-            <View key={`excel-${index}`} style={styles.photo}>
-              <Image source={{ uri: `data:${image.mime || "image/jpeg"};base64,${image.dataBase64}` }} style={styles.photoImg} resizeMode="cover" />
-              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>From Excel</Text>
-            </View>
-          )) : null}
-          {(formula.images || []).map((image) => (
-            <View key={image.id} style={styles.photo}>
-              {image.id === primaryImage?.id ? null : photos[image.id] ? (
-                <Pressable onPress={() => setZoom(photos[image.id])}>
-                  <Image source={{ uri: photos[image.id] }} style={styles.photoImg} resizeMode="cover" />
-                </Pressable>
-              ) : (
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>No Preview</Text>
-              )}
-              <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>
-                {image.isPrimary ? "Main Photo · " : ""}
-                {displayUserName(image.uploadedBy)} · {formatWhen(image.createdAt)}
-              </Text>
-              {isAdmin ? (
-                <View style={styles.toolbar}>
-                  {!image.isPrimary ? (
-                    <AppButton
-                      compact
-                      mode="text"
-                      onPress={async () => {
-                        const saved = await runBusy(() => StainFormulaService.setPrimaryImage(id, image.id));
-                        if (!saved) return;
-                        setFormula(saved);
-                        setDraft(saved);
-                      }}
-                    >
-                      Use As Main
-                    </AppButton>
-                  ) : null}
-                  <AppButton
-                    compact
-                    mode="text"
-                    onPress={async () => {
-                      const ok = await confirmAction("Delete picture", "Remove this picture from the formula?", { confirmLabel: "Delete", destructive: true });
-                      if (!ok) return;
-                      await runBusy(async () => {
-                        await StainFormulaService.deleteImage(id, image.id);
-                        await load();
-                      });
-                    }}
-                  >
-                    Remove
-                  </AppButton>
-                </View>
-              ) : null}
-            </View>
-          ))}
-        </View>
-        {(formula.images || []).length === 0 && !(creating && (seedRef.current?.images || []).length) ? (
-          <Text style={{ color: theme.colors.onSurfaceVariant }}>No Reference Photo.</Text>
         ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Production Notes & History</Text>
         {isAdmin ? (
@@ -2074,6 +2271,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  headerScroll: { flex: 1 },
   stickyTitle: {
     position: "sticky",
     top: 0,
@@ -2086,12 +2284,20 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
   },
-  stickyTitleRow: { position: "relative", alignItems: "center", justifyContent: "center", minHeight: 72 },
-  headerCenter: { alignItems: "center", paddingHorizontal: 108, width: "100%" },
-  headerDescription: { fontSize: 16, lineHeight: 22, fontStyle: "italic", textAlign: "center", marginTop: 2 },
-  headerPhotoSlot: { position: "absolute", right: 0, top: 0 },
-  headerActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 4 },
-  headerEdit: { marginLeft: "auto" },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  headerNavBack: { alignSelf: "flex-start", transformOrigin: "left center" },
+  headerNavEdit: { alignSelf: "flex-end", transformOrigin: "right center" },
+  stickyTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  headerCenter: { flex: 1, alignItems: "flex-start", minWidth: 0 },
+  headerDescription: { fontSize: 16, lineHeight: 22, fontStyle: "italic", textAlign: "left", marginTop: 2 },
+  headerPhotoSlot: { alignItems: "center", flexShrink: 0 },
+  headerPhotoBox: { borderRadius: 8, overflow: "hidden" },
+  headerPhotoFill: { flex: 1 },
+  headerPhotoEmpty: { borderWidth: 1, borderStyle: "dashed" },
+  headerPhotoActions: { flexDirection: "row", alignItems: "center", marginTop: -4 },
+  headerPhotoIcon: { margin: 0 },
+  headerActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", paddingTop: 4 },
+  headerActionsFade: { overflow: "hidden" },
   headerPhoto: { width: 96, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
   busyCover: {
     position: Platform.OS === "web" ? "fixed" : "absolute",
@@ -2126,7 +2332,7 @@ const styles = StyleSheet.create({
   cardThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   gridCard: { width: "48%" },
-  title: { fontSize: 40, fontWeight: "800", lineHeight: 46, textAlign: "center" },
+  title: { fontSize: 40, fontWeight: "800", lineHeight: 46, textAlign: "left" },
   section: { fontSize: 18, fontWeight: "800", marginTop: 16 },
   metaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   detailDivider: { height: 1, width: "100%", marginTop: 16, marginBottom: 4 },
@@ -2142,7 +2348,6 @@ const styles = StyleSheet.create({
   unitField: { width: 72 },
   nameField: { flex: 1, minWidth: 120 },
   stepHead: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 4 },
-  dragHandle: { paddingHorizontal: 6, paddingVertical: 4 },
   stepMatch: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginBottom: 8 },
   stepMatchLabel: { fontSize: 10, fontWeight: "800", marginBottom: 4, letterSpacing: 0.3, textTransform: "uppercase" },
   stepMatchLinks: { flexDirection: "row", flexWrap: "wrap", gap: 4 },

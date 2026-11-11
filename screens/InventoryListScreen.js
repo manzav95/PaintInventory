@@ -22,6 +22,7 @@ import {
   formatItemLocationDisplay,
   customStackGroupLetter,
   resolveCustomStackLocation,
+  isCustomStackLocation,
   isCustomType as isCustomTypeName,
 } from "../utils/customStacks";
 import {
@@ -79,6 +80,15 @@ const STANDARD_TYPES = [
 
 function isCustomType(item) {
   return CUSTOM_TYPES.includes((item.type || "").toLowerCase());
+}
+
+function customHasDesignatedSpot(item) {
+  const loc = item?.location != null ? String(item.location).trim() : "";
+  return loc.length > 0 && isCustomStackLocation(loc);
+}
+
+function customLocationDisplay(item) {
+  return formatItemLocationDisplay(item) || "None";
 }
 
 function formatRecycleDateDisplay(recycleDate) {
@@ -259,8 +269,6 @@ export default function InventoryListScreen({
   const [customOrderMode, setCustomOrderMode] = useState("stack"); // 'stack' | 'name'
   const [stockFilter, setStockFilter] = useState(null); // null | 'inStock' | 'lowStock' | 'outOfStock'
   const [apOnly, setApOnly] = useState(false);
-  /** Admin: when true, inventory list includes custom colors at 0 gal. */
-  const [showZeroCustoms, setShowZeroCustoms] = useState(false);
   const [auditLogsLocal, setAuditLogsLocal] = useState([]);
   const useCachedAudit = auditLogsLoadedFromApp;
   const auditLogs = useCachedAudit ? auditLogsFromApp : auditLogsLocal;
@@ -1113,14 +1121,10 @@ export default function InventoryListScreen({
         return false;
       if (bookFilter === "custom" && !CUSTOM_TYPES.includes(itemType))
         return false;
-      // Custom inventory: hide empty cans unless admin opts into full list.
-      if (
-        !showZeroCustoms &&
-        CUSTOM_TYPES.includes(itemType) &&
-        qty === 0 &&
-        !(bookFilter === "standard" && customNumberSearch)
-      ) {
-        return false;
+      // Custom list: in-stock designated stacks only. Search still shows empty / no location.
+      if (CUSTOM_TYPES.includes(itemType) && !trimmedSearch) {
+        if (qty <= 0) return false;
+        if (!customHasDesignatedSpot(item)) return false;
       }
       if (effectiveRecycleDue && !isRecycleDue(item)) return false;
       return true;
@@ -1211,7 +1215,6 @@ export default function InventoryListScreen({
     isAdmin,
     isSales,
     apOnly,
-    showZeroCustoms,
     effectiveCustomOrderMode,
   ]);
 
@@ -1875,14 +1878,14 @@ export default function InventoryListScreen({
                 {item.quantity || 0} gal
               </Text>
             </View>
-            {(item.location || hasOpen) && !isSales && (
+            {(item.location || hasOpen || isCustomInventoryView) && !isSales && (
               <View style={styles.itemMetaRow}>
-                {item.location ? (
+                {item.location || isCustomInventoryView ? (
                   <Text
                     style={[styles.itemLocation, { color: ink.muted }]}
                     numberOfLines={1}
                   >
-                    📍 {formatItemLocationDisplay(item)}
+                    📍 {isCustomInventoryView ? customLocationDisplay(item) : formatItemLocationDisplay(item)}
                   </Text>
                 ) : (
                   <View style={styles.itemMetaSpacer} />
@@ -2577,27 +2580,6 @@ export default function InventoryListScreen({
                                   AP
                                 </AppButton>
                               )}
-                              {isAdmin && bookFilter === "custom" && (
-                                <AppButton
-                                  mode={
-                                    showZeroCustoms ? "contained" : "outlined"
-                                  }
-                                  compact
-                                  onPress={() =>
-                                    setShowZeroCustoms((v) => !v)
-                                  }
-                                  style={[
-                                    styles.viewModeButton,
-                                    styles.viewModeButtonLong,
-                                  ]}
-                                  contentStyle={invBtnContentStyle}
-                                  labelStyle={invBtnLabelStyle}
-                                >
-                                  {showZeroCustoms
-                                    ? "Hide empty"
-                                    : "Show empty"}
-                                </AppButton>
-                              )}
                             </View>
                           )}
                           <View style={styles.tableHeaderTopRight}>
@@ -2996,8 +2978,10 @@ export default function InventoryListScreen({
                                             },
                                           ]}
                                         >
-                                          {formatItemLocationDisplay(item) ||
-                                            "-"}
+                                          {isCustomInventoryView
+                                            ? customLocationDisplay(item)
+                                            : formatItemLocationDisplay(item) ||
+                                              "-"}
                                         </Text>
                                       </DataTable.Cell>
                                       ) : null}
@@ -3352,23 +3336,6 @@ export default function InventoryListScreen({
                     AP
                   </AppButton>
                 )}
-                {isAdmin &&
-                  viewMode !== "colorBook" &&
-                  bookFilter === "custom" && (
-                    <AppButton
-                      mode={showZeroCustoms ? "contained" : "outlined"}
-                      compact
-                      onPress={() => setShowZeroCustoms((v) => !v)}
-                      style={[
-                        styles.viewModeButtonMobile,
-                        styles.viewModeButtonLong,
-                      ]}
-                      contentStyle={invBtnContentStyle}
-                      labelStyle={invBtnLabelStyle}
-                    >
-                      {showZeroCustoms ? "Hide empty" : "Show empty"}
-                    </AppButton>
-                  )}
               </View>
               <AppButton
                 mode={viewMode === "colorBook" ? "contained" : "outlined"}

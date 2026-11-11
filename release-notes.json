@@ -1,5 +1,8 @@
 {
   "changes": [
-    "Formula steps are labeled from the process name only. A dye colorant in a stain or toner does not change the step to Dye."
+    "Custom inventory opens with in-stock colors in their stack. Search still shows a color at 0 gal with location None.",
+    "When you change a quantity, the top mixers also show how much they checked out of that item.",
+    "Formula photos upload from the picture at the top. Tap the empty box to add one.",
+    "Delete a whole formula step. Blank steps drop off when you save."
   ]
 }

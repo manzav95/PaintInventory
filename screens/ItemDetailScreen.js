@@ -47,9 +47,24 @@ import {
   resolveCustomStackLocation,
 } from "../utils/customStacks";
 import MaterialUsageService from "../services/materialUsageService";
+import AuditService from "../services/auditService";
+import {
+  isCheckOutLog,
+  getCheckOutQtyFromLog,
+} from "../utils/auditLogUtils";
 
 function textMentionsFlorenza(...parts) {
   return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
+}
+
+function usageUserKey(name) {
+  const display = displayUserName(name, "Unknown").trim().toLowerCase();
+  if (display === "admin" || display === "admin123") return "admin";
+  return display;
+}
+
+function formatCulpritGal(n) {
+  return String(Math.round((Number(n) || 0) * 100) / 100);
 }
 
 const CONTAINER_OPTIONS = [
@@ -292,22 +307,41 @@ export default function ItemDetailScreen({
     }
     (async () => {
       try {
-        const rows = await MaterialUsageService.list(null, 80, {
-          item_id: String(item.id),
-          color_name: String(item.name || item.color_label || "").trim() || undefined,
-        });
+        const itemId = String(item.id);
+        const [rows, auditLogs] = await Promise.all([
+          MaterialUsageService.list(null, 80, {
+            item_id: itemId,
+            color_name:
+              String(item.name || item.color_label || "").trim() || undefined,
+          }),
+          AuditService.list(10000, { itemId }),
+        ]);
         if (cancelled) return;
         const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+        const checkoutByUser = new Map();
+        for (const log of Array.isArray(auditLogs) ? auditLogs : []) {
+          if (!isCheckOutLog(log)) continue;
+          const ts = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+          if (ts && ts < cutoff) continue;
+          const qty = getCheckOutQtyFromLog(log);
+          if (qty <= 0) continue;
+          const key = usageUserKey(log.userName);
+          checkoutByUser.set(key, (checkoutByUser.get(key) || 0) + qty);
+        }
+
         const byUser = new Map();
         for (const row of Array.isArray(rows) ? rows : []) {
           const dateStr = String(row.entry_date || "").slice(0, 10);
           const ts = dateStr ? new Date(`${dateStr}T12:00:00`).getTime() : 0;
           if (ts && ts < cutoff) continue;
           const user = displayUserName(row.user_name, "Unknown");
+          const key = usageUserKey(row.user_name);
           const gal = Number(row.qty_gallons) || 0;
           if (gal <= 0) continue;
-          const prev = byUser.get(user) || {
+          const prev = byUser.get(key) || {
             user,
+            key,
             gallons: 0,
             booth: "",
             lastDate: "",
@@ -320,7 +354,7 @@ export default function ItemDetailScreen({
           if (!prev.lastDate || dateStr > prev.lastDate) {
             prev.lastDate = dateStr;
           }
-          byUser.set(user, prev);
+          byUser.set(key, prev);
         }
         const ranked = Array.from(byUser.values())
           .sort((a, b) => b.gallons - a.gallons)
@@ -328,6 +362,8 @@ export default function ItemDetailScreen({
           .map((u) => ({
             ...u,
             gallons: Math.round(u.gallons * 100) / 100,
+            checkoutGal:
+              Math.round((checkoutByUser.get(u.key) || 0) * 100) / 100,
           }));
         setUsageCulprits(ranked);
       } catch (e) {
@@ -611,20 +647,30 @@ export default function ItemDetailScreen({
               { color: theme.colors.onSurfaceVariant },
             ]}
           >
-            If stock is short (7d material usage)
+            If stock is short (7d)
           </Text>
           {usageCulprits.map((u) => (
-            <Text
-              key={u.user}
-              style={[
-                styles.usageCulpritLine,
-                { color: theme.colors.onSurface },
-              ]}
-              numberOfLines={1}
-            >
-              {u.user}
-              {u.booth ? ` · ${u.booth}` : ""} · {u.gallons} gal
-            </Text>
+            <View key={u.key || u.user} style={styles.usageCulpritRow}>
+              <Text
+                style={[
+                  styles.usageCulpritLine,
+                  { color: theme.colors.onSurface },
+                ]}
+                numberOfLines={1}
+              >
+                {u.user}
+                {u.booth ? ` · ${u.booth}` : ""}
+              </Text>
+              <Text
+                style={[
+                  styles.usageCulpritMeta,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                mixed {formatCulpritGal(u.gallons)} gal · out{" "}
+                {formatCulpritGal(u.checkoutGal)} gal
+              </Text>
+            </View>
           ))}
         </View>
       ) : null}
@@ -1566,7 +1612,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginTop: -6,
     marginBottom: 12,
-    gap: 2,
+    gap: 6,
   },
   usageCulpritBoxDesktop: {
     marginTop: 8,
@@ -1577,11 +1623,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
     letterSpacing: 0.4,
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  usageCulpritRow: {
+    gap: 0,
   },
   usageCulpritLine: {
     fontSize: 13,
     fontWeight: "600",
+  },
+  usageCulpritMeta: {
+    fontSize: 12,
+    fontWeight: "500",
   },
   typeLabel: {
     fontSize: 12,

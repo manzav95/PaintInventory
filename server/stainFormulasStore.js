@@ -723,8 +723,22 @@ function formulaDateValue(value) {
   return `${year}-${month}-${day}`;
 }
 
+function isBlankFormulaStep(step) {
+  const title = String(step?.processName || "").trim();
+  const notes = [step?.importantNotes, step?.notes]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join("");
+  const ingredients = (step?.ingredients || []).some((ing) =>
+    String(ing?.name || ing?.rawLine || ing?.quantityText || ing?.quantity || "").trim(),
+  );
+  return !title && !notes && !ingredients && !step?.important;
+}
+
 function cleanDraft(body) {
-  const steps = Array.isArray(body.steps) ? body.steps : [];
+  const steps = (Array.isArray(body.steps) ? body.steps : []).filter(
+    (step) => !isBlankFormulaStep(step),
+  );
   const wood = normalizeWood(body.woodType, body.woodSpecies, body.materialForm);
   return {
     formulaNumber: String(body.formulaNumber || body.formula_number || "").trim(),
