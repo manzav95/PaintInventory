@@ -1,8 +1,9 @@
 {
   "changes": [
-    "Custom inventory opens with in-stock colors in their stack. Search still shows a color at 0 gal with location None.",
-    "When you change a quantity, the top mixers also show how much they checked out of that item.",
-    "Formula photos upload from the picture at the top. Tap the empty box to add one.",
-    "Delete a whole formula step. Blank steps drop off when you save."
+    "Data sheets is in the menu for everyone. Open SDS, PDS, or TDS by type.",
+    "Admins can drop files onto PDS, SDS, or TDS, then assign each file a material type.",
+    "Receive PO shows Rex, or the code if there is no Rex. Ordered and Received only.",
+    "Each Material Usage week shows mixed cost and a Copy week button on that card.",
+    "Purchase order week and month totals include price. Dark cards and popups sit lighter than the page."
   ]
 }

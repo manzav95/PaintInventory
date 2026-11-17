@@ -47,7 +47,7 @@ import {
 } from "../utils/materialTypes";
 import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
-import { nestedSurfaceColor } from "../utils/themeColors";
+import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
   findExactInventoryScanMatch,
@@ -492,9 +492,11 @@ export default function InventoryListScreen({
     const id = String(itemId ?? "").trim();
     if (!id) return "";
     const inv = inventory.find((i) => String(i.id) === id);
+    const rex = inv?.rex != null ? String(inv.rex).trim() : "";
+    if (rex) return rex;
     const ext =
       inv?.external_code != null ? String(inv.external_code).trim() : "";
-    if (ext) return `${id} · ${ext}`;
+    if (ext) return ext;
     return id;
   };
 
@@ -1292,7 +1294,7 @@ export default function InventoryListScreen({
           <Pressable
             style={[
               styles.colorModalBox,
-              { backgroundColor: theme.colors.surface },
+              { backgroundColor: popupSurfaceColor(theme) },
             ]}
             onPress={(e) => e?.stopPropagation?.()}
           >

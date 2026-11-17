@@ -22,6 +22,7 @@ import {
   listFeedback,
 } from "../utils/feedback";
 import { layout, radius, space } from "../theme/tokens";
+import { popupSurfaceColor } from "../utils/themeColors";
 import showToast from "../utils/showToast";
 
 function formatWhen(ts) {
@@ -144,7 +145,7 @@ export default function FeedbackHost() {
         style={[
           styles.dialog,
           {
-            backgroundColor: theme.colors.surface,
+            backgroundColor: popupSurfaceColor(theme),
             borderRadius: radius.lg,
           },
         ]}

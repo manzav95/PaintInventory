@@ -16,7 +16,7 @@ import {
 } from "react-native-paper";
 import AppButton from "./ui/AppButton";
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
-import { nestedSurfaceColor } from "../utils/themeColors";
+import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import { AppBadge, AppEmptyState } from "./ui";
@@ -483,7 +483,7 @@ export default function ReceivePoModal({
               {
                 height: panelHeight,
                 maxHeight: panelMaxHeight,
-                backgroundColor: theme.colors.surfaceContainerHighest,
+                backgroundColor: popupSurfaceColor(theme),
                 borderColor: theme.colors.outlineVariant,
               },
             ]}
@@ -971,15 +971,62 @@ export default function ReceivePoModal({
                               Job: {(line.job_name || "").trim()}
                             </Text>
                           ) : null}
-                          <Text
-                            style={[
-                              styles.qtyMeta,
-                              { color: theme.colors.onSurfaceVariant },
-                            ]}
-                          >
-                            Ordered {ordered} · Received {received} · Remaining{" "}
-                            {remaining} gal
-                          </Text>
+                          <View style={styles.qtyRow}>
+                            <View
+                              style={[
+                                styles.qtyChip,
+                                {
+                                  backgroundColor: theme.dark
+                                    ? "rgba(255,255,255,0.08)"
+                                    : "rgba(15,22,36,0.06)",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.qtyChipLabel,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Ordered
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyChipValue,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                {ordered}
+                              </Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.qtyChip,
+                                {
+                                  backgroundColor: theme.dark
+                                    ? "rgba(201,151,46,0.18)"
+                                    : "rgba(201,151,46,0.14)",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.qtyChipLabel,
+                                  { color: theme.colors.onSurfaceVariant },
+                                ]}
+                              >
+                                Received
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.qtyChipValue,
+                                  { color: theme.colors.onSurface },
+                                ]}
+                              >
+                                {received}
+                              </Text>
+                            </View>
+                          </View>
                           {remaining > 0 ? (
                             <ReceiveLineQtyInput
                               itemId={itemId}
@@ -1316,11 +1363,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: space[1],
   },
-  qtyMeta: {
-    fontSize: 13,
-    lineHeight: 18,
+  qtyRow: {
+    flexDirection: "row",
+    gap: space[2],
+    marginTop: space[2],
     marginBottom: space[2],
-    marginTop: space[1],
+  },
+  qtyChip: {
+    flex: 1,
+    borderRadius: radius.md,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  qtyChipLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  qtyChipValue: {
+    fontSize: 22,
+    fontWeight: "800",
+    lineHeight: 26,
+    marginTop: 2,
   },
   receiveQtyInput: {
     marginTop: space[2],

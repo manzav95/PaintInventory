@@ -5,6 +5,7 @@ import AppButton from "./ui/AppButton";
 import UserMessageService from "../services/userMessageService";
 import { displayUserName } from "../utils/displayUserName";
 import { radius, space } from "../theme/tokens";
+import { popupSurfaceColor } from "../utils/themeColors";
 
 function formatWhen(ts) {
   if (!ts) return "";
@@ -77,7 +78,7 @@ export default function UserMessageHost({ userName, paused = false, onCountChang
           style={[
             styles.card,
             {
-              backgroundColor: theme.colors.surfaceContainerHighest,
+              backgroundColor: popupSurfaceColor(theme),
               borderColor: theme.colors.outlineVariant,
             },
           ]}

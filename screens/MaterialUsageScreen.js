@@ -38,7 +38,6 @@ import {
   buildLastCheckoutMap,
 } from "../utils/materialUsageCheckoutGuard";
 import {
-  bundleUsageByWeek,
   formatBoothWeekUsageForExcel,
   boothWeekCopyHint,
 } from "../utils/materialUsageWeekCopy";
@@ -46,7 +45,7 @@ import StaggerItem from "../components/StaggerItem";
 import { SkeletonStack } from "../components/SkeletonBlock";
 import ScrollFrame from "../components/ScrollFrame";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
-import { nestedSurfaceColor } from "../utils/themeColors";
+import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import MaterialUsageService, {
   BOOTH_OPTIONS,
@@ -382,6 +381,13 @@ function dayTotalsFromRows(rows, inventory) {
     );
   });
   return t;
+}
+
+function rowsDollars(rows, inventory) {
+  return (rows || []).reduce(
+    (sum, row) => sum + usageRowDollars(row, inventory),
+    0,
+  );
 }
 
 function normalizeMuUser(name) {
@@ -773,6 +779,7 @@ export default function MaterialUsageScreen({
         date,
         rows: byDay[date],
         totals: dayTotalsFromRows(byDay[date], inventory),
+        dollars: rowsDollars(byDay[date], inventory),
       }));
   }, [filteredLogs, materialUsageOvertime, inventory]);
 
@@ -792,13 +799,15 @@ export default function MaterialUsageScreen({
     });
     return [...byWeek.values()]
       .sort((a, b) => (b.monday || "").localeCompare(a.monday || ""))
-      .map((week) => ({
-        ...week,
-        totals: dayTotalsFromRows(
-          week.days.flatMap((d) => d.rows),
-          inventory,
-        ),
-      }));
+      .map((week) => {
+        const rows = week.days.flatMap((d) => d.rows);
+        return {
+          ...week,
+          rows,
+          totals: dayTotalsFromRows(rows, inventory),
+          dollars: rowsDollars(rows, inventory),
+        };
+      });
   }, [logsByDay, inventory]);
 
   useEffect(() => {
@@ -860,17 +869,12 @@ export default function MaterialUsageScreen({
       : `${boothPart} · This week`;
   })();
 
-  const logsByWeek = useMemo(() => {
-    if (!boothFilter || boothFilter === "all") return [];
-    return bundleUsageByWeek(filteredLogs, (row) =>
-      getLogDate(row, materialUsageOvertime),
-    );
-  }, [filteredLogs, boothFilter, materialUsageOvertime]);
-
   const handleCopyWeek = async (week) => {
     if (!week || !boothFilter || boothFilter === "all") return;
+    const rows =
+      week.rows || (week.days || []).flatMap((d) => d.rows || []);
     const tsv = formatBoothWeekUsageForExcel(
-      week.rows,
+      rows,
       week.monday,
       boothFilter,
       (row) => getResolvedMaterialType(row, inventory),
@@ -1717,11 +1721,23 @@ export default function MaterialUsageScreen({
                 {formatLogDate(day.date)}
                 {isToday ? " · Today" : ""}
               </Text>
-              <Text
-                style={[styles.dayTotalGal, { color: theme.colors.onSurface }]}
-              >
-                {day.totals.total.toFixed(2)} gal
-              </Text>
+              <View style={styles.weekMeta}>
+                <Text
+                  style={[styles.dayTotalGal, { color: theme.colors.onSurface }]}
+                >
+                  {day.totals.total.toFixed(2)} gal
+                </Text>
+                {isAdmin ? (
+                  <Text
+                    style={[
+                      styles.weekCost,
+                      { color: theme.colors.primary },
+                    ]}
+                  >
+                    {formatCurrency(day.dollars)}
+                  </Text>
+                ) : null}
+              </View>
             </View>
             <Text
               style={[
@@ -1761,6 +1777,7 @@ export default function MaterialUsageScreen({
   const renderWeekGroup = (week, weekIndex) => {
     const open = expandedWeeks.has(week.monday);
     const isThisWeek = week.monday === thisWeekMonday;
+    const showCopy = boothFilter && boothFilter !== "all";
     return (
       <View
         key={week.monday}
@@ -1772,11 +1789,11 @@ export default function MaterialUsageScreen({
           },
         ]}
       >
-        <Pressable
-          onPress={() => toggleWeek(week.monday)}
-          style={styles.groupHeaderPress}
-        >
-          <View style={styles.dayHeaderTop}>
+        <View style={styles.dayHeaderTop}>
+          <Pressable
+            onPress={() => toggleWeek(week.monday)}
+            style={styles.groupHeaderPress}
+          >
             <Text
               style={[styles.groupTitle, { color: theme.colors.onSurface }]}
               numberOfLines={2}
@@ -1785,13 +1802,33 @@ export default function MaterialUsageScreen({
               {week.label}
               {isThisWeek ? " · This week" : ""}
             </Text>
+          </Pressable>
+          <View style={styles.weekMeta}>
             <Text
               style={[styles.dayTotalGal, { color: theme.colors.onSurface }]}
             >
               {week.totals.total.toFixed(2)} gal
             </Text>
+            {isAdmin ? (
+              <Text
+                style={[styles.weekCost, { color: theme.colors.primary }]}
+              >
+                {formatCurrency(week.dollars)}
+              </Text>
+            ) : null}
+            {showCopy ? (
+              <AppButton
+                mode="outlined"
+                compact
+                icon={copiedWeek === week.monday ? "check" : "content-copy"}
+                onPress={() => handleCopyWeek(week)}
+                style={styles.weekCopyBtn}
+              >
+                {copiedWeek === week.monday ? "Copied" : "Copy week"}
+              </AppButton>
+            ) : null}
           </View>
-        </Pressable>
+        </View>
         {open ? (
           <View style={styles.groupExpanded}>
             {week.days.map((day, i) => renderDayCard(day, weekIndex * 10 + i))}
@@ -1915,31 +1952,6 @@ export default function MaterialUsageScreen({
           <AppEmptyState title="No entries" style={styles.emptyLogs} />
         ) : (
           <View style={styles.dayList}>
-            {boothFilter && boothFilter !== "all" && logsByWeek.length > 0
-              ? logsByWeek.map((week) => (
-                  <View key={week.monday} style={styles.weekCopyBar}>
-                    <Text
-                      style={[
-                        styles.weekCopyLabel,
-                        { color: theme.colors.onSurface },
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {week.label}
-                    </Text>
-                    <AppButton
-                      mode="outlined"
-                      compact
-                      icon={
-                        copiedWeek === week.monday ? "check" : "content-copy"
-                      }
-                      onPress={() => handleCopyWeek(week)}
-                    >
-                      {copiedWeek === week.monday ? "Copied" : "Copy week"}
-                    </AppButton>
-                  </View>
-                ))
-              : null}
             {!isAdmin
               ? logsByDay.map((day, i) => renderDayCard(day, i))
               : logsByWeekGrouped.map((week, i) => renderWeekGroup(week, i))}
@@ -1999,7 +2011,7 @@ export default function MaterialUsageScreen({
           <View
             style={[
               styles.savingBox,
-              { backgroundColor: theme.colors.surface },
+              { backgroundColor: popupSurfaceColor(theme) },
             ]}
           >
             <ActivityIndicator size="large" color={theme.colors.primary} />
@@ -2709,6 +2721,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   groupHeaderPress: {
+    flex: 1,
+    minWidth: 0,
     gap: 8,
   },
   groupTitle: {
@@ -2755,7 +2769,19 @@ const styles = StyleSheet.create({
   },
   dayTotalGal: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
+  },
+  weekMeta: {
+    alignItems: "flex-end",
+    gap: 4,
+    flexShrink: 0,
+  },
+  weekCost: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  weekCopyBtn: {
+    marginTop: 2,
   },
   dayToggleHint: {
     fontSize: 11,

@@ -10,6 +10,10 @@ export const DARK_SURFACE_ELEVATED = colors.dark.elevated;
 export const DARK_NESTED_SURFACE = colors.dark.nested;
 export const LIGHT_NESTED_SURFACE = colors.light.nested;
 
+/** Dialogs / popups — lightest dark surface so overlays sit above cards. */
+export const DARK_POPUP_SURFACE = colors.dark.popup;
+export const LIGHT_POPUP_SURFACE = colors.light.elevatedHigh;
+
 export const DARK_BORDER = colors.dark.border;
 
 /** Bell notification count badge — saturated alert red. */
@@ -18,4 +22,13 @@ export const NOTIFICATION_BADGE_RED = colors.semantic.notificationBadge;
 /** Fill for nested list rows/cards inside elevated parent surfaces. */
 export function nestedSurfaceColor(theme) {
   return theme?.dark ? DARK_NESTED_SURFACE : LIGHT_NESTED_SURFACE;
+}
+
+/** Fill for dialogs, receive-PO panel, and other overlays above cards. */
+export function popupSurfaceColor(theme) {
+  if (theme?.dark) return DARK_POPUP_SURFACE;
+  return (
+    theme?.colors?.surfaceContainerHighest ||
+    LIGHT_POPUP_SURFACE
+  );
 }

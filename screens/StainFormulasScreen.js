@@ -28,6 +28,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
 import { space, radius } from "../theme/tokens";
+import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import { displayUserName } from "../utils/displayUserName";
 import {
   copyFormulaStep,
@@ -808,7 +809,12 @@ export default function StainFormulasScreen({
                 styles.card,
                 styles.listCard,
                 wide ? styles.gridCard : null,
-                { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface },
+                {
+                  borderColor: theme.colors.outlineVariant,
+                  backgroundColor: theme.dark
+                    ? nestedSurfaceColor(theme)
+                    : theme.colors.surfaceContainerHighest,
+                },
               ]}
             >
               <Pressable
@@ -2141,7 +2147,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         <Modal visible={colorantReview} transparent animationType="fade" onRequestClose={() => setColorantReview(false)}>
           <Pressable style={styles.downloadOverlay} onPress={() => setColorantReview(false)}>
             <Pressable
-              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest, maxWidth: 560 }]}
+              style={[styles.downloadCard, { backgroundColor: popupSurfaceColor(theme), maxWidth: 560 }]}
               onPress={(event) => event.stopPropagation()}
             >
               <Text style={[styles.downloadTitle, { color: theme.colors.onSurface }]}>Check these colorants</Text>
@@ -2195,7 +2201,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         <Modal visible={dupOpen} transparent animationType="fade" onRequestClose={() => setDupOpen(false)}>
           <Pressable style={styles.downloadOverlay} onPress={() => setDupOpen(false)}>
             <Pressable
-              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+              style={[styles.downloadCard, { backgroundColor: popupSurfaceColor(theme) }]}
               onPress={(event) => event.stopPropagation()}
             >
               <View style={styles.downloadHeader}>
@@ -2221,7 +2227,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         <Modal visible={downloadOpen} transparent animationType="fade" onRequestClose={() => setDownloadOpen(false)}>
           <Pressable style={styles.downloadOverlay} onPress={() => setDownloadOpen(false)}>
             <Pressable
-              style={[styles.downloadCard, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+              style={[styles.downloadCard, { backgroundColor: popupSurfaceColor(theme) }]}
               onPress={(event) => event.stopPropagation()}
             >
               <View style={styles.downloadHeader}>

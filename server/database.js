@@ -733,6 +733,10 @@ class Database {
     const stainStore = require("./stainFormulasStore");
     await stainStore.ensureStainTables(this.pool);
     await stainStore.seedDemoFormula(this.pool);
+
+    const itemDocs = require("./itemDocs");
+    await itemDocs.ensureItemDocTables(this.pool);
+    console.log("Safety sheet tables ready");
   }
 
   async getAllItems() {

@@ -26,7 +26,8 @@ import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
 import OrderService from "../services/orderService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
-import { nestedSurfaceColor } from "../utils/themeColors";
+import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
+import { formatCurrency } from "../utils/pricing";
 import {
   getItemApMixingFlags,
   itemLeadTimePrefers7Days,
@@ -666,10 +667,29 @@ export default function UpcomingOrdersScreen({
     return parts.join(" · ");
   };
 
+  const getOrdersDollars = (orders) => {
+    let sum = 0;
+    for (const order of orders || []) {
+      for (const line of order.lines || []) {
+        const itemId = line.itemId ?? line.item_id;
+        const item = (inventory || []).find(
+          (i) => String(i.id) === String(itemId),
+        );
+        const qty = lineGallonQty(line, "ordered");
+        const price = Number(item?.price);
+        if (qty > 0 && Number.isFinite(price) && price > 0) {
+          sum += qty * price;
+        }
+      }
+    }
+    return sum;
+  };
+
   const formatGroupSummary = (orders, totalsByType) => {
     const count = Array.isArray(orders) ? orders.length : 0;
     const poPart = `${count} PO${count === 1 ? "" : "s"}`;
-    return `${poPart} · ${formatTotalsByType(totalsByType)}`;
+    const dollars = getOrdersDollars(orders);
+    return `${poPart} · ${formatCurrency(dollars)} · ${formatTotalsByType(totalsByType)}`;
   };
 
   /** All POs sorted most recent placed_at first. Search filter applied. */
@@ -1770,7 +1790,7 @@ export default function UpcomingOrdersScreen({
           <Pressable
             style={[
               styles.receivedModalBox,
-              { backgroundColor: theme.colors.surface },
+              { backgroundColor: popupSurfaceColor(theme) },
             ]}
             onPress={(e) => e?.stopPropagation?.()}
           >

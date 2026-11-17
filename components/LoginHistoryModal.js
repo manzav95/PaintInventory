@@ -17,6 +17,7 @@ import LoginLogService from "../services/loginLogService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import ScrollFrame from "./ScrollFrame";
 import { displayUserName } from "../utils/displayUserName";
+import { popupSurfaceColor } from "../utils/themeColors";
 
 function formatLoginTime(iso) {
   if (!iso) return "—";
@@ -74,7 +75,7 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
           style={[
             styles.card,
             isWide && styles.cardWide,
-            { backgroundColor: theme.colors.surfaceContainerHighest },
+            { backgroundColor: popupSurfaceColor(theme) },
           ]}
           onPress={(e) => e.stopPropagation()}
         >

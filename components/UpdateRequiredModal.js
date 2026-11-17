@@ -4,6 +4,7 @@ import { Text, useTheme } from "react-native-paper";
 import AppButton from "./ui/AppButton";
 import { reloadAppToLatest, markReleaseSeen } from "../utils/appVersion";
 import { space, radius } from "../theme/tokens";
+import { popupSurfaceColor } from "../utils/themeColors";
 
 /**
  * Version popup.
@@ -45,7 +46,7 @@ export default function UpdateRequiredModal({
           style={[
             styles.card,
             {
-              backgroundColor: theme.colors.surfaceContainerHighest,
+              backgroundColor: popupSurfaceColor(theme),
               borderColor: theme.colors.outlineVariant,
             },
           ]}

@@ -35,6 +35,7 @@ import { colors, space, radius } from "../theme/tokens";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
 import SendUserMessageDialog from "../components/SendUserMessageDialog";
+import SafetyDocsPanel from "../components/SafetyDocsPanel";
 import { getActionColor } from "../utils/actionColors";
 
 const MONTH_NAMES = [
@@ -64,6 +65,7 @@ const PANEL = {
   "admin-zeros": { title: "Zero quantities", parent: "admin" },
   "admin-hex": { title: "Color hex lookup", parent: "admin" },
   "admin-codes": { title: "External codes", parent: "admin" },
+  "admin-docs": { title: "Safety sheets", parent: "admin" },
 };
 
 function formatGal(n) {
@@ -689,6 +691,14 @@ export default function SettingsScreen({
                 selected={panel === "admin-codes"}
                 onPress={() => setPanel("admin-codes")}
               />
+              <SettingsMenuRow
+                icon="file-document-outline"
+                title="Safety sheets"
+                compact
+                showChevron={false}
+                selected={panel === "admin-docs"}
+                onPress={() => setPanel("admin-docs")}
+              />
             </>
           ) : null}
         </ScrollView>
@@ -826,6 +836,12 @@ export default function SettingsScreen({
         icon="barcode"
         title="External codes"
         onPress={() => setPanel("admin-codes")}
+      />
+      <Divider style={{ backgroundColor: theme.colors.outlineVariant }} />
+      <SettingsMenuRow
+        icon="file-document-outline"
+        title="Safety sheets"
+        onPress={() => setPanel("admin-docs")}
       />
     </AppSurface>
   );
@@ -1398,6 +1414,16 @@ export default function SettingsScreen({
     </AppSurface>
   );
 
+  const renderAdminDocs = () => (
+    <AppSurface>
+      <AppText variant="caption" tone="muted" style={{ marginBottom: 8 }}>
+        Shop floor opens these from Data sheets in the menu. Uploads stay here
+        and on that page for admins.
+      </AppText>
+      <SafetyDocsPanel scope="type" isAdmin={isAdmin} />
+    </AppSurface>
+  );
+
   const renderPanelBody = () => {
     switch (panel) {
       case "appearance":
@@ -1420,6 +1446,8 @@ export default function SettingsScreen({
         return isAdmin ? renderAdminHex() : renderRoot();
       case "admin-codes":
         return isAdmin ? renderAdminCodes() : renderRoot();
+      case "admin-docs":
+        return isAdmin ? renderAdminDocs() : renderRoot();
       case "root":
       default:
         return renderRoot();

@@ -22,7 +22,9 @@ export default function AppSurface({
       style={[
         styles.card,
         {
-          backgroundColor: theme.colors.surfaceContainerHighest,
+          backgroundColor: theme.dark
+            ? theme.colors.surface
+            : theme.colors.surfaceContainerHighest,
           borderColor: theme.colors.outlineVariant,
           elevation: elevationLevel === "raised" ? elevation.card : 0,
           borderRadius: radius.lg,

@@ -62,6 +62,8 @@ export const colors = {
     elevated: "#161E2E",
     /** Nested rows inside elevated surfaces */
     nested: "#1C2638",
+    /** Dialogs / popups — lightest surface so stacked UI reads as depth */
+    popup: "#243044",
     /** Persistent / drawer sidebar */
     sidebar: "#0B0E1A",
     border: "#2A3344",

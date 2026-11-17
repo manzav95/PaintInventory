@@ -65,6 +65,7 @@ import MaterialUsageScreen from './screens/MaterialUsageScreen';
 import WasteTrackingScreen from './screens/WasteTrackingScreen';
 import LineupScreen from './screens/LineupScreen';
 import JobSearchScreen from './screens/JobSearchScreen';
+import DataSheetsScreen from './screens/DataSheetsScreen';
 import ReportsScreen from './screens/ReportsScreen';
 import OverviewScreen from './screens/OverviewScreen';
 import LineupService from './services/lineupService';
@@ -106,6 +107,7 @@ const WEB_SCREEN_HASH = {
   orders: '/orders',
   stainFormulas: '/stain-formulas',
   jobSearch: '/job-search',
+  dataSheets: '/data-sheets',
   messages: '/messages',
   materialUsage: '/material-usage',
   wasteTracking: '/waste-tracking',
@@ -126,6 +128,7 @@ const WEB_HASH_SCREEN = {
   '/orders': 'orders',
   '/stain-formulas': 'stainFormulas',
   '/job-search': 'jobSearch',
+  '/data-sheets': 'dataSheets',
   '/messages': 'messages',
   '/material-usage': 'materialUsage',
   '/waste-tracking': 'wasteTracking',
@@ -145,6 +148,15 @@ const ADMIN_WEB_SCREENS = new Set([
   'overview',
 ]);
 
+function salesCanOpenScreen(screen) {
+  return (
+    screen === 'list' ||
+    screen === 'settings' ||
+    screen === 'dataSheets' ||
+    screen === 'login'
+  );
+}
+
 function normalizeWebHash(raw) {
   const hash = String(raw || '').replace(/^#/, '') || '/';
   const path = (hash.startsWith('/') ? hash : `/${hash}`).split('?')[0];
@@ -154,7 +166,7 @@ function normalizeWebHash(raw) {
 function screenFromWebHash(raw, { isAdmin, isSales }) {
   const screen = WEB_HASH_SCREEN[normalizeWebHash(raw)];
   if (!screen) return null;
-  if (isSales && screen !== 'list' && screen !== 'settings') return null;
+  if (isSales && !salesCanOpenScreen(screen)) return null;
   if (ADMIN_WEB_SCREENS.has(screen) && !isAdmin) return null;
   return screen;
 }
@@ -348,7 +360,7 @@ export default function App() {
 
   const navigateTo = (screen, options = {}) => {
     setNavDrawerOpen(false);
-    if (isSales && screen !== 'list' && screen !== 'settings' && screen !== 'login') {
+    if (isSales && !salesCanOpenScreen(screen)) {
       return;
     }
     if ((screen === 'reports' || screen === 'messages' || screen === 'overview') && !isAdmin) {
@@ -430,7 +442,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isSales || !userName) return;
-    if (currentScreen !== 'list' && currentScreen !== 'settings') {
+    if (!salesCanOpenScreen(currentScreen)) {
       setCurrentScreen('list');
     }
   }, [isSales, userName, currentScreen]);
@@ -446,6 +458,7 @@ export default function App() {
         stockPlanning: 'Stock & week order',
         stainFormulas: 'Formulas',
         jobSearch: 'Job search',
+        dataSheets: 'Data sheets',
         messages: 'Messages',
         list: 'Inventory',
         qrscan: 'Check In / Check Out',
@@ -2166,6 +2179,14 @@ export default function App() {
             onOpenFormula={(formulaId) =>
               navigateTo('stainFormulas', { formulaFocusId: formulaId })
             }
+          />
+        );
+      case 'dataSheets':
+        return (
+          <DataSheetsScreen
+            isAdmin={isAdmin}
+            embeddedInShell={embeddedInShell}
+            onBack={() => navigateTo(isSales ? 'list' : 'home')}
           />
         );
       case 'messages':

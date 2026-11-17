@@ -1415,8 +1415,6 @@ app.get('/', (req, res) => {
       items: '/api/items',
       orders: '/api/orders',
       'orders: delete (POST)': '/api/orders/:id/delete',
-      'settings: next-id': '/api/settings/next-id',
-      'settings: min-quantity': '/api/settings/min-quantity',
       audit: '/api/audit'
     }
   });
@@ -1742,6 +1740,7 @@ require('./stainFormulaRoutes').registerStainFormulaRoutes(app, db);
 require('./overviewRoutes').registerOverviewRoutes(app, db);
 require('./jobLookup').registerJobLookupRoutes(app, db);
 require('./userMessageRoutes').registerUserMessageRoutes(app, db);
+require('./itemDocRoutes').registerItemDocRoutes(app, db);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`CURE API server running on http://0.0.0.0:${PORT}`);

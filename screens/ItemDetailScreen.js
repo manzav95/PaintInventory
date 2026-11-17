@@ -52,6 +52,7 @@ import {
   isCheckOutLog,
   getCheckOutQtyFromLog,
 } from "../utils/auditLogUtils";
+import SafetyDocsPanel from "../components/SafetyDocsPanel";
 
 function textMentionsFlorenza(...parts) {
   return parts.some((p) => /\bflorenza\b/i.test(String(p ?? "")));
@@ -1425,6 +1426,14 @@ export default function ItemDetailScreen({
                   </FormRow>
 
                   {recycleBlock}
+                  {item?.id ? (
+                    <SafetyDocsPanel
+                      scope="item"
+                      itemId={String(item.id)}
+                      itemType={type}
+                      isAdmin={isAdmin}
+                    />
+                  ) : null}
                   {lastScannedLine}
                   {actionButtons}
                 </>
@@ -1565,6 +1574,14 @@ export default function ItemDetailScreen({
                   <FieldLabel theme={theme}>Paint color (optional)</FieldLabel>
                   {colorSection}
                   {recycleBlock}
+                  {item?.id ? (
+                    <SafetyDocsPanel
+                      scope="item"
+                      itemId={String(item.id)}
+                      itemType={type}
+                      isAdmin={isAdmin}
+                    />
+                  ) : null}
                   {lastScannedLine}
                   {actionButtons}
                 </>

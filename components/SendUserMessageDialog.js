@@ -14,6 +14,7 @@ import UserMessageService from "../services/userMessageService";
 import { displayUserName } from "../utils/displayUserName";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
+import { popupSurfaceColor } from "../utils/themeColors";
 
 const EVERYONE = "*";
 
@@ -107,7 +108,7 @@ export default function SendUserMessageDialog({
       <Dialog
         visible={visible}
         onDismiss={busy ? undefined : onDismiss}
-        style={{ backgroundColor: theme.colors.surfaceContainerHighest }}
+        style={{ backgroundColor: popupSurfaceColor(theme) }}
       >
         <Dialog.Title>Send on-screen message</Dialog.Title>
         <Dialog.Content>

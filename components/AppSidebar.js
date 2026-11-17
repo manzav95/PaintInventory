@@ -142,6 +142,12 @@ export default function AppSidebar({
         active={currentScreen === "list"}
         onPress={() => onNavigate("list")}
       />
+      <NavButton
+        label="Data sheets"
+        icon="file-document-outline"
+        active={currentScreen === "dataSheets"}
+        onPress={() => onNavigate("dataSheets")}
+      />
 
       {isAdmin && (
         <>

@@ -34,6 +34,11 @@ export const STANDARD_MATERIAL_TYPES = [
   "precat",
 ];
 
+/** Safety sheets: custom paint/stain use the same files as paint/stain. */
+export const SAFETY_DOC_TYPE_OPTIONS = MATERIAL_TYPE_OPTIONS.filter(
+  (o) => o.value !== "custom_paint" && o.value !== "custom_stain",
+);
+
 export function getMaterialTypeLabel(type) {
   const t = String(type || "").toLowerCase();
   if (MATERIAL_TYPE_LABELS[t]) return MATERIAL_TYPE_LABELS[t];

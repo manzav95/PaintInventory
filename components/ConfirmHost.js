@@ -4,6 +4,7 @@ import { Portal, Dialog, Text, useTheme } from "react-native-paper";
 import AppButton from "./ui/AppButton";
 import { subscribeConfirm } from "../utils/confirmAction";
 import { layout, radius } from "../theme/tokens";
+import { popupSurfaceColor } from "../utils/themeColors";
 
 /**
  * Renders promise-based confirm dialogs from confirmAction().
@@ -50,7 +51,7 @@ export default function ConfirmHost() {
         style={[
           styles.dialog,
           {
-            backgroundColor: theme.colors.surface,
+            backgroundColor: popupSurfaceColor(theme),
           },
         ]}
       >
