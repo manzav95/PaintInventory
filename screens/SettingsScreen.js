@@ -1418,7 +1418,7 @@ export default function SettingsScreen({
     <AppSurface>
       <AppText variant="caption" tone="muted" style={{ marginBottom: 8 }}>
         Shop floor opens these from Data sheets in the menu. Uploads stay here
-        and on that page for admins.
+        and on that page for admins. Sheets are PDS, SDS, and EDS.
       </AppText>
       <SafetyDocsPanel scope="type" isAdmin={isAdmin} />
     </AppSurface>

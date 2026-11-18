@@ -1,9 +1,9 @@
 {
   "changes": [
-    "Data sheets is in the menu for everyone. Open SDS, PDS, or TDS by type.",
-    "Admins can drop files onto PDS, SDS, or TDS, then assign each file a material type.",
-    "Receive PO shows Rex, or the code if there is no Rex. Ordered and Received only.",
-    "Each Material Usage week shows mixed cost and a Copy week button on that card.",
-    "Purchase order week and month totals include price. Dark cards and popups sit lighter than the page."
+    "Data sheets shows PDS, SDS, and EDS files under the type you tap.",
+    "Hold an inventory item for Data sheets. Only kinds that exist show.",
+    "If an item has no sheets, the menu says none available.",
+    "TDS is now EDS. Add extras like MAK on Data sheets.",
+    "The bell loads alerts once. The user menu has a caret like the bell."
   ]
 }

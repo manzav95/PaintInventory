@@ -60,7 +60,7 @@ function registerItemDocRoutes(app, db) {
         const type = docs.normalizeType(itemType);
         const k = docs.normalizeKind(kind);
         if (!type || !k) return;
-        if (!counts[type]) counts[type] = { sds: 0, pds: 0, tds: 0 };
+        if (!counts[type]) counts[type] = { sds: 0, pds: 0, eds: 0 };
         counts[type][k] += Number(n) || 0;
       };
       const typeRows = await pool.query(
@@ -77,10 +77,101 @@ function registerItemDocRoutes(app, db) {
          GROUP BY 1, 2`,
       );
       itemRows.rows.forEach((row) => add(row.item_type, row.kind, row.n));
-      res.json({ counts });
+
+      const extraRows = await pool.query(
+        `SELECT e.id, e.name, d.kind, COUNT(d.id)::int AS n
+         FROM data_sheet_extras e
+         LEFT JOIN item_docs d ON d.item_id = $1 || e.id::text
+         GROUP BY e.id, e.name, d.kind
+         ORDER BY LOWER(e.name), e.id`,
+        ["extra-"],
+      );
+      const extrasById = new Map();
+      extraRows.rows.forEach((row) => {
+        if (!extrasById.has(row.id)) {
+          extrasById.set(row.id, {
+            id: row.id,
+            name: row.name,
+            counts: { sds: 0, pds: 0, eds: 0 },
+          });
+        }
+        const kind = docs.normalizeKind(row.kind);
+        if (kind) extrasById.get(row.id).counts[kind] += Number(row.n) || 0;
+      });
+
+      const linkedRows = await pool.query(
+        `SELECT d.item_id, d.kind, COUNT(*)::int AS n,
+                i.name, i.color_label, i."type" AS item_type
+         FROM item_docs d
+         JOIN items i ON i.id = d.item_id
+         WHERE d.item_id NOT LIKE 'extra-%'
+         GROUP BY d.item_id, d.kind, i.name, i.color_label, i."type"
+         ORDER BY LOWER(COALESCE(i.name, d.item_id)), d.item_id`,
+      );
+      const itemsById = new Map();
+      linkedRows.rows.forEach((row) => {
+        if (!itemsById.has(row.item_id)) {
+          const color = String(row.color_label || "").trim();
+          const name = String(row.name || row.item_id).trim() || row.item_id;
+          itemsById.set(row.item_id, {
+            itemId: row.item_id,
+            name: color && color !== name ? `${name} · ${color}` : name,
+            counts: { sds: 0, pds: 0, eds: 0 },
+          });
+        }
+        const kind = docs.normalizeKind(row.kind);
+        if (kind) itemsById.get(row.item_id).counts[kind] += Number(row.n) || 0;
+      });
+
+      res.json({
+        counts,
+        extras: Array.from(extrasById.values()),
+        items: Array.from(itemsById.values()),
+      });
     } catch (error) {
       console.error("safety docs summary:", error);
       res.status(500).json({ error: "Failed to load data sheets" });
+    }
+  });
+
+  app.post("/api/safety-docs/extras", async (req, res) => {
+    try {
+      const session = await requireAdmin(req, res);
+      if (!session) return;
+      const name = String(req.body?.name || "").trim();
+      if (!name) return res.status(400).json({ error: "Enter a name." });
+      const inserted = await pool.query(
+        `INSERT INTO data_sheet_extras (name, created_by)
+         VALUES ($1, $2)
+         RETURNING id, name, created_by, created_at`,
+        [name, session.userName],
+      );
+      const row = inserted.rows[0];
+      res.json({
+        extra: {
+          id: row.id,
+          name: row.name,
+          counts: { sds: 0, pds: 0, eds: 0 },
+        },
+      });
+    } catch (error) {
+      console.error("safety extra create:", error);
+      res.status(500).json({ error: "Failed to add item" });
+    }
+  });
+
+  app.delete("/api/safety-docs/extras/:id", async (req, res) => {
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const id = Number(req.params.id);
+      if (!id) return res.status(400).json({ error: "Item is required" });
+      const itemId = docs.extraDocItemId(id);
+      await pool.query(`DELETE FROM item_docs WHERE item_id = $1`, [itemId]);
+      await pool.query(`DELETE FROM data_sheet_extras WHERE id = $1`, [id]);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("safety extra delete:", error);
+      res.status(500).json({ error: "Failed to delete item" });
     }
   });
 
@@ -109,7 +200,7 @@ function registerItemDocRoutes(app, db) {
       const itemId = String(req.params.itemId || "").trim();
       const kind = docs.normalizeKind(req.body?.kind);
       if (!itemId) return res.status(400).json({ error: "Item is required" });
-      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or TDS." });
+      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or EDS." });
       const decoded = decodeUpload(req.body || {});
       if (decoded.error) return res.status(400).json({ error: decoded.error });
       const mime = docs.mimeFromName(decoded.filename);
@@ -191,7 +282,7 @@ function registerItemDocRoutes(app, db) {
       const itemType = docs.normalizeType(req.params.itemType);
       const kind = docs.normalizeKind(req.body?.kind);
       if (!itemType) return res.status(400).json({ error: "Choose an item type." });
-      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or TDS." });
+      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or EDS." });
       const decoded = decodeUpload(req.body || {});
       if (decoded.error) return res.status(400).json({ error: decoded.error });
       const mime = docs.mimeFromName(decoded.filename);
@@ -260,7 +351,7 @@ function registerItemDocRoutes(app, db) {
       const aliases = docs.typeAliases(itemType);
       const kind = docs.normalizeKind(req.query.kind);
       if (!itemType) return res.status(400).json({ error: "Choose an item type." });
-      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or TDS." });
+      if (!kind) return res.status(400).json({ error: "Choose SDS, PDS, or EDS." });
       const fileId = req.query.fileId != null ? Number(req.query.fileId) : 0;
 
       if (fileId > 0) {

@@ -23,14 +23,11 @@ import {
   SAFETY_DOC_TYPE_OPTIONS,
   getMaterialTypeLabel,
 } from "../utils/materialTypes";
+import { SAFETY_DOC_KINDS } from "../utils/safetyDocKinds";
 import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import { radius, space } from "../theme/tokens";
 
-const KINDS = [
-  { key: "pds", label: "PDS" },
-  { key: "sds", label: "SDS" },
-  { key: "tds", label: "TDS" },
-];
+const KINDS = SAFETY_DOC_KINDS;
 
 function filesForKind(files, kind) {
   return (files || []).filter((f) => String(f.kind) === kind);

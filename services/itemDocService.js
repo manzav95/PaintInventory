@@ -55,6 +55,17 @@ const ItemDocService = {
   summary() {
     return _fetch("/api/safety-docs/summary");
   },
+  createExtra(name) {
+    return _fetch("/api/safety-docs/extras", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  },
+  deleteExtra(id) {
+    return _fetch(`/api/safety-docs/extras/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
   listItem(itemId) {
     return _fetch(`/api/safety-docs/items/${encodeURIComponent(itemId)}`);
   },

@@ -1,6 +1,6 @@
 "use strict";
 
-const ALLOWED_KINDS = new Set(["sds", "pds", "tds"]);
+const ALLOWED_KINDS = new Set(["sds", "pds", "eds"]);
 const ALLOWED_TYPES = new Set([
   "paint",
   "primer",
@@ -56,13 +56,28 @@ async function ensureItemDocTables(pool) {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_type_docs_type_kind ON type_docs (item_type, kind)`,
   );
+  await pool.query(`UPDATE item_docs SET kind = 'eds' WHERE kind = 'tds'`);
+  await pool.query(`UPDATE type_docs SET kind = 'eds' WHERE kind = 'tds'`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS data_sheet_extras (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 }
 
 function normalizeKind(kind) {
-  const k = String(kind || "")
+  let k = String(kind || "")
     .trim()
     .toLowerCase();
+  if (k === "tds") k = "eds";
   return ALLOWED_KINDS.has(k) ? k : "";
+}
+
+function extraDocItemId(id) {
+  return `extra-${Number(id)}`;
 }
 
 function normalizeType(type) {
@@ -138,4 +153,5 @@ module.exports = {
   extFromFilename,
   mimeFromName,
   publicDoc,
+  extraDocItemId,
 };

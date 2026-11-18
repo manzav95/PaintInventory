@@ -2185,6 +2185,7 @@ export default function App() {
         return (
           <DataSheetsScreen
             isAdmin={isAdmin}
+            inventory={inventory}
             embeddedInShell={embeddedInShell}
             onBack={() => navigateTo(isSales ? 'list' : 'home')}
           />

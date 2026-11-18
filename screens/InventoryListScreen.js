@@ -18,6 +18,7 @@ import ToolbarCard from "../components/ToolbarCard";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import PullToRefresh from "../components/PullToRefresh";
 import ItemActionPopover from "../components/ItemActionPopover";
+import ItemDataSheetsPopover from "../components/ItemDataSheetsPopover";
 import {
   formatItemLocationDisplay,
   customStackGroupLetter,
@@ -283,6 +284,7 @@ export default function InventoryListScreen({
   /** Mobile: item keys that currently show their color_label instead of name. */
   const [revealedColorLabels, setRevealedColorLabels] = useState(() => new Set());
   const [itemActionMenu, setItemActionMenu] = useState(null); // { item, pageX, pageY }
+  const [sheetsMenu, setSheetsMenu] = useState(null); // { item, pageX, pageY }
   const [copiedItemId, setCopiedItemId] = useState(null);
   const copiedItemIdTimerRef = useRef(null);
   const [viewMode, setViewMode] = useState(initialViewMode || "inventory"); // 'inventory' | 'colorBook' — default to standard inventory
@@ -428,11 +430,20 @@ export default function InventoryListScreen({
 
   const openItemActionMenu = (item, event) => {
     const anchor = pressAnchorFromEvent(event, width);
+    setSheetsMenu(null);
     setItemActionMenu({
       item,
       showRelatedJobs: isCustomInventoryView,
       ...anchor,
     });
+  };
+
+  const openSheetsMenu = (item, event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const anchor = pressAnchorFromEvent(event, width);
+    setItemActionMenu(null);
+    setSheetsMenu({ item, ...anchor });
   };
 
   const handleItemActivate = (item, event) => {
@@ -1249,6 +1260,8 @@ export default function InventoryListScreen({
           desktop ? styles.colorBookCardWrapDesktop : styles.colorBookCardWrap
         }
         onPress={() => setColorPreviewItem(item)}
+        onLongPress={(e) => openSheetsMenu(item, e)}
+        delayLongPress={400}
       >
         <View style={[styles.colorBookCard, { backgroundColor: bgHex }]} />
         <Text
@@ -1726,6 +1739,15 @@ export default function InventoryListScreen({
     />
   );
 
+  const itemDataSheetsPopover = (
+    <ItemDataSheetsPopover
+      visible={!!sheetsMenu?.item}
+      anchor={sheetsMenu || { pageX: 0, pageY: 0 }}
+      item={sheetsMenu?.item}
+      onClose={() => setSheetsMenu(null)}
+    />
+  );
+
   const renderItem = ({ item, index }) => {
     const isLowStock =
       !isSales &&
@@ -1809,7 +1831,11 @@ export default function InventoryListScreen({
         <Card.Content style={styles.itemCardContent}>
           <Pressable
             style={styles.itemCardPressable}
+            accessibilityRole="button"
+            accessibilityLabel={item.name || item.id || "Inventory item"}
             onPress={(e) => handleItemActivate(item, e)}
+            onLongPress={(e) => openSheetsMenu(item, e)}
+            delayLongPress={400}
           >
             <View style={styles.itemHeader}>
               <View style={styles.itemNameBlock}>
@@ -1836,6 +1862,8 @@ export default function InventoryListScreen({
                         }
                         handleItemActivate(item, e);
                       }}
+                      onLongPress={(e) => openSheetsMenu(item, e)}
+                      delayLongPress={400}
                       hitSlop={4}
                       style={styles.itemNameHit}
                     >
@@ -2845,6 +2873,8 @@ export default function InventoryListScreen({
                                     ) : null}
                                     <DataTable.Row
                                       onPress={(e) => handleItemActivate(item, e)}
+                                      onLongPress={(e) => openSheetsMenu(item, e)}
+                                      delayLongPress={400}
                                       style={
                                         isLowStock
                                           ? {
@@ -3203,6 +3233,7 @@ export default function InventoryListScreen({
           )}
           {receivePoModal}
           {itemActionPopover}
+          {itemDataSheetsPopover}
           <ColorPreviewModal />
           {inventoryStatModals}
         </View>
@@ -3742,6 +3773,7 @@ export default function InventoryListScreen({
         </View>
         {receivePoModal}
         {itemActionPopover}
+        {itemDataSheetsPopover}
         <ColorPreviewModal />
         {inventoryStatModals}
       </>
@@ -3985,6 +4017,7 @@ export default function InventoryListScreen({
       </View>
       {receivePoModal}
       {itemActionPopover}
+      {itemDataSheetsPopover}
       <ColorPreviewModal />
       {inventoryStatModals}
     </View>

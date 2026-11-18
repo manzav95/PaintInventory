@@ -5,10 +5,14 @@ import {
   Pressable,
   Modal,
   Platform,
+  useWindowDimensions,
 } from "react-native";
 import { Text, Avatar, useTheme } from "react-native-paper";
 import { colors, space, radius } from "../theme/tokens";
 import { displayUserName } from "../utils/displayUserName";
+import { popupSurfaceColor } from "../utils/themeColors";
+
+const PANEL_WIDTH = 240;
 
 /** One letter for a single name; first + last initials when there are two+ words. */
 function initialsFromName(name) {
@@ -39,8 +43,13 @@ export default function UserMenuAvatar({
   size = 28,
 }) {
   const theme = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [panelPos, setPanelPos] = useState({
+    top: 48,
+    left: 8,
+    caretLeft: PANEL_WIDTH - 28,
+  });
   const btnRef = useRef(null);
 
   const displayName = displayUserName(userName, "User");
@@ -60,22 +69,38 @@ export default function UserMenuAvatar({
   }, [open]);
 
   const measureAndOpen = () => {
+    const place = (x, y, w, h) => {
+      const gap = 8;
+      const caretSize = 10;
+      const margin = 8;
+      const top = Math.max(margin, y + h + gap);
+      const preferredLeft = x + w - PANEL_WIDTH;
+      const left = Math.max(
+        margin,
+        Math.min(preferredLeft, windowWidth - PANEL_WIDTH - margin),
+      );
+      const avatarCenterX = x + w / 2;
+      const caretLeft = Math.max(
+        14,
+        Math.min(
+          avatarCenterX - left - caretSize,
+          PANEL_WIDTH - caretSize * 2 - 14,
+        ),
+      );
+      setPanelPos({ top, left, caretLeft });
+      setOpen(true);
+    };
     const node = btnRef.current;
     if (node && typeof node.measureInWindow === "function") {
       node.measureInWindow((x, y, w, h) => {
-        setAnchor({ x, y, w, h });
-        setOpen(true);
+        place(x, y, w, h);
       });
-    } else {
-      setOpen(true);
+      return;
     }
+    place(windowWidth - 48, 8, 40, 40);
   };
 
-  const menuTop = anchor.y + anchor.h + 6;
-  const menuRight =
-    Platform.OS === "web" && typeof window !== "undefined"
-      ? Math.max(8, window.innerWidth - (anchor.x + anchor.w))
-      : 12;
+  const panelFill = popupSurfaceColor(theme);
 
   return (
     <View ref={btnRef} collapsable={false} style={styles.avatarWrap}>
@@ -107,21 +132,50 @@ export default function UserMenuAvatar({
         animationType="none"
         onRequestClose={() => setOpen(false)}
       >
-        <Pressable style={styles.scrim} onPress={() => setOpen(false)}>
+        <View style={styles.modalRoot}>
+          <Pressable
+            style={styles.scrim}
+            onPress={() => setOpen(false)}
+            accessibilityLabel="Dismiss"
+          />
           <View
             style={[
-              styles.menu,
+              styles.panelAnchor,
               {
-                top: menuTop,
-                right: menuRight,
-                backgroundColor: theme.dark
-                  ? colors.dark.elevated
-                  : theme.colors.surfaceContainerHighest,
-                borderColor: theme.colors.outlineVariant,
+                top: panelPos.top,
+                left: panelPos.left,
+                width: PANEL_WIDTH,
+                pointerEvents: "box-none",
               },
             ]}
-            onStartShouldSetResponder={() => true}
           >
+            <View
+              style={[
+                styles.caret,
+                {
+                  left: panelPos.caretLeft,
+                  borderBottomColor: theme.colors.outlineVariant,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.caretInner,
+                {
+                  left: panelPos.caretLeft + 1,
+                  borderBottomColor: panelFill,
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.menu,
+                {
+                  backgroundColor: panelFill,
+                  borderColor: theme.colors.outlineVariant,
+                },
+              ]}
+            >
             <View
               style={[
                 styles.userHeader,
@@ -252,8 +306,9 @@ export default function UserMenuAvatar({
                 Sign out
               </Text>
             </Pressable>
+            </View>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     </View>
   );
@@ -272,12 +327,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  scrim: {
+  modalRoot: {
     flex: 1,
   },
-  menu: {
+  scrim: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  panelAnchor: {
     position: "absolute",
-    minWidth: 200,
+  },
+  caret: {
+    position: "absolute",
+    top: -9,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 9,
+    borderRightWidth: 9,
+    borderBottomWidth: 9,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 2,
+  },
+  caretInner: {
+    position: "absolute",
+    top: -7,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    zIndex: 3,
+  },
+  menu: {
+    width: "100%",
     borderRadius: radius.md,
     borderWidth: 1,
     overflow: "hidden",

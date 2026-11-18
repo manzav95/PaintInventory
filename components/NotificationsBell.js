@@ -69,6 +69,7 @@ export default function NotificationsBell({
   const [wasteUnreadCount, setWasteUnreadCount] = useState(0);
   const [orderCountsLoading, setOrderCountsLoading] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
+  const fetchedKeyRef = useRef("");
 
   const refreshDismissed = useCallback(async () => {
     const ids = await getDismissedIdsToday(userName);
@@ -76,17 +77,23 @@ export default function NotificationsBell({
   }, [userName]);
 
   useEffect(() => {
-    refreshDismissed();
-  }, [refreshDismissed, visible, userName]);
+    fetchedKeyRef.current = "";
+  }, [userName, isAdmin]);
 
   useEffect(() => {
+    if (!visible) return;
+    const key = `${userName}|${isAdmin ? "admin" : "user"}`;
+    if (fetchedKeyRef.current === key) return;
+    let cancelled = false;
+    refreshDismissed();
     if (!isAdmin) {
       setBackOrderCount(0);
       setLateOrderCount(0);
       setWasteUnreadCount(0);
+      setOrderCountsLoading(false);
+      fetchedKeyRef.current = key;
       return;
     }
-    let cancelled = false;
     setOrderCountsLoading(true);
     Promise.all([
       OrderService.getBackOrderCount().catch(() => 0),
@@ -98,6 +105,7 @@ export default function NotificationsBell({
           setBackOrderCount(back);
           setLateOrderCount(late);
           setWasteUnreadCount(waste);
+          fetchedKeyRef.current = key;
         }
       })
       .finally(() => {
@@ -106,7 +114,7 @@ export default function NotificationsBell({
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, visible]);
+  }, [visible, isAdmin, userName, refreshDismissed]);
 
   const recycleDueCount = useMemo(
     () =>
@@ -368,7 +376,7 @@ export default function NotificationsBell({
       <Modal
         visible={visible}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setVisible(false)}
       >
         <View style={styles.modalRoot}>
