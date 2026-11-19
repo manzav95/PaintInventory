@@ -1,14 +1,13 @@
 import React, { useState } from "react";
 import {
   Image,
-  Modal,
   Platform,
-  Pressable,
   StyleSheet,
   View,
 } from "react-native";
 import { IconButton, Text, useTheme } from "react-native-paper";
 import ScrollFrame from "./ScrollFrame";
+import AppSheet from "./ui/AppSheet";
 
 /**
  * Help content shape:
@@ -42,33 +41,12 @@ export default function FormHelp({ content, style, size = 22, accessibilityLabel
         iconColor={theme.colors.primary}
         style={[styles.iconBtn, style]}
       />
-      <Modal
+      <AppSheet
         visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
+        onDismiss={() => setOpen(false)}
+        title={content.title}
+        size="large"
       >
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <Pressable
-            style={[
-              styles.sheet,
-              { backgroundColor: theme.colors.surface },
-            ]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.sheetHeader}>
-              <Text
-                style={[styles.sheetTitle, { color: theme.colors.onSurface }]}
-              >
-                {content.title}
-              </Text>
-              <IconButton
-                icon="close"
-                size={20}
-                onPress={() => setOpen(false)}
-                accessibilityLabel="Close help"
-              />
-            </View>
             <ScrollFrame
               maxHeight={520}
               contentContainerStyle={styles.sheetBody}
@@ -142,9 +120,7 @@ export default function FormHelp({ content, style, size = 22, accessibilityLabel
                 </View>
               ))}
             </ScrollFrame>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </AppSheet>
     </>
   );
 }

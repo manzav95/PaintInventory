@@ -11,6 +11,9 @@ import {
 } from "react-native";
 import { Text, useTheme, ActivityIndicator, Menu } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
+import SwipeableRow from "./ui/SwipeableRow";
+import { useAppLayout } from "../utils/layout";
 import ItemDocService from "../services/itemDocService";
 import pickFiles, { filesFromFileList } from "../utils/pickFiles";
 import downloadBlob, {
@@ -133,9 +136,11 @@ export default function SafetyDocsPanel({
   hideTitle = false,
   hideTypePicker = false,
   kindCounts = null,
+  readOnly = false,
   onChanged,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const isType = scope === "type";
   const [type, setType] = useState(itemType || "paint");
   const [files, setFiles] = useState([]);
@@ -264,18 +269,6 @@ export default function SafetyDocsPanel({
       await downloadBlob(loaded.blob, loaded.filename);
     });
 
-  const downloadOne = (file) =>
-    runKind(file.kind, async () => {
-      const loaded = await fetchOne(file);
-      await downloadBlob(loaded.blob, loaded.filename);
-    });
-
-  const downloadAll = (kind) =>
-    runKind(kind, async () => {
-      const loaded = await ItemDocService.downloadTypeKind(type, kind);
-      await downloadBlob(loaded.blob, loaded.filename);
-    });
-
   const removeFile = (file) =>
     runKind(file.kind, async () => {
       const ok = await confirmAction(
@@ -323,7 +316,35 @@ export default function SafetyDocsPanel({
       });
     });
 
-  const typeLabel = getMaterialTypeLabel(type) || "Type";
+  const canManage = isAdmin && !readOnly && (isType || !!itemId);
+
+  const previewFrame = (
+    <View style={styles.previewFill}>
+      {preview?.mime?.startsWith("image/") ? (
+        <Image
+          source={{ uri: preview.url }}
+          style={styles.previewImage}
+          resizeMode="contain"
+        />
+      ) : Platform.OS === "web" && preview?.url ? (
+        <iframe
+          src={preview.url}
+          title={preview.filename}
+          style={{
+            flex: 1,
+            width: "100%",
+            height: "100%",
+            border: "none",
+            background: "#fff",
+          }}
+        />
+      ) : null}
+    </View>
+  );
+
+  if (readOnly && !loading && !(files || []).length) {
+    return null;
+  }
 
   return (
     <View
@@ -357,16 +378,11 @@ export default function SafetyDocsPanel({
         KINDS.map((meta) => {
           const list = filesForKind(files, meta.key);
           const busy = busyKind === meta.key;
-          const extraCount = Number(kindCounts?.[meta.key] || 0);
-          const canDownloadKind = list.length > 0 || extraCount > 0;
           const dropping = hoverKind === meta.key;
-          return (
-            <WebDropZone
-              key={meta.key}
-              enabled={isAdmin && isType}
-              onHover={(on) => setHoverKind(on ? meta.key : "")}
-              onFiles={(rows) => openBatch(meta.key, rows)}
-            >
+          const showDrop = canManage;
+          if (readOnly && list.length === 0) return null;
+          if (!showDrop && list.length === 0) return null;
+          const kindCard = (
             <View
               style={[
                 styles.kindCard,
@@ -375,107 +391,147 @@ export default function SafetyDocsPanel({
                   borderColor: dropping
                     ? theme.colors.primary
                     : theme.colors.outlineVariant,
-                  borderStyle: dropping ? "dashed" : "solid",
+                  borderStyle: dropping || (showDrop && list.length === 0)
+                    ? "dashed"
+                    : "solid",
                 },
               ]}
             >
-              <View style={styles.kindHeader}>
-                <Text
-                  style={[styles.kindTitle, { color: theme.colors.onSurface }]}
-                >
-                  {meta.label}
-                </Text>
-                <View style={styles.kindActions}>
-                  {isType ? (
-                    <AppButton
-                      mode="outlined"
-                      compact
-                      icon="download"
-                      loading={busy}
-                      disabled={busy || !canDownloadKind}
-                      onPress={() => downloadAll(meta.key)}
-                    >
-                      {`${typeLabel} ${meta.label}`}
-                    </AppButton>
-                  ) : null}
-                  {isAdmin ? (
-                    <AppButton
-                      mode="contained"
-                      compact
-                      icon="upload"
-                      loading={busy}
-                      disabled={busy || (!isType && !itemId)}
-                      onPress={() => upload(meta.key)}
-                    >
-                      Upload
-                    </AppButton>
-                  ) : null}
-                </View>
-              </View>
+              <Text
+                style={[styles.kindTitle, { color: theme.colors.onSurface }]}
+              >
+                {meta.label}
+              </Text>
               {list.length === 0 ? (
-                <Text
-                  style={[
-                    styles.empty,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
+                <Pressable
+                  onPress={() => !busy && upload(meta.key)}
+                  disabled={busy}
+                  style={styles.dropHit}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add ${meta.label}`}
                 >
-                  {extraCount > 0
-                    ? "No shared file for this type. Download still includes item-level sheets."
-                    : isAdmin && isType
-                      ? "None — drop files here or upload"
-                      : "None"}
-                </Text>
+                  <Text
+                    style={[
+                      styles.empty,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    Drop or tap to add {meta.label}
+                  </Text>
+                </Pressable>
               ) : (
-                list.map((file) => (
-                  <View key={file.id} style={styles.fileRow}>
+                <>
+                  {list.map((file) => {
+                    const row = (
+                      <View style={styles.fileRow}>
+                        <Pressable
+                          onPress={() => viewOne(file)}
+                          disabled={busy}
+                          style={styles.fileNamePress}
+                        >
+                          <Text
+                            style={[
+                              styles.fileName,
+                              { color: theme.colors.onSurface },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {file.filename}
+                          </Text>
+                        </Pressable>
+                        {!isMobilePortrait && canManage ? (
+                          <AppButton
+                            mode="text"
+                            compact
+                            textColor={theme.colors.error}
+                            onPress={() => removeFile(file)}
+                            disabled={busy}
+                          >
+                            Delete
+                          </AppButton>
+                        ) : null}
+                      </View>
+                    );
+                    if (!isMobilePortrait || readOnly) {
+                      return <View key={file.id}>{row}</View>;
+                    }
+                    return (
+                      <SwipeableRow
+                        key={file.id}
+                        style={styles.swipeFile}
+                        leftAction={
+                          canManage
+                            ? {
+                                key: "delete",
+                                label: "Delete",
+                                tone: "danger",
+                                onPress: () => removeFile(file),
+                              }
+                            : null
+                        }
+                        rightAction={{
+                          key: "view",
+                          label: "View",
+                          tone: "gold",
+                          onPress: () => viewOne(file),
+                        }}
+                      >
+                        {row}
+                      </SwipeableRow>
+                    );
+                  })}
+                  {showDrop ? (
                     <Pressable
-                      onPress={() => viewOne(file)}
+                      onPress={() => !busy && upload(meta.key)}
                       disabled={busy}
-                      style={styles.fileNamePress}
+                      style={styles.dropHitSlim}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add ${meta.label}`}
                     >
                       <Text
                         style={[
-                          styles.fileName,
-                          { color: theme.colors.onSurface },
+                          styles.empty,
+                          { color: theme.colors.onSurfaceVariant },
                         ]}
-                        numberOfLines={1}
                       >
-                        {file.filename}
+                        Drop or tap to add
                       </Text>
                     </Pressable>
-                    <View style={styles.fileActions}>
-                      <AppButton
-                        mode="text"
-                        compact
-                        onPress={() => viewOne(file)}
-                        disabled={busy}
-                      >
-                        View
-                      </AppButton>
-                      <AppButton
-                        mode="text"
-                        compact
-                        onPress={() => downloadOne(file)}
-                        disabled={busy}
-                      >
-                        Download
-                      </AppButton>
-                      {isAdmin ? (
-                        <AppButton
-                          mode="text"
-                          compact
-                          textColor={theme.colors.error}
-                          onPress={() => removeFile(file)}
-                          disabled={busy}
-                        >
-                          Delete
-                        </AppButton>
-                      ) : null}
-                    </View>
-                  </View>
-                ))
+                  ) : null}
+                </>
               )}
             </View>
+          );
+          return (
+            <WebDropZone
+              key={meta.key}
+              enabled={showDrop}
+              onHover={(on) => setHoverKind(on ? meta.key : "")}
+              onFiles={(rows) => {
+                if (isType && rows.length > 1) {
+                  openBatch(meta.key, rows);
+                  return;
+                }
+                runKind(meta.key, async () => {
+                  for (const file of rows) {
+                    if (isType) {
+                      await ItemDocService.uploadType(type, {
+                        kind: meta.key,
+                        ...file,
+                      });
+                    } else {
+                      await ItemDocService.uploadItem(itemId, {
+                        kind: meta.key,
+                        ...file,
+                      });
+                    }
+                  }
+                  await load();
+                  onChanged?.();
+                });
+              }}
+            >
+              {kindCard}
             </WebDropZone>
           );
         })
@@ -608,64 +664,71 @@ export default function SafetyDocsPanel({
         </Pressable>
       </Modal>
 
-      <Modal
-        visible={!!preview}
-        animationType="fade"
-        onRequestClose={closePreview}
-      >
-        <View
-          style={[
-            styles.previewRoot,
-            { backgroundColor: theme.colors.background },
-          ]}
+      {isMobilePortrait ? (
+        <AppSheet
+          visible={!!preview}
+          onDismiss={closePreview}
+          title={preview?.filename || "Data sheet"}
+          snap
+          scroll={false}
+          footer={
+            preview?.blob ? (
+              <AppButton
+                mode="contained"
+                onPress={() =>
+                  downloadBlob(preview.blob, preview.filename)
+                }
+              >
+                Download
+              </AppButton>
+            ) : null
+          }
+        >
+          {previewFrame}
+        </AppSheet>
+      ) : (
+        <Modal
+          visible={!!preview}
+          animationType="fade"
+          onRequestClose={closePreview}
         >
           <View
             style={[
-              styles.previewBar,
-              { backgroundColor: popupSurfaceColor(theme) },
+              styles.previewRoot,
+              { backgroundColor: theme.colors.background },
             ]}
           >
-            <Text
-              style={[styles.previewTitle, { color: theme.colors.onSurface }]}
-              numberOfLines={1}
+            <View
+              style={[
+                styles.previewBar,
+                { backgroundColor: popupSurfaceColor(theme) },
+              ]}
             >
-              {preview?.filename || "Data sheet"}
-            </Text>
-            <AppButton
-              mode="outlined"
-              compact
-              onPress={() => {
-                if (preview?.blob) {
-                  downloadBlob(preview.blob, preview.filename);
-                }
-              }}
-            >
-              Download
-            </AppButton>
-            <AppButton mode="contained" compact onPress={closePreview}>
-              Close
-            </AppButton>
+              <Text
+                style={[styles.previewTitle, { color: theme.colors.onSurface }]}
+                numberOfLines={1}
+              >
+                {preview?.filename || "Data sheet"}
+              </Text>
+              {preview?.blob ? (
+                <AppButton
+                  mode="outlined"
+                  compact
+                  onPress={() =>
+                    downloadBlob(preview.blob, preview.filename)
+                  }
+                >
+                  Download
+                </AppButton>
+              ) : null}
+              <AppButton mode="contained" compact onPress={closePreview}>
+                Close
+              </AppButton>
+            </View>
+            {previewFrame}
           </View>
-          {preview?.mime?.startsWith("image/") ? (
-            <Image
-              source={{ uri: preview.url }}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
-          ) : Platform.OS === "web" && preview?.url ? (
-            <iframe
-              src={preview.url}
-              title={preview.filename}
-              style={{
-                flex: 1,
-                width: "100%",
-                border: "none",
-                background: "#fff",
-              }}
-            />
-          ) : null}
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -733,6 +796,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
+    minHeight: 48,
+    paddingVertical: 6,
   },
   fileName: {
     flex: 1,
@@ -743,6 +808,24 @@ const styles = StyleSheet.create({
   fileActions: {
     flexDirection: "row",
     flexShrink: 0,
+  },
+  dropHit: {
+    minHeight: 72,
+    justifyContent: "center",
+    paddingVertical: space[3],
+  },
+  dropHitSlim: {
+    minHeight: 40,
+    justifyContent: "center",
+    paddingVertical: space[2],
+  },
+  swipeFile: {
+    marginTop: 4,
+  },
+  previewFill: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
   },
   previewRoot: {
     flex: 1,

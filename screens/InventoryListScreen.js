@@ -12,6 +12,10 @@ import {
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import ReceivePoModal from "../components/ReceivePoModal";
+import ColorPreviewOverlay, {
+  measureColorOrigin,
+} from "../components/ColorPreviewOverlay";
+import StainGrain, { isStainType } from "../components/ui/StainGrain";
 import PageHeader from "../components/PageHeader";
 import MetricStrip from "../components/MetricStrip";
 import ToolbarCard from "../components/ToolbarCard";
@@ -19,6 +23,7 @@ import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import PullToRefresh from "../components/PullToRefresh";
 import ItemActionPopover from "../components/ItemActionPopover";
 import ItemDataSheetsPopover from "../components/ItemDataSheetsPopover";
+import SwipeableRow from "../components/ui/SwipeableRow";
 import {
   formatItemLocationDisplay,
   customStackGroupLetter,
@@ -48,7 +53,7 @@ import {
 } from "../utils/materialTypes";
 import showToast from "../utils/showToast";
 import { displayUserName } from "../utils/displayUserName";
-import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
+import { nestedSurfaceColor } from "../utils/themeColors";
 import ScrollFrame, { EdgeFade } from "../components/ScrollFrame";
 import {
   findExactInventoryScanMatch,
@@ -280,7 +285,52 @@ export default function InventoryListScreen({
   const [staleListSearch, setStaleListSearch] = useState("");
   const [totalValueListOpen, setTotalValueListOpen] = useState(false);
   const [recycleDueOnly, setRecycleDueOnly] = useState(false);
-  const [colorPreviewItem, setColorPreviewItem] = useState(null);
+  const [colorPreview, setColorPreview] = useState(null);
+  const colorChipRefs = useRef(new Map());
+  const bindColorChipRef = (id) => (node) => {
+    const key = String(id);
+    if (node) colorChipRefs.current.set(key, node);
+    else colorChipRefs.current.delete(key);
+  };
+  const openColorPreview = (item, e) => {
+    const previewItem = {
+      ...item,
+      hex_color: getValidHex(item.hex_color) || item.hex_color,
+    };
+    let origin = null;
+    if (Platform.OS === "web") {
+      const t = e?.nativeEvent?.target || e?.target;
+      const el = t?.closest ? t : t?.parentElement;
+      const chip =
+        el && typeof el.closest === "function"
+          ? el.closest("[data-color-chip]")
+          : el;
+      origin =
+        measureColorOrigin(chip) ||
+        measureColorOrigin(colorChipRefs.current.get(String(item.id)));
+      setColorPreview({ item: previewItem, origin });
+      return;
+    }
+    const node = colorChipRefs.current.get(String(item.id));
+    if (node && typeof node.measureInWindow === "function") {
+      node.measureInWindow((x, y, width, height) => {
+        setColorPreview({
+          item: previewItem,
+          origin:
+            width > 1 && height > 1
+              ? { x, y, width, height, radius: 8 }
+              : null,
+        });
+      });
+      return;
+    }
+    setColorPreview({
+      item: previewItem,
+      origin: measureColorOrigin(node),
+    });
+  };
+  const previewChipId =
+    colorPreview?.item?.id != null ? String(colorPreview.item.id) : null;
   /** Mobile: item keys that currently show their color_label instead of name. */
   const [revealedColorLabels, setRevealedColorLabels] = useState(() => new Set());
   const [itemActionMenu, setItemActionMenu] = useState(null); // { item, pageX, pageY }
@@ -445,6 +495,25 @@ export default function InventoryListScreen({
     setItemActionMenu(null);
     setSheetsMenu({ item, ...anchor });
   };
+
+  const inventorySwipeLeft = (item) =>
+    isAdmin
+      ? {
+          key: "edit",
+          label: "Edit",
+          onPress: () => {
+            if (onEditItem) onEditItem(item);
+            else onItemSelect?.(item);
+          },
+        }
+      : null;
+
+  const inventorySwipeRight = (item) => ({
+    key: "sheets",
+    label: "Sheets",
+    tone: "gold",
+    onPress: () => openSheetsMenu(item),
+  });
 
   const handleItemActivate = (item, event) => {
     if (isSales) return;
@@ -1250,20 +1319,33 @@ export default function InventoryListScreen({
       );
   }, [inventory, searchQuery, bookFilter, effectiveRecycleDue]);
 
-  const renderColorCard = ({ item, desktop = false }) => {
+  const renderColorCard = ({ item, desktop = false, list = false }) => {
     const bgHex = getValidHex(item.hex_color) || "#e0e0e0";
     const name = item.name || "Unnamed";
     const colorLabel = String(item.color_label || "").trim();
     return (
       <Pressable
         style={
-          desktop ? styles.colorBookCardWrapDesktop : styles.colorBookCardWrap
+          desktop
+            ? styles.colorBookCardWrapDesktop
+            : list
+              ? styles.colorBookCardWrapList
+              : styles.colorBookCardWrap
         }
-        onPress={() => setColorPreviewItem(item)}
-        onLongPress={(e) => openSheetsMenu(item, e)}
-        delayLongPress={400}
+        onPress={(e) => openColorPreview(item, e)}
       >
-        <View style={[styles.colorBookCard, { backgroundColor: bgHex }]} />
+        <View
+          ref={bindColorChipRef(item.id)}
+          collapsable={false}
+          dataSet={{ colorChip: "1" }}
+          style={[
+            styles.colorBookCard,
+            { backgroundColor: bgHex },
+            previewChipId === String(item.id) ? { opacity: 0 } : null,
+          ]}
+        >
+          {isStainType(item.type) ? <StainGrain /> : null}
+        </View>
         <Text
           style={[styles.colorBookCardName, { color: theme.colors.onSurface }]}
           numberOfLines={2}
@@ -1285,118 +1367,13 @@ export default function InventoryListScreen({
     );
   };
 
-  const ColorPreviewModal = () => {
-    const it = colorPreviewItem;
-    if (!it) return null;
-    const bgHex = getValidHex(it.hex_color) || "#e0e0e0";
-    const name = it.name || "Unnamed";
-    const colorLabel = String(it.color_label || "").trim();
-    const type = (it.type || "").toLowerCase();
-    const isStain = type === "stain" || type === "custom_stain";
-    return (
-      <Modal
-        visible={!!it}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setColorPreviewItem(null)}
-      >
-        <Pressable
-          style={styles.colorModalBackdrop}
-          onPress={() => setColorPreviewItem(null)}
-        >
-          <Pressable
-            style={[
-              styles.colorModalBox,
-              { backgroundColor: popupSurfaceColor(theme) },
-            ]}
-            onPress={(e) => e?.stopPropagation?.()}
-          >
-            <View style={styles.colorModalSwatchWrapper}>
-              <View
-                style={[styles.colorModalSwatch, { backgroundColor: bgHex }]}
-              />
-              {isStain && (
-                <View
-                  style={[
-                    styles.colorModalStainWatermark,
-                    { pointerEvents: "none" },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.colorModalStainWatermarkText,
-                      {
-                        color: theme.dark
-                          ? "rgba(255,255,255,0.25)"
-                          : "rgba(0,0,0,0.2)",
-                      },
-                    ]}
-                  >
-                    STAIN
-                  </Text>
-                </View>
-              )}
-            </View>
-            <View
-              style={[
-                styles.colorModalNameRow,
-                {
-                  backgroundColor: nestedSurfaceColor(theme),
-                  borderColor: theme.colors.outlineVariant,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.colorModalName,
-                  { color: theme.colors.onSurface },
-                ]}
-                numberOfLines={2}
-              >
-                {name}
-              </Text>
-              {colorLabel ? (
-                <Text
-                  style={[
-                    styles.colorModalColorLabel,
-                    { color: theme.colors.onSurface },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {colorLabel}
-                </Text>
-              ) : null}
-              {it.id ? (
-                <Text
-                  style={[
-                    styles.colorModalId,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                  numberOfLines={1}
-                >
-                  ID: {String(it.id)}
-                </Text>
-              ) : null}
-            </View>
-            <IconButton
-              icon="close"
-              size={24}
-              onPress={() => setColorPreviewItem(null)}
-              style={[
-                styles.colorModalClose,
-                {
-                  backgroundColor: theme.dark
-                    ? "rgba(255,255,255,0.15)"
-                    : "rgba(255,255,255,0.9)",
-                },
-              ]}
-              iconColor={theme.colors.onSurface}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
-    );
-  };
+  const ColorPreviewModal = () => (
+    <ColorPreviewOverlay
+      item={colorPreview?.item || null}
+      origin={colorPreview?.origin || null}
+      onClose={() => setColorPreview(null)}
+    />
+  );
 
   const inventoryStatModals = (
     <>
@@ -1698,6 +1675,17 @@ export default function InventoryListScreen({
         if (onViewItemHistory) onViewItemHistory(item);
         else onItemSelect?.(item);
       }}
+      onDataSheets={() => {
+        const item = itemActionMenu?.item;
+        const anchor = itemActionMenu || { pageX: 0, pageY: 0 };
+        setItemActionMenu(null);
+        if (!item) return;
+        setSheetsMenu({
+          item,
+          pageX: anchor.pageX,
+          pageY: anchor.pageY,
+        });
+      }}
       onEditDetails={() => {
         const item = itemActionMenu?.item;
         setItemActionMenu(null);
@@ -1821,9 +1809,15 @@ export default function InventoryListScreen({
             </Text>
           </View>
         ) : null}
+      <SwipeableRow
+        style={isStackGrouped ? styles.swipeInStack : styles.swipeCard}
+        leftAction={inventorySwipeLeft(item)}
+        rightAction={inventorySwipeRight(item)}
+      >
       <Card
         style={[
           styles.card,
+          styles.cardInSwipe,
           isStackGrouped && styles.cardInStack,
           lowStockCardStyle,
         ]}
@@ -1834,8 +1828,6 @@ export default function InventoryListScreen({
             accessibilityRole="button"
             accessibilityLabel={item.name || item.id || "Inventory item"}
             onPress={(e) => handleItemActivate(item, e)}
-            onLongPress={(e) => openSheetsMenu(item, e)}
-            delayLongPress={400}
           >
             <View style={styles.itemHeader}>
               <View style={styles.itemNameBlock}>
@@ -1862,8 +1854,6 @@ export default function InventoryListScreen({
                         }
                         handleItemActivate(item, e);
                       }}
-                      onLongPress={(e) => openSheetsMenu(item, e)}
-                      delayLongPress={400}
                       hitSlop={4}
                       style={styles.itemNameHit}
                     >
@@ -2029,19 +2019,31 @@ export default function InventoryListScreen({
               )}
               {getValidHex(item.hex_color) ? (
                 <Pressable
-                  onPress={() => setColorPreviewItem(item)}
-                  style={[
-                    styles.inventoryColorSwatch,
-                    {
-                      backgroundColor: getValidHex(item.hex_color),
-                    },
-                  ]}
-                />
+                  onPress={(e) => openColorPreview(item, e)}
+                  style={
+                    previewChipId === String(item.id) ? { opacity: 0 } : null
+                  }
+                >
+                  <View
+                    ref={bindColorChipRef(item.id)}
+                    collapsable={false}
+                    dataSet={{ colorChip: "1" }}
+                    style={[
+                      styles.inventoryColorSwatch,
+                      {
+                        backgroundColor: getValidHex(item.hex_color),
+                      },
+                    ]}
+                  >
+                    {isStainType(item.type) ? <StainGrain /> : null}
+                  </View>
+                </Pressable>
               ) : null}
             </View>
           </Pressable>
         </Card.Content>
       </Card>
+      </SwipeableRow>
       </View>
     );
   };
@@ -2097,7 +2099,7 @@ export default function InventoryListScreen({
             </View>
           )}
 
-          {/* Color Book view (desktop): 4-column grid */}
+          {/* Color Book view (desktop): 3-column grid */}
           {viewMode === "colorBook" ? (
             <View
               style={[styles.webContentCentered, styles.webContentCenteredFlex]}
@@ -2873,8 +2875,6 @@ export default function InventoryListScreen({
                                     ) : null}
                                     <DataTable.Row
                                       onPress={(e) => handleItemActivate(item, e)}
-                                      onLongPress={(e) => openSheetsMenu(item, e)}
-                                      delayLongPress={400}
                                       style={
                                         isLowStock
                                           ? {
@@ -3025,18 +3025,33 @@ export default function InventoryListScreen({
                                       >
                                         {getValidHex(item.hex_color) ? (
                                           <Pressable
-                                            onPress={() =>
-                                              setColorPreviewItem(item)
+                                            onPress={(e) =>
+                                              openColorPreview(item, e)
                                             }
-                                            style={[
-                                              styles.inventoryColorSwatch,
-                                              {
-                                                backgroundColor: getValidHex(
-                                                  item.hex_color,
-                                                ),
-                                              },
-                                            ]}
-                                          />
+                                            style={
+                                              previewChipId === String(item.id)
+                                                ? { opacity: 0 }
+                                                : null
+                                            }
+                                          >
+                                            <View
+                                              ref={bindColorChipRef(item.id)}
+                                              collapsable={false}
+                                              dataSet={{ colorChip: "1" }}
+                                              style={[
+                                                styles.inventoryColorSwatch,
+                                                {
+                                                  backgroundColor: getValidHex(
+                                                    item.hex_color,
+                                                  ),
+                                                },
+                                              ]}
+                                            >
+                                              {isStainType(item.type) ? (
+                                                <StainGrain />
+                                              ) : null}
+                                            </View>
+                                          </Pressable>
                                         ) : null}
                                       </DataTable.Cell>
                                       {!isSales ? (
@@ -3949,7 +3964,9 @@ export default function InventoryListScreen({
                     : colorBookItems
                 }
                 renderItem={
-                  viewMode === "inventory" ? renderItem : renderColorCard
+                  viewMode === "inventory"
+                    ? renderItem
+                    : ({ item }) => renderColorCard({ item, list: true })
                 }
                 keyExtractor={(item) =>
                   item.id?.toString() || String(Math.random())
@@ -4268,8 +4285,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     elevation: 2,
   },
-  cardInStack: {
+  swipeCard: {
+    marginBottom: 12,
+  },
+  swipeInStack: {
     marginBottom: 8,
+  },
+  cardInSwipe: {
+    marginBottom: 0,
+    marginHorizontal: 0,
+    elevation: 0,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  cardInStack: {
     elevation: 1,
   },
   stackGroupItem: {
@@ -4380,6 +4409,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.12)",
+    overflow: "hidden",
   },
   nonClickableCard: {
     // Remove any visual indication that it's clickable
@@ -4478,39 +4508,53 @@ const styles = StyleSheet.create({
   },
   colorModalBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(15, 22, 36, 0.36)",
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
+    ...(Platform.OS === "web"
+      ? {
+          backdropFilter: "blur(8px)",
+          WebkitBackdropFilter: "blur(8px)",
+        }
+      : {}),
   },
   colorModalBox: {
-    position: "relative",
-    width: "100%",
-    maxWidth: 320,
-    borderRadius: 12,
+    width: 280,
+    maxWidth: "86%",
+    aspectRatio: 1,
+    borderRadius: radius.lg,
     overflow: "hidden",
-    elevation: 8,
+    borderWidth: 1,
     ...(Platform.OS === "web"
-      ? { boxShadow: "0px 4px 16px rgba(0,0,0,0.3)" }
+      ? { boxShadow: "0 8px 24px rgba(0,0,0,0.35)" }
       : {
+          elevation: 8,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.3,
           shadowRadius: 8,
         }),
   },
-  colorModalSwatchWrapper: {
-    position: "relative",
-    width: "100%",
-    aspectRatio: 1.1,
-    minHeight: 280,
-  },
   colorModalSwatch: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
+    width: "100%",
+    position: "relative",
+  },
+  colorModalNameRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+  },
+  colorModalName: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  colorModalId: {
+    fontSize: 13,
+    fontFamily: fontFamily.mono,
+    marginTop: 4,
   },
   colorModalStainWatermark: {
     position: "absolute",
@@ -4527,31 +4571,11 @@ const styles = StyleSheet.create({
     letterSpacing: 55,
     transform: [{ rotate: "45deg" }],
   },
-  colorModalNameRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    paddingBottom: 12,
-    borderTopWidth: 1,
-  },
-  colorModalName: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  colorModalColorLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    marginTop: 4,
-  },
-  colorModalId: {
-    fontSize: 13,
-    fontFamily: fontFamily.mono,
-    marginTop: 4,
-  },
   colorModalClose: {
     position: "absolute",
     top: 8,
     right: 8,
-    backgroundColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "rgba(255,255,255,0.92)",
   },
   locationColCell: {
     flex: 1.1,
@@ -5022,12 +5046,17 @@ const styles = StyleSheet.create({
     width: Platform.OS === "web" ? "calc((100% - 12px) / 2)" : "47%",
     marginBottom: 4,
   },
+  colorBookCardWrapList: {
+    flex: 1,
+    minWidth: 0,
+  },
   colorBookCard: {
     width: "100%",
     aspectRatio: 1.3,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.08)",
+    overflow: "hidden",
   },
   colorBookCardName: {
     fontSize: 11,
@@ -5096,7 +5125,7 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   colorBookCardWrapDesktop: {
-    width: "calc((100% - 48px) / 4)",
+    width: "calc((100% - 32px) / 3)",
     marginBottom: 0,
   },
 });

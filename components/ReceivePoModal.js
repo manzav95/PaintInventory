@@ -15,11 +15,13 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
 import { allowsHalfGallon, sanitizeGallonInput } from "../utils/gallonQuantity";
 import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import ScrollFrame from "./ScrollFrame";
 import { colors, fontFamily, space, radius } from "../theme/tokens";
 import { AppBadge, AppEmptyState } from "./ui";
+import { useAppLayout } from "../utils/layout";
 import {
   CUSTOM_STACK_OPTIONS,
   isCustomType,
@@ -68,6 +70,36 @@ function sortLinesForReceive(lines) {
     const bId = String(b?.itemId ?? b?.item_id ?? "");
     return aId.localeCompare(bId);
   });
+}
+
+function formatGal(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x <= 0) return "0";
+  const rounded = Math.round(x * 100) / 100;
+  if (Number.isInteger(rounded)) return String(rounded);
+  return String(rounded);
+}
+
+function orderReceiveProgress(order) {
+  let ordered = 0;
+  let received = 0;
+  let openLines = 0;
+  const lines = order?.lines || [];
+  for (const line of lines) {
+    ordered += lineOrderedQty(line);
+    received += lineReceivedQty(line);
+    if (lineRemainingQty(line) > 0) openLines += 1;
+  }
+  const remaining = Math.max(0, ordered - received);
+  const ratio = ordered > 0 ? Math.min(1, received / ordered) : 0;
+  return {
+    ordered,
+    received,
+    remaining,
+    openLines,
+    totalLines: lines.length,
+    ratio,
+  };
 }
 
 const STATUS_COLORS = {
@@ -294,6 +326,88 @@ const ReceiveLineStackPicker = memo(function ReceiveLineStackPicker({
   );
 });
 
+function ReceivePoChrome({
+  sheet,
+  visible,
+  onClose,
+  receiveSubmitting,
+  title,
+  subtitle,
+  footer,
+  keyboard,
+  panelPos,
+  panelWidth,
+  panelHeight,
+  panelMaxHeight,
+  theme,
+  children,
+}) {
+  if (sheet) {
+    return (
+      <AppSheet
+        visible={visible}
+        onDismiss={() => {
+          if (!receiveSubmitting) onClose();
+        }}
+        title={title}
+        subtitle={subtitle}
+        size="large"
+        scroll={false}
+        keyboard={keyboard}
+        dismissable={!receiveSubmitting}
+        footer={footer}
+      >
+        {children}
+      </AppSheet>
+    );
+  }
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      presentationStyle="overFullScreen"
+      onRequestClose={() => !receiveSubmitting && onClose()}
+    >
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => !receiveSubmitting && onClose()}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View
+          style={[
+            styles.panelAnchor,
+            {
+              top: panelPos.top,
+              left: panelPos.left,
+              width: panelWidth,
+              height: panelHeight,
+              pointerEvents: "box-none",
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.panel,
+              {
+                height: panelHeight,
+                maxHeight: panelMaxHeight,
+                backgroundColor: popupSurfaceColor(theme),
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+          >
+            {children}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function ReceivePoModal({
   visible,
   actorName,
@@ -318,6 +432,7 @@ export default function ReceivePoModal({
   anchorRef,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const margin = 10;
   const panelWidth = Math.max(
@@ -375,7 +490,7 @@ export default function ReceivePoModal({
   );
 
   useEffect(() => {
-    if (!visible) return undefined;
+    if (!visible || isMobilePortrait) return undefined;
     const node = anchorRef?.current;
 
     const runMeasure = () => {
@@ -408,6 +523,7 @@ export default function ReceivePoModal({
     };
   }, [
     visible,
+    isMobilePortrait,
     step,
     placePanel,
     anchorRef,
@@ -440,99 +556,57 @@ export default function ReceivePoModal({
   };
 
   const panelMaxHeight = panelHeight;
-  const listScrollMax = Math.max(180, panelMaxHeight - 200);
-  const detailScrollMax = Math.max(200, panelMaxHeight - 220);
+  const listScrollMax = Math.max(
+    180,
+    isMobilePortrait
+      ? Math.round(windowHeight * 0.55)
+      : panelMaxHeight - 200,
+  );
+  const detailScrollMax = Math.max(
+    200,
+    isMobilePortrait
+      ? Math.round(windowHeight * 0.42)
+      : panelMaxHeight - 220,
+  );
 
-  const selectedTypeChips = selectedReceiveOrder
-    ? getOrderTypeChips(selectedReceiveOrder, getItemTypeForOrder, theme)
-    : [];
-  const selectedPrimaryTypeColor =
-    selectedTypeChips[0]?.color || colors.action.materialUsage;
+  const receiveProgress = selectedReceiveOrder
+    ? orderReceiveProgress(selectedReceiveOrder)
+    : null;
+  const sheetTitle =
+    step === "detail"
+      ? selectedReceiveOrder
+        ? `PO ${selectedReceiveOrder.po_number || selectedReceiveOrder.id}`
+        : "Receive lines"
+      : "Receive from PO";
+  const sheetSubtitle =
+    step === "list"
+      ? "Pick an open order to log delivery"
+      : expLabel
+        ? `Expected ~${expLabel}`
+        : "Gallons per line";
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      presentationStyle="overFullScreen"
-      onRequestClose={() => !receiveSubmitting && onClose()}
+  const listFooter =
+    receiveOrdersLoaded && openOrders.length === 0 ? (
+      <AppButton
+        mode="outlined"
+        onPress={() => onRefreshReceiveOrders?.(true)}
+        disabled={receiveOrdersLoading}
+      >
+        Reload
+      </AppButton>
+    ) : null;
+  const detailFooter = (
+    <AppButton
+      mode="contained"
+      onPress={onSubmit}
+      loading={receiveSubmitting}
+      disabled={receiveSubmitting}
     >
-      <View style={styles.modalRoot}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={() => !receiveSubmitting && onClose()}
-          accessibilityRole="button"
-          accessibilityLabel="Close"
-        />
-        <View
-          style={[
-            styles.panelAnchor,
-            {
-              top: panelPos.top,
-              left: panelPos.left,
-              width: panelWidth,
-              height: panelHeight,
-              pointerEvents: "box-none",
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.panel,
-              {
-                height: panelHeight,
-                maxHeight: panelMaxHeight,
-                backgroundColor: popupSurfaceColor(theme),
-                borderColor: theme.colors.outlineVariant,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.panelHeader,
-                {
-                  borderBottomColor: theme.colors.outlineVariant,
-                  backgroundColor: theme.dark
-                    ? "rgba(201, 151, 46, 0.12)"
-                    : "rgba(201, 151, 46, 0.1)",
-                },
-              ]}
-            >
-              <View
-                style={[
-                  styles.panelHeaderAccent,
-                  { backgroundColor: colors.brand.accent },
-                ]}
-              />
-              <View style={styles.panelHeaderText}>
-                <Text
-                  style={[styles.panelTitle, { color: theme.colors.onSurface }]}
-                >
-                  {step === "detail" ? "Receive lines" : "Receive from PO"}
-                </Text>
-                {step === "list" ? (
-                  <Text
-                    style={[
-                      styles.panelSubtitle,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Pick an open order to log delivery
-                  </Text>
-                ) : null}
-              </View>
-              <IconButton
-                icon="close"
-                size={18}
-                onPress={onClose}
-                disabled={receiveSubmitting}
-                style={styles.closeBtn}
-                accessibilityLabel="Close receive PO"
-              />
-            </View>
+      Receive
+    </AppButton>
+  );
 
-            {step === "list" && (
+  const listBody = (
               <>
                 <View style={styles.listIntro}>
                   <View
@@ -580,6 +654,7 @@ export default function ReceivePoModal({
                       title="No open purchase orders detected."
                       style={styles.emptyOrders}
                     />
+                    {!isMobilePortrait ? (
                     <View style={styles.actions}>
                       <AppButton
                         mode="outlined"
@@ -589,6 +664,7 @@ export default function ReceivePoModal({
                         Reload
                       </AppButton>
                     </View>
+                    ) : null}
                   </>
                 ) : (
                   <ScrollFrame
@@ -764,20 +840,21 @@ export default function ReceivePoModal({
                   </ScrollFrame>
                 )}
               </>
-            )}
+  );
 
-            {step === "detail" && selectedReceiveOrder && (
+  const detailBody = !selectedReceiveOrder ? null : (
               <>
+                {!isMobilePortrait ? (
                 <View
                   style={[
                     styles.detailHeader,
                     {
                       backgroundColor: theme.dark
-                        ? `${selectedPrimaryTypeColor}22`
-                        : `${selectedPrimaryTypeColor}14`,
+                        ? "rgba(201, 151, 46, 0.16)"
+                        : "rgba(201, 151, 46, 0.12)",
                       borderColor: theme.dark
-                        ? `${selectedPrimaryTypeColor}55`
-                        : `${selectedPrimaryTypeColor}44`,
+                        ? "rgba(201, 151, 46, 0.4)"
+                        : "rgba(201, 151, 46, 0.35)",
                     },
                   ]}
                 >
@@ -803,7 +880,7 @@ export default function ReceivePoModal({
                       <Text
                         style={[
                           styles.detailExpected,
-                          { color: selectedPrimaryTypeColor },
+                          { color: colors.brand.accentBright },
                         ]}
                         numberOfLines={1}
                       >
@@ -812,73 +889,83 @@ export default function ReceivePoModal({
                     ) : null}
                   </View>
                 </View>
-
-                {selectedTypeChips.length > 0 ? (
-                  <View style={styles.detailTypeChipRow}>
-                    {selectedTypeChips.map((chip) => (
-                      <View
-                        key={chip.key}
-                        style={[
-                          styles.typeChip,
-                          {
-                            borderColor: chip.color,
-                            backgroundColor: theme.dark
-                              ? `${chip.color}33`
-                              : `${chip.color}18`,
-                          },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.typeChipDot,
-                            { backgroundColor: chip.color },
-                          ]}
-                        />
-                        <Text
-                          style={[styles.typeChipText, { color: chip.color }]}
-                        >
-                          {chip.label}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
                 ) : null}
 
-                <View style={styles.statusLegend}>
-                  {(
-                    [
-                      ["pending", "Open"],
-                      ["partial", "Partial"],
-                      ["complete", "Done"],
-                    ]
-                  ).map(([key, label]) => (
+                {receiveProgress ? (
+                  <View style={styles.progressBlock}>
+                    <View style={styles.progressRow}>
+                      <View style={styles.progressHero}>
+                        <Text
+                          style={[
+                            styles.progressValue,
+                            { color: colors.brand.accentBright },
+                          ]}
+                        >
+                          {receiveProgress.remaining > 0
+                            ? `${formatGal(receiveProgress.remaining)} gal`
+                            : "All in"}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.progressLabel,
+                            { color: theme.colors.onSurfaceVariant },
+                          ]}
+                        >
+                          {receiveProgress.remaining > 0
+                            ? "still to receive"
+                            : "nothing left on this PO"}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.progressLogged,
+                          { color: theme.colors.onSurface },
+                        ]}
+                      >
+                        {formatGal(receiveProgress.received)} /{" "}
+                        {formatGal(receiveProgress.ordered)} gal logged
+                      </Text>
+                    </View>
                     <View
-                      key={key}
                       style={[
-                        styles.statusLegendChip,
+                        styles.progressTrack,
                         {
-                          backgroundColor: STATUS_COLORS[key].soft,
-                          borderColor: STATUS_COLORS[key].accent,
+                          backgroundColor: theme.dark
+                            ? "rgba(255,255,255,0.1)"
+                            : "rgba(15,22,36,0.1)",
                         },
                       ]}
                     >
                       <View
                         style={[
-                          styles.statusLegendDot,
-                          { backgroundColor: STATUS_COLORS[key].accent },
+                          styles.progressFill,
+                          {
+                            width: `${Math.round(receiveProgress.ratio * 100)}%`,
+                            backgroundColor: colors.brand.accent,
+                          },
                         ]}
                       />
+                    </View>
+                    {receiveProgress.totalLines > 0 ? (
                       <Text
                         style={[
-                          styles.statusLegendText,
-                          { color: theme.colors.onSurface },
+                          styles.progressLines,
+                          { color: theme.colors.onSurfaceVariant },
                         ]}
                       >
-                        {label}
+                        {receiveProgress.openLines === 0
+                          ? `${receiveProgress.totalLines} line${
+                              receiveProgress.totalLines === 1 ? "" : "s"
+                            } logged`
+                          : `${receiveProgress.openLines} of ${
+                              receiveProgress.totalLines
+                            } line${
+                              receiveProgress.totalLines === 1 ? "" : "s"
+                            } still need gallons`}
                       </Text>
-                    </View>
-                  ))}
-                </View>
+                    ) : null}
+                  </View>
+                ) : null}
 
                   <ScrollFrame
                     bordered={false}
@@ -1057,6 +1144,7 @@ export default function ReceivePoModal({
                   )}
                 </ScrollFrame>
 
+                {!isMobilePortrait ? (
                 <View style={styles.actions}>
                   <AppButton
                     mode="outlined"
@@ -1074,12 +1162,113 @@ export default function ReceivePoModal({
                     Receive
                   </AppButton>
                 </View>
+                ) : null}
               </>
-            )}
-          </View>
+  );
+
+  if (isMobilePortrait) {
+    return (
+      <>
+        <AppSheet
+          visible={visible}
+          onDismiss={() => {
+            if (!receiveSubmitting) onClose();
+          }}
+          title="Receive from PO"
+          subtitle="Pick an open order to log delivery"
+          size="large"
+          tall
+          scroll={false}
+          dismissable={!receiveSubmitting}
+          footer={listFooter}
+        >
+          {listBody}
+        </AppSheet>
+        <AppSheet
+          visible={visible && step === "detail" && !!selectedReceiveOrder}
+          onDismiss={() => {
+            if (!receiveSubmitting) onBackToList();
+          }}
+          title={
+            selectedReceiveOrder
+              ? `PO ${selectedReceiveOrder.po_number || selectedReceiveOrder.id}`
+              : "Receive lines"
+          }
+          subtitle={expLabel ? `Expected ~${expLabel}` : "Gallons per line"}
+          stacked
+          scroll={false}
+          keyboard
+          dismissable={!receiveSubmitting}
+          footer={detailFooter}
+        >
+          {detailBody}
+        </AppSheet>
+      </>
+    );
+  }
+
+  return (
+    <ReceivePoChrome
+      sheet={false}
+      visible={visible}
+      onClose={onClose}
+      receiveSubmitting={receiveSubmitting}
+      title={sheetTitle}
+      subtitle={sheetSubtitle}
+      footer={null}
+      keyboard={false}
+      panelPos={panelPos}
+      panelWidth={panelWidth}
+      panelHeight={panelHeight}
+      panelMaxHeight={panelMaxHeight}
+      theme={theme}
+    >
+      <View
+        style={[
+          styles.panelHeader,
+          {
+            borderBottomColor: theme.colors.outlineVariant,
+            backgroundColor: theme.dark
+              ? "rgba(201, 151, 46, 0.12)"
+              : "rgba(201, 151, 46, 0.1)",
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.panelHeaderAccent,
+            { backgroundColor: colors.brand.accent },
+          ]}
+        />
+        <View style={styles.panelHeaderText}>
+          <Text
+            style={[styles.panelTitle, { color: theme.colors.onSurface }]}
+          >
+            {step === "detail" ? "Receive lines" : "Receive from PO"}
+          </Text>
+          {step === "list" ? (
+            <Text
+              style={[
+                styles.panelSubtitle,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
+              Pick an open order to log delivery
+            </Text>
+          ) : null}
         </View>
+        <IconButton
+          icon="close"
+          size={18}
+          onPress={onClose}
+          disabled={receiveSubmitting}
+          style={styles.closeBtn}
+          accessibilityLabel="Close receive PO"
+        />
       </View>
-    </Modal>
+      {step === "list" ? listBody : null}
+      {step === "detail" ? detailBody : null}
+    </ReceivePoChrome>
   );
 }
 
@@ -1234,12 +1423,48 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 8,
   },
-  detailTypeChipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
+  progressBlock: {
     paddingHorizontal: space[5],
-    marginBottom: space[2],
+    marginBottom: space[3],
+    gap: 8,
+  },
+  progressRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  progressHero: {
+    flex: 1,
+    minWidth: 0,
+  },
+  progressValue: {
+    fontSize: 22,
+    fontWeight: "700",
+    lineHeight: 26,
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  progressLogged: {
+    fontSize: 13,
+    fontWeight: "700",
+    flexShrink: 0,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 3,
+  },
+  progressLines: {
+    fontSize: 12,
+    fontWeight: "500",
   },
   typeChip: {
     flexDirection: "row",
@@ -1304,31 +1529,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: "center",
     fontWeight: "600",
-  },
-  statusLegend: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: space[5],
-    marginBottom: space[3],
-  },
-  statusLegendChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  statusLegendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusLegendText: {
-    fontSize: 11,
-    fontWeight: "700",
   },
   lineCard: {
     borderWidth: 1,

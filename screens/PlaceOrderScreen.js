@@ -6,7 +6,6 @@ import {
   Platform,
   useWindowDimensions,
   Alert,
-  KeyboardAvoidingView,
   Pressable,
   Modal,
 } from "react-native";
@@ -609,10 +608,7 @@ export default function PlaceOrderScreen({
         { backgroundColor: listBg },
       ]}
     >
-      <KeyboardAvoidingView
-        style={styles.keyboardInner}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <View style={styles.keyboardInner}>
         <View
           style={[
             styles.stickyPanel,
@@ -1106,7 +1102,7 @@ export default function PlaceOrderScreen({
             </Pressable>
           </Pressable>
         </Modal>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

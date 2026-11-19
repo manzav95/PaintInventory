@@ -13,6 +13,7 @@ import {
   IconButton,
 } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
 import LoginLogService from "../services/loginLogService";
 import { DESKTOP_BREAKPOINT } from "../utils/layout";
 import ScrollFrame from "./ScrollFrame";
@@ -64,27 +65,17 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
   }, [visible, load]);
 
   return (
-    <Modal
+    <AppSheet
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onDismiss}
+      onDismiss={onDismiss}
+      title="User login history"
+      size="large"
+      footer={
+        <AppButton mode="outlined" onPress={onDismiss}>
+          Close
+        </AppButton>
+      }
     >
-      <Pressable style={styles.overlay} onPress={onDismiss}>
-        <Pressable
-          style={[
-            styles.card,
-            isWide && styles.cardWide,
-            { backgroundColor: popupSurfaceColor(theme) },
-          ]}
-          onPress={(e) => e.stopPropagation()}
-        >
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-              User login history
-            </Text>
-            <IconButton icon="close" size={20} onPress={onDismiss} />
-          </View>
           {loading ? (
             <View style={styles.centered}>
               <ActivityIndicator />
@@ -143,12 +134,7 @@ export default function LoginHistoryModal({ visible, onDismiss }) {
             </ScrollFrame>
           )}
 
-          <AppButton mode="outlined" onPress={onDismiss} style={styles.closeBtn}>
-            Close
-          </AppButton>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </AppSheet>
   );
 }
 

@@ -20,6 +20,7 @@ import {
 import AppButton from "../components/ui/AppButton";
 import PageHeader from "../components/PageHeader";
 import { AppEmptyState, AppText } from "../components/ui";
+import AppSheet from "../components/ui/AppSheet";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
@@ -649,21 +650,17 @@ export default function JobSearchScreen({
         {recentJobsSection}
       </ScrollView>
 
-      <Modal
+      <AppSheet
         visible={!!zoom}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setZoom(null)}
+        onDismiss={() => setZoom(null)}
+        title={zoom?.photo?.caption || "Photo"}
+        size="large"
+        scroll={false}
       >
-        <Pressable style={styles.lightbox} onPress={() => setZoom(null)}>
-          {zoom?.uri ? (
-            <Image source={{ uri: zoom.uri }} style={styles.lightboxImg} resizeMode="contain" />
-          ) : null}
-          {zoom?.photo?.caption ? (
-            <Text style={styles.lightboxCaption}>{zoom.photo.caption}</Text>
-          ) : null}
-        </Pressable>
-      </Modal>
+        {zoom?.uri ? (
+          <Image source={{ uri: zoom.uri }} style={styles.lightboxImg} resizeMode="contain" />
+        ) : null}
+      </AppSheet>
     </View>
   );
 }

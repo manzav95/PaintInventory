@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Modal, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
 import UserMessageService from "../services/userMessageService";
 import { displayUserName } from "../utils/displayUserName";
-import { radius, space } from "../theme/tokens";
-import { popupSurfaceColor } from "../utils/themeColors";
 
 function formatWhen(ts) {
   if (!ts) return "";
@@ -64,67 +62,29 @@ export default function UserMessageHost({ userName, paused = false, onCountChang
     }
   };
 
-  if (!current || paused) return null;
-
   const heading =
-    current.title ||
-    (current.kind === "reminder" ? "Reminder" : "Message");
-  const from = displayUserName(current.fromUser, "Admin");
+    current?.title ||
+    (current?.kind === "reminder" ? "Reminder" : "Message");
+  const from = displayUserName(current?.fromUser, "Admin");
+  const kindLabel = current?.kind === "reminder" ? "Reminder" : "Message";
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={() => {}}>
-      <View style={styles.scrim}>
-        <View
-          style={[
-            styles.card,
-            {
-              backgroundColor: popupSurfaceColor(theme),
-              borderColor: theme.colors.outlineVariant,
-            },
-          ]}
-        >
-          <Text style={[styles.kicker, { color: theme.colors.primary }]}>
-            {current.kind === "reminder" ? "Reminder" : "Message"} · from {from}
-          </Text>
-          <Text style={[styles.title, { color: theme.colors.onSurface }]}>
-            {heading}
-          </Text>
-          <Text style={[styles.body, { color: theme.colors.onSurface }]}>
-            {current.body}
-          </Text>
-          {current.createdAt ? (
-            <Text style={[styles.when, { color: theme.colors.onSurfaceVariant }]}>
-              {formatWhen(current.createdAt)}
-              {queue.length > 1 ? ` · ${queue.length} waiting` : ""}
-            </Text>
-          ) : null}
-          <AppButton mode="contained" onPress={ack} loading={busy} disabled={busy}>
-            Got it
-          </AppButton>
-        </View>
-      </View>
-    </Modal>
+    <AppSheet
+      visible={!!current && !paused}
+      dismissable={false}
+      title={heading}
+      subtitle={`${kindLabel} from ${from}${
+        current?.createdAt ? ` · ${formatWhen(current.createdAt)}` : ""
+      }${queue.length > 1 ? ` · ${queue.length} waiting` : ""}`}
+      footer={
+        <AppButton mode="contained" onPress={ack} loading={busy} disabled={busy}>
+          Got it
+        </AppButton>
+      }
+    >
+      <Text style={{ color: theme.colors.onSurface, fontSize: 16, lineHeight: 22 }}>
+        {current?.body}
+      </Text>
+    </AppSheet>
   );
 }
-
-const styles = StyleSheet.create({
-  scrim: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  card: {
-    width: "100%",
-    maxWidth: 420,
-    borderWidth: 1,
-    borderRadius: radius.lg || 12,
-    padding: space[5] || 20,
-    gap: 10,
-  },
-  kicker: { fontSize: 12, fontWeight: "800", letterSpacing: 0.4, textTransform: "uppercase" },
-  title: { fontSize: 22, fontWeight: "800" },
-  body: { fontSize: 16, lineHeight: 22 },
-  when: { fontSize: 12, marginBottom: 4 },
-});

@@ -22,6 +22,9 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
+import { popupSurfaceColor } from "../utils/themeColors";
+import { useAppLayout } from "../utils/layout";
 import OrderService from "../services/orderService";
 import NotificationService from "../services/notificationService";
 import WasteTrackingService from "../services/wasteTrackingService";
@@ -55,6 +58,7 @@ export default function NotificationsBell({
   iconSize = 22,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const bellRef = useRef(null);
   const [visible, setVisible] = useState(false);
@@ -270,6 +274,10 @@ export default function NotificationsBell({
   const panelWidth = Math.min(PANEL_WIDTH, Math.max(260, windowWidth - 16));
 
   const openPanel = () => {
+    if (isMobilePortrait) {
+      setVisible(true);
+      return;
+    }
     const node = bellRef.current;
     const place = (x, y, width, height) => {
       const gap = 8;
@@ -353,6 +361,96 @@ export default function NotificationsBell({
     }
   };
 
+  const notificationList =
+    !inventoryLoaded || (isAdmin && orderCountsLoading) ? (
+      <View style={styles.loadingRow}>
+        <ActivityIndicator size="small" />
+        <Text style={{ color: theme.colors.onSurfaceVariant }}>Loading…</Text>
+      </View>
+    ) : allVisibleDismissed ? (
+      <Text
+        style={[styles.clearedMsg, { color: theme.colors.onSurfaceVariant }]}
+      >
+        Cleared for today. Open again tomorrow if issues remain.
+      </Text>
+    ) : activeNotifications.length === 0 ? (
+      <Text
+        style={[styles.emptyMsg, { color: theme.colors.onSurfaceVariant }]}
+      >
+        {hasUnderlyingAlerts
+          ? "No active alerts."
+          : "Nothing needs attention right now."}
+      </Text>
+    ) : (
+      <ScrollFrame
+        bordered={false}
+        maxHeight={LIST_MAX_HEIGHT}
+        contentContainerStyle={styles.listContent}
+      >
+        {activeNotifications.map((n, index) => (
+          <React.Fragment key={n.id}>
+            {index > 0 && <Divider style={styles.divider} />}
+            <Pressable
+              onPress={n.onPress}
+              disabled={!n.onPress}
+              style={({ pressed }) => [
+                styles.row,
+                pressed && {
+                  backgroundColor: theme.dark
+                    ? "rgba(255,255,255,0.06)"
+                    : "rgba(0,0,0,0.04)",
+                },
+              ]}
+            >
+              <View
+                style={[styles.countPill, { backgroundColor: n.color }]}
+              >
+                <Text style={styles.countPillText}>{n.count}</Text>
+              </View>
+              <View style={styles.rowText}>
+                <Text
+                  style={[styles.rowTitle, { color: theme.colors.onSurface }]}
+                >
+                  {n.title}
+                </Text>
+                <Text
+                  style={[
+                    styles.rowDetail,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {n.detail}
+                </Text>
+                {n.showEmailAction ? (
+                  <AppButton
+                    mode="contained"
+                    compact
+                    icon="email-outline"
+                    loading={emailSending}
+                    disabled={emailSending}
+                    onPress={handleEmailLowStock}
+                    style={styles.emailBtn}
+                  >
+                    Email low stock list
+                  </AppButton>
+                ) : null}
+                {n.onPress ? (
+                  <Text
+                    style={[
+                      styles.rowAction,
+                      { color: theme.colors.primary },
+                    ]}
+                  >
+                    Tap to view
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          </React.Fragment>
+        ))}
+      </ScrollFrame>
+    );
+
   return (
     <>
       <View ref={bellRef} collapsable={false} style={styles.bellWrap}>
@@ -373,202 +471,139 @@ export default function NotificationsBell({
         )}
       </View>
 
-      <Modal
-        visible={visible}
-        transparent
-        animationType="none"
-        onRequestClose={() => setVisible(false)}
-      >
-        <View style={styles.modalRoot}>
-          <Pressable
-            style={styles.backdrop}
-            onPress={() => setVisible(false)}
-            accessibilityLabel="Dismiss notifications"
-          />
-          <View
-            style={[
-              styles.panelAnchor,
-              {
-                top: panelPos.top,
-                left: panelPos.left,
-                width: panelWidth,
-                pointerEvents: "box-none",
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.caret,
-                {
-                  left: panelPos.caretLeft,
-                  borderBottomColor: theme.colors.outlineVariant,
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.caretInner,
-                {
-                  left: panelPos.caretLeft + 1,
-                  borderBottomColor: theme.colors.surfaceContainerHighest,
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.panel,
-                {
-                  maxHeight: Math.min(
-                    PANEL_MAX_HEIGHT,
-                    windowHeight - panelPos.top - 12,
-                  ),
-                  backgroundColor: theme.colors.surfaceContainerHighest,
-                  borderColor: theme.colors.outlineVariant,
-                },
-              ]}
-            >
-            <View style={styles.panelHeader}>
-              <Text
-                style={[styles.modalTitle, { color: theme.colors.onSurface }]}
-              >
-                Notifications
-              </Text>
-              <IconButton
-                icon="close"
-                size={18}
-                onPress={() => setVisible(false)}
-                style={styles.closeBtn}
-                accessibilityLabel="Close notifications"
-              />
-            </View>
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: theme.colors.onSurfaceVariant },
-              ]}
-            >
-              {isAdmin
-                ? "Clears your admin alerts for today on this device only."
-                : "Clears your alerts for today on this device. Admin alerts are not affected."}
-            </Text>
-
-            {!inventoryLoaded || (isAdmin && orderCountsLoading) ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator size="small" />
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>
-                  Loading…
-                </Text>
-              </View>
-            ) : allVisibleDismissed ? (
-              <Text
-                style={[
-                  styles.clearedMsg,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                Cleared for today. Open again tomorrow if issues remain.
-              </Text>
-            ) : activeNotifications.length === 0 ? (
-              <Text
-                style={[
-                  styles.emptyMsg,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                {hasUnderlyingAlerts
-                  ? "No active alerts."
-                  : "Nothing needs attention right now."}
-              </Text>
-            ) : (
-              <ScrollFrame
-                bordered={false}
-                maxHeight={LIST_MAX_HEIGHT}
-                contentContainerStyle={styles.listContent}
-              >
-                {activeNotifications.map((n, index) => (
-                  <React.Fragment key={n.id}>
-                    {index > 0 && <Divider style={styles.divider} />}
-                    <Pressable
-                      onPress={n.onPress}
-                      disabled={!n.onPress}
-                      style={({ pressed }) => [
-                        styles.row,
-                        pressed && {
-                          backgroundColor: theme.dark
-                            ? "rgba(255,255,255,0.06)"
-                            : "rgba(0,0,0,0.04)",
-                        },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.countPill,
-                          { backgroundColor: n.color },
-                        ]}
-                      >
-                        <Text style={styles.countPillText}>{n.count}</Text>
-                      </View>
-                      <View style={styles.rowText}>
-                        <Text
-                          style={[
-                            styles.rowTitle,
-                            { color: theme.colors.onSurface },
-                          ]}
-                        >
-                          {n.title}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.rowDetail,
-                            { color: theme.colors.onSurfaceVariant },
-                          ]}
-                        >
-                          {n.detail}
-                        </Text>
-                        {n.showEmailAction ? (
-                          <AppButton
-                            mode="contained"
-                            compact
-                            icon="email-outline"
-                            loading={emailSending}
-                            disabled={emailSending}
-                            onPress={handleEmailLowStock}
-                            style={styles.emailBtn}
-                          >
-                            Email low stock list
-                          </AppButton>
-                        ) : null}
-                        {n.onPress ? (
-                          <Text
-                            style={[
-                              styles.rowAction,
-                              { color: theme.colors.primary },
-                            ]}
-                          >
-                            Tap to view
-                          </Text>
-                        ) : null}
-                      </View>
-                    </Pressable>
-                  </React.Fragment>
-                ))}
-              </ScrollFrame>
-            )}
-
-            <View style={styles.modalActions}>
-              {hasUnderlyingAlerts && activeNotifications.some((n) => !n.persist) && (
-                <AppButton mode="outlined" onPress={handleDismissToday} compact>
+      {isMobilePortrait ? (
+        <AppSheet
+          visible={visible}
+          onDismiss={() => setVisible(false)}
+          title="Notifications"
+          subtitle={
+            isAdmin
+              ? "Clears your admin alerts for today on this device only."
+              : "Clears your alerts for today on this device. Admin alerts are not affected."
+          }
+          footer={
+            <View style={{ gap: 8 }}>
+              {hasUnderlyingAlerts &&
+              activeNotifications.some((n) => !n.persist) ? (
+                <AppButton mode="outlined" onPress={handleDismissToday}>
                   Clear for today
                 </AppButton>
-              )}
-              <AppButton mode="text" onPress={() => setVisible(false)} compact>
+              ) : null}
+              <AppButton mode="outlined" onPress={() => setVisible(false)}>
                 Close
               </AppButton>
             </View>
+          }
+        >
+          {notificationList}
+        </AppSheet>
+      ) : (
+        <Modal
+          visible={visible}
+          transparent
+          animationType="none"
+          onRequestClose={() => setVisible(false)}
+        >
+          <View style={styles.modalRoot}>
+            <Pressable
+              style={styles.backdrop}
+              onPress={() => setVisible(false)}
+              accessibilityLabel="Dismiss notifications"
+            />
+            <View
+              style={[
+                styles.panelAnchor,
+                {
+                  top: panelPos.top,
+                  left: panelPos.left,
+                  width: panelWidth,
+                  pointerEvents: "box-none",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.caret,
+                  {
+                    left: panelPos.caretLeft,
+                    borderBottomColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.caretInner,
+                  {
+                    left: panelPos.caretLeft + 1,
+                    borderBottomColor: popupSurfaceColor(theme),
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.panel,
+                  {
+                    maxHeight: Math.min(
+                      PANEL_MAX_HEIGHT,
+                      windowHeight - panelPos.top - 12,
+                    ),
+                    backgroundColor: popupSurfaceColor(theme),
+                    borderColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              >
+                <View style={styles.panelHeader}>
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      { color: theme.colors.onSurface },
+                    ]}
+                  >
+                    Notifications
+                  </Text>
+                  <IconButton
+                    icon="close"
+                    size={18}
+                    onPress={() => setVisible(false)}
+                    style={styles.closeBtn}
+                    accessibilityLabel="Close notifications"
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.modalSubtitle,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {isAdmin
+                    ? "Clears your admin alerts for today on this device only."
+                    : "Clears your alerts for today on this device. Admin alerts are not affected."}
+                </Text>
+                {notificationList}
+                <View style={styles.modalActions}>
+                  {hasUnderlyingAlerts &&
+                  activeNotifications.some((n) => !n.persist) ? (
+                    <AppButton
+                      mode="outlined"
+                      onPress={handleDismissToday}
+                      compact
+                    >
+                      Clear for today
+                    </AppButton>
+                  ) : null}
+                  <AppButton
+                    mode="text"
+                    onPress={() => setVisible(false)}
+                    compact
+                  >
+                    Close
+                  </AppButton>
+                </View>
+              </View>
+            </View>
           </View>
-          </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </>
   );
 }

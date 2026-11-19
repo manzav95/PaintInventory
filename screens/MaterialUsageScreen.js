@@ -24,6 +24,7 @@ import {
   SegmentedButtons,
 } from "react-native-paper";
 import AppButton from "../components/ui/AppButton";
+import AppSheet from "../components/ui/AppSheet";
 import DateField from "../components/DateField";
 import TimeField from "../components/TimeField";
 import PageHeader from "../components/PageHeader";
@@ -2082,42 +2083,31 @@ export default function MaterialUsageScreen({
           </ScrollView>
         )}
 
-        <Portal>
-          <Dialog
-            visible={catalyzedDialogVisible}
-            onDismiss={() => setCatalyzedDialogVisible(false)}
-            style={styles.catalystDialog}
-          >
-            <Dialog.Title>Catalyst confirmation</Dialog.Title>
-            <Dialog.Content>
-              <Text>Was this batch catalyzed?</Text>
-              <Text
-                style={[
-                  styles.catalystDialogSubtext,
-                  { color: mutedTextColor(theme) },
-                ]}
-              >
-                {formatCatalystPercentLabel(catalystPercent) || "—"} mixing ratio
-              </Text>
-            </Dialog.Content>
-            <Dialog.Actions>
-              <AppButton
-                mode="outlined"
-                onPress={() => handleCatalyzed(false)}
-                style={styles.dialogButton}
-              >
-                No
-              </AppButton>
-              <AppButton
-                mode="contained"
-                onPress={() => handleCatalyzed(true)}
-                style={styles.dialogButton}
-              >
+        <AppSheet
+          visible={catalyzedDialogVisible}
+          onDismiss={() => setCatalyzedDialogVisible(false)}
+          title="Catalyst confirmation"
+          footer={
+            <>
+              <AppButton mode="contained" onPress={() => handleCatalyzed(true)}>
                 Yes
               </AppButton>
-            </Dialog.Actions>
-          </Dialog>
-        </Portal>
+              <AppButton mode="outlined" onPress={() => handleCatalyzed(false)}>
+                No
+              </AppButton>
+            </>
+          }
+        >
+          <Text>Was this batch catalyzed?</Text>
+          <Text
+            style={[
+              styles.catalystDialogSubtext,
+              { color: mutedTextColor(theme) },
+            ]}
+          >
+            {formatCatalystPercentLabel(catalystPercent) || "—"} mixing ratio
+          </Text>
+        </AppSheet>
         <MaterialUsageEditPopover
           visible={!!editRow}
           row={editRow}

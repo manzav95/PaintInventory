@@ -1,9 +1,10 @@
 {
   "changes": [
-    "Data sheets shows PDS, SDS, and EDS files under the type you tap.",
-    "Hold an inventory item for Data sheets. Only kinds that exist show.",
-    "If an item has no sheets, the menu says none available.",
-    "TDS is now EDS. Add extras like MAK on Data sheets.",
-    "The bell loads alerts once. The user menu has a caret like the bell."
+    "Tap an inventory item for Transactions, Data sheets, and Edit. Holding is no longer needed.",
+    "On a phone held upright, swipe an item left for Sheets or right for Edit. The label grows, then pops when it will take.",
+    "Tap a color chip to see it large. The screen blurs; tap outside to close.",
+    "Stain chips show a wood-grain hint. That color is only approximate.",
+    "Receive PO slides up from the bottom on a phone. Open a PO to see gallons still needed.",
+    "On Data sheets, swipe left to view or right to delete (admin)."
   ]
 }

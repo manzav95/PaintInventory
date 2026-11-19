@@ -1,20 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import {
-  Dialog,
-  Menu,
-  Portal,
-  Text,
-  TextInput,
-  useTheme,
-} from "react-native-paper";
+import { Text, TextInput, useTheme } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet, { SheetAction } from "./ui/AppSheet";
 import UserService from "../services/userService";
 import UserMessageService from "../services/userMessageService";
 import { displayUserName } from "../utils/displayUserName";
 import showToast from "../utils/showToast";
-import confirmAction from "../utils/confirmAction";
-import { popupSurfaceColor } from "../utils/themeColors";
 
 const EVERYONE = "*";
 
@@ -27,7 +19,7 @@ export default function SendUserMessageDialog({
   const theme = useTheme();
   const [users, setUsers] = useState([]);
   const [toUser, setToUser] = useState(initialToUser || EVERYONE);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [kind, setKind] = useState("reminder");
@@ -39,42 +31,32 @@ export default function SendUserMessageDialog({
     setTitle("");
     setBody("");
     setKind("reminder");
-    let cancel = false;
-    UserService.list()
+    setPicking(false);
+    let cancelled = false;
+    UserService.getAll()
       .then((rows) => {
-        if (!cancel) setUsers(Array.isArray(rows) ? rows : []);
+        if (!cancelled) setUsers(Array.isArray(rows) ? rows : []);
       })
       .catch(() => {
-        if (!cancel) setUsers([]);
+        if (!cancelled) setUsers([]);
       });
     return () => {
-      cancel = true;
+      cancelled = true;
     };
   }, [visible, initialToUser]);
 
-  const selectedLabel = useMemo(() => {
-    if (toUser === EVERYONE) return "Everyone on the floor";
-    const row = users.find(
-      (item) =>
-        String(item.user_name || "").toLowerCase() ===
-        String(toUser || "").toLowerCase(),
-    );
-    return displayUserName(row?.user_name || toUser);
-  }, [toUser, users]);
+  const selectedLabel =
+    toUser === EVERYONE ? "Everyone on the floor" : displayUserName(toUser);
 
   const send = async () => {
-    const text = body.trim();
+    const text = String(body || "").trim();
     if (!text) {
-      showToast({ type: "error", title: "Type a message", message: "Reminders need a note." });
+      showToast({
+        type: "error",
+        title: "Message needed",
+        message: "Type the on-screen message first.",
+      });
       return;
-    }
-    if (toUser === EVERYONE) {
-      const ok = await confirmAction(
-        "Send to everyone?",
-        "Everyone signed in will see this on screen until they tap Got it.",
-        { confirmLabel: "Send to everyone" },
-      );
-      if (!ok) return;
     }
     setBusy(true);
     try {
@@ -103,55 +85,82 @@ export default function SendUserMessageDialog({
     }
   };
 
+  const pickerUsers = useMemo(
+    () =>
+      users.filter((row) => String(row.user_name || "").trim()),
+    [users],
+  );
+
   return (
-    <Portal>
-      <Dialog
-        visible={visible}
-        onDismiss={busy ? undefined : onDismiss}
-        style={{ backgroundColor: popupSurfaceColor(theme) }}
-      >
-        <Dialog.Title>Send on-screen message</Dialog.Title>
-        <Dialog.Content>
-          <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 10 }}>
-            They will see this over the app until they tap Got it.
-          </Text>
+    <AppSheet
+      visible={visible}
+      onDismiss={busy ? undefined : onDismiss}
+      title={picking ? "Send to" : "Send on-screen message"}
+      subtitle={
+        picking
+          ? null
+          : "They will see this over the app until they tap Got it."
+      }
+      keyboard={!picking}
+      footer={
+        picking ? null : (
+          <View style={{ gap: 8 }}>
+            <AppButton
+              mode="contained"
+              onPress={send}
+              loading={busy}
+              disabled={busy}
+            >
+              Send
+            </AppButton>
+            <AppButton mode="outlined" onPress={onDismiss} disabled={busy}>
+              Cancel
+            </AppButton>
+          </View>
+        )
+      }
+    >
+      {picking ? (
+        <>
+          <SheetAction
+            title="Everyone on the floor"
+            onPress={() => {
+              setToUser(EVERYONE);
+              setPicking(false);
+            }}
+          />
+          {pickerUsers.map((row) => (
+            <SheetAction
+              key={row.id || row.user_name}
+              title={displayUserName(row.user_name)}
+              onPress={() => {
+                setToUser(row.user_name);
+                setPicking(false);
+              }}
+            />
+          ))}
+        </>
+      ) : (
+        <>
           {lockedToUser ? (
-            <Text style={{ color: theme.colors.onSurface, fontWeight: "700", marginBottom: 8 }}>
+            <Text
+              style={{
+                color: theme.colors.onSurface,
+                fontWeight: "700",
+                marginBottom: 8,
+              }}
+            >
               To {selectedLabel}
             </Text>
           ) : (
-            <Menu
-              visible={pickerOpen}
-              onDismiss={() => setPickerOpen(false)}
-              anchor={
-                <AppButton
-                  mode="outlined"
-                  icon="account"
-                  onPress={() => setPickerOpen(true)}
-                  style={{ marginBottom: 8, alignSelf: "flex-start" }}
-                >
-                  {selectedLabel}
-                </AppButton>
-              }
+            <AppButton
+              mode="outlined"
+              icon="account"
+              onPress={() => setPicking(true)}
+              style={{ marginBottom: 8, alignSelf: "flex-start" }}
             >
-              <Menu.Item
-                title="Everyone on the floor"
-                onPress={() => {
-                  setToUser(EVERYONE);
-                  setPickerOpen(false);
-                }}
-              />
-              {users.map((row) => (
-                <Menu.Item
-                  key={row.id || row.user_name}
-                  title={displayUserName(row.user_name)}
-                  onPress={() => {
-                    setToUser(row.user_name);
-                    setPickerOpen(false);
-                  }}
-                />
-              ))}
-            </Menu>
+              {selectedLabel}
+            </AppButton>
           )}
           <View style={styles.kindRow}>
             <AppButton
@@ -184,17 +193,9 @@ export default function SendUserMessageDialog({
             multiline
             style={{ marginTop: 8 }}
           />
-        </Dialog.Content>
-        <Dialog.Actions>
-          <AppButton mode="text" onPress={onDismiss} disabled={busy}>
-            Cancel
-          </AppButton>
-          <AppButton mode="contained" onPress={send} loading={busy} disabled={busy}>
-            Send
-          </AppButton>
-        </Dialog.Actions>
-      </Dialog>
-    </Portal>
+        </>
+      )}
+    </AppSheet>
   );
 }
 

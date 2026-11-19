@@ -11,6 +11,8 @@ import { Text, Avatar, useTheme } from "react-native-paper";
 import { colors, space, radius } from "../theme/tokens";
 import { displayUserName } from "../utils/displayUserName";
 import { popupSurfaceColor } from "../utils/themeColors";
+import { useAppLayout } from "../utils/layout";
+import AppSheet, { SheetAction } from "./ui/AppSheet";
 
 const PANEL_WIDTH = 240;
 
@@ -31,6 +33,7 @@ function initialsFromName(name) {
 
 /**
  * Circular user avatar that opens a small menu: Settings / Sign out.
+ * Caret popup on desktop / landscape; bottom sheet on phone portrait.
  */
 export default function UserMenuAvatar({
   userName,
@@ -44,6 +47,7 @@ export default function UserMenuAvatar({
 }) {
   const theme = useTheme();
   const { width: windowWidth } = useWindowDimensions();
+  const { isMobilePortrait } = useAppLayout();
   const [open, setOpen] = useState(false);
   const [panelPos, setPanelPos] = useState({
     top: 48,
@@ -69,6 +73,10 @@ export default function UserMenuAvatar({
   }, [open]);
 
   const measureAndOpen = () => {
+    if (isMobilePortrait) {
+      setOpen(true);
+      return;
+    }
     const place = (x, y, w, h) => {
       const gap = 8;
       const caretSize = 10;
@@ -101,6 +109,51 @@ export default function UserMenuAvatar({
   };
 
   const panelFill = popupSurfaceColor(theme);
+  const hoverBg = theme.dark
+    ? colors.semantic.activeTintDark
+    : colors.semantic.activeTintLight;
+
+  const sheetActions = (
+    <>
+      <SheetAction
+        title="Settings"
+        onPress={() => {
+          setOpen(false);
+          onOpenSettings?.();
+        }}
+      />
+      {typeof onFeedback === "function" ? (
+        <SheetAction
+          title="Feedback"
+          onPress={() => {
+            setOpen(false);
+            onFeedback();
+          }}
+        />
+      ) : null}
+      {isAdmin && onTogglePreviewStandardView ? (
+        <SheetAction
+          title={
+            previewStandardView
+              ? "Exit standard user view"
+              : "View as standard user"
+          }
+          onPress={() => {
+            setOpen(false);
+            onTogglePreviewStandardView();
+          }}
+        />
+      ) : null}
+      <SheetAction
+        title="Sign out"
+        destructive
+        onPress={() => {
+          setOpen(false);
+          onSignOut?.();
+        }}
+      />
+    </>
+  );
 
   return (
     <View ref={btnRef} collapsable={false} style={styles.avatarWrap}>
@@ -126,190 +179,185 @@ export default function UserMenuAvatar({
         />
       </Pressable>
 
-      <Modal
-        visible={open}
-        transparent
-        animationType="none"
-        onRequestClose={() => setOpen(false)}
-      >
-        <View style={styles.modalRoot}>
-          <Pressable
-            style={styles.scrim}
-            onPress={() => setOpen(false)}
-            accessibilityLabel="Dismiss"
-          />
-          <View
-            style={[
-              styles.panelAnchor,
-              {
-                top: panelPos.top,
-                left: panelPos.left,
-                width: PANEL_WIDTH,
-                pointerEvents: "box-none",
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.caret,
-                {
-                  left: panelPos.caretLeft,
-                  borderBottomColor: theme.colors.outlineVariant,
-                },
-              ]}
+      {isMobilePortrait ? (
+        <AppSheet
+          visible={open}
+          onDismiss={() => setOpen(false)}
+          title={displayName}
+          subtitle="Signed in"
+        >
+          {sheetActions}
+        </AppSheet>
+      ) : (
+        <Modal
+          visible={open}
+          transparent
+          animationType="none"
+          onRequestClose={() => setOpen(false)}
+        >
+          <View style={styles.modalRoot}>
+            <Pressable
+              style={styles.scrim}
+              onPress={() => setOpen(false)}
+              accessibilityLabel="Dismiss"
             />
             <View
               style={[
-                styles.caretInner,
+                styles.panelAnchor,
                 {
-                  left: panelPos.caretLeft + 1,
-                  borderBottomColor: panelFill,
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.menu,
-                {
-                  backgroundColor: panelFill,
-                  borderColor: theme.colors.outlineVariant,
+                  top: panelPos.top,
+                  left: panelPos.left,
+                  width: PANEL_WIDTH,
+                  pointerEvents: "box-none",
                 },
               ]}
             >
-            <View
-              style={[
-                styles.userHeader,
-                {
-                  backgroundColor: theme.dark
-                    ? "rgba(255,255,255,0.06)"
-                    : "rgba(0,0,0,0.04)",
-                },
-              ]}
-            >
-              <Avatar.Text
-                size={36}
-                label={initial}
-                style={{
-                  backgroundColor: theme.colors.primaryContainer,
-                }}
-                labelStyle={{
-                  color: theme.colors.onPrimaryContainer,
-                  ...(initial.length > 1 ? { fontSize: 14 } : null),
-                }}
+              <View
+                style={[
+                  styles.caret,
+                  {
+                    left: panelPos.caretLeft,
+                    borderBottomColor: theme.colors.outlineVariant,
+                  },
+                ]}
               />
-              <View style={styles.userHeaderText}>
-                <Text
+              <View
+                style={[
+                  styles.caretInner,
+                  {
+                    left: panelPos.caretLeft + 1,
+                    borderBottomColor: panelFill,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.menu,
+                  {
+                    backgroundColor: panelFill,
+                    borderColor: theme.colors.outlineVariant,
+                  },
+                ]}
+              >
+                <View
                   style={[
-                    styles.signedInLabel,
-                    { color: theme.colors.onSurfaceVariant },
+                    styles.userHeader,
+                    {
+                      backgroundColor: theme.dark
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                    },
                   ]}
                 >
-                  Signed in as
-                </Text>
-                <Text
-                  style={[styles.userName, { color: theme.colors.onSurface }]}
-                  numberOfLines={1}
+                  <Avatar.Text
+                    size={36}
+                    label={initial}
+                    style={{
+                      backgroundColor: theme.colors.primaryContainer,
+                    }}
+                    labelStyle={{
+                      color: theme.colors.onPrimaryContainer,
+                      ...(initial.length > 1 ? { fontSize: 14 } : null),
+                    }}
+                  />
+                  <View style={styles.userHeaderText}>
+                    <Text
+                      style={[
+                        styles.signedInLabel,
+                        { color: theme.colors.onSurfaceVariant },
+                      ]}
+                    >
+                      Signed in as
+                    </Text>
+                    <Text
+                      style={[styles.userName, { color: theme.colors.onSurface }]}
+                      numberOfLines={1}
+                    >
+                      {displayName}
+                    </Text>
+                  </View>
+                </View>
+                <View
+                  style={[
+                    styles.divider,
+                    { backgroundColor: theme.colors.outlineVariant },
+                  ]}
+                />
+                <Pressable
+                  style={({ hovered, pressed }) => [
+                    styles.item,
+                    (hovered || pressed) && { backgroundColor: hoverBg },
+                  ]}
+                  onPress={() => {
+                    setOpen(false);
+                    onOpenSettings?.();
+                  }}
                 >
-                  {displayName}
-                </Text>
+                  <Text
+                    style={[styles.itemText, { color: theme.colors.onSurface }]}
+                  >
+                    Settings
+                  </Text>
+                </Pressable>
+                {typeof onFeedback === "function" ? (
+                  <Pressable
+                    style={({ hovered, pressed }) => [
+                      styles.item,
+                      (hovered || pressed) && { backgroundColor: hoverBg },
+                    ]}
+                    onPress={() => {
+                      setOpen(false);
+                      onFeedback();
+                    }}
+                  >
+                    <Text
+                      style={[styles.itemText, { color: theme.colors.onSurface }]}
+                    >
+                      Feedback
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {isAdmin && onTogglePreviewStandardView ? (
+                  <Pressable
+                    style={({ hovered, pressed }) => [
+                      styles.item,
+                      (hovered || pressed) && { backgroundColor: hoverBg },
+                    ]}
+                    onPress={() => {
+                      setOpen(false);
+                      onTogglePreviewStandardView();
+                    }}
+                  >
+                    <Text
+                      style={[styles.itemText, { color: theme.colors.onSurface }]}
+                    >
+                      {previewStandardView
+                        ? "Exit standard user view"
+                        : "View as standard user"}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={({ hovered, pressed }) => [
+                    styles.item,
+                    (hovered || pressed) && { backgroundColor: hoverBg },
+                  ]}
+                  onPress={() => {
+                    setOpen(false);
+                    onSignOut?.();
+                  }}
+                >
+                  <Text
+                    style={[styles.itemText, { color: theme.colors.onSurface }]}
+                  >
+                    Sign out
+                  </Text>
+                </Pressable>
               </View>
             </View>
-            <View
-              style={[
-                styles.divider,
-                { backgroundColor: theme.colors.outlineVariant },
-              ]}
-            />
-            <Pressable
-              style={({ hovered, pressed }) => [
-                styles.item,
-                (hovered || pressed) && {
-                  backgroundColor: theme.dark
-                    ? colors.semantic.activeTintDark
-                    : colors.semantic.activeTintLight,
-                },
-              ]}
-              onPress={() => {
-                setOpen(false);
-                onOpenSettings?.();
-              }}
-            >
-              <Text
-                style={[styles.itemText, { color: theme.colors.onSurface }]}
-              >
-                Settings
-              </Text>
-            </Pressable>
-            {typeof onFeedback === "function" ? (
-              <Pressable
-                style={({ hovered, pressed }) => [
-                  styles.item,
-                  (hovered || pressed) && {
-                    backgroundColor: theme.dark
-                      ? colors.semantic.activeTintDark
-                      : colors.semantic.activeTintLight,
-                  },
-                ]}
-                onPress={() => {
-                  setOpen(false);
-                  onFeedback();
-                }}
-              >
-                <Text
-                  style={[styles.itemText, { color: theme.colors.onSurface }]}
-                >
-                  Feedback
-                </Text>
-              </Pressable>
-            ) : null}
-            {isAdmin && onTogglePreviewStandardView ? (
-              <Pressable
-                style={({ hovered, pressed }) => [
-                  styles.item,
-                  (hovered || pressed) && {
-                    backgroundColor: theme.dark
-                      ? colors.semantic.activeTintDark
-                      : colors.semantic.activeTintLight,
-                  },
-                ]}
-                onPress={() => {
-                  setOpen(false);
-                  onTogglePreviewStandardView();
-                }}
-              >
-                <Text
-                  style={[styles.itemText, { color: theme.colors.onSurface }]}
-                >
-                  {previewStandardView
-                    ? "Exit standard user view"
-                    : "View as standard user"}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              style={({ hovered, pressed }) => [
-                styles.item,
-                (hovered || pressed) && {
-                  backgroundColor: theme.dark
-                    ? colors.semantic.activeTintDark
-                    : colors.semantic.activeTintLight,
-                },
-              ]}
-              onPress={() => {
-                setOpen(false);
-                onSignOut?.();
-              }}
-            >
-              <Text
-                style={[styles.itemText, { color: theme.colors.onSurface }]}
-              >
-                Sign out
-              </Text>
-            </Pressable>
-            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </View>
   );
 }

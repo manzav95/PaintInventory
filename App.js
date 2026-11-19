@@ -1,9 +1,13 @@
+import 'react-native-reanimated';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Alert, Platform, Modal, TouchableOpacity } from 'react-native';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+import KeyboardScreen from './components/KeyboardScreen';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider as PaperProvider, ActivityIndicator, Text, Dialog, Portal, Paragraph } from "react-native-paper";
+import { Provider as PaperProvider, ActivityIndicator, Text } from "react-native-paper";
 import AppButton from "./components/ui/AppButton";
+import AppSheet from "./components/ui/AppSheet";
 import {
   findExactInventoryScanMatch,
   getScanRejectReason,
@@ -2496,7 +2500,9 @@ export default function App() {
     );
 
   return (
+    <KeyboardProvider preload={false}>
     <PaperProvider theme={paperTheme}>
+      <KeyboardScreen>
       <View
         {...idleTouchCaptureProps}
         style={[styles.container, isWeb && styles.containerWeb, { backgroundColor: paperTheme.colors.background }]}
@@ -2538,95 +2544,72 @@ export default function App() {
           changes={updateChanges}
           onDismiss={() => setWhatsNewVisible(false)}
         />
-        <Portal>
-          <Dialog
-            visible={!!lineupAlert}
-            onDismiss={() => dismissLineupAlert(false)}
-            style={{ backgroundColor: paperTheme.colors.surfaceContainerHighest }}
-          >
-            <Dialog.Title>New lineup posted</Dialog.Title>
-            <Dialog.Content>
-              <Paragraph style={{ color: paperTheme.colors.onSurfaceVariant }}>
-                View lineup to see what is coming up on the line
-                {lineupAlert?.color_name
-                  ? ` (${lineupAlert.color_name}${
-                      lineupAlert.job_name ? ` · ${lineupAlert.job_name}` : ""
-                    })`
-                  : ""}
-                .
-              </Paragraph>
-            </Dialog.Content>
-            <Dialog.Actions>
-              <AppButton mode="text" onPress={() => dismissLineupAlert(false)}>
-                Dismiss
-              </AppButton>
+        <AppSheet
+          visible={!!lineupAlert}
+          onDismiss={() => dismissLineupAlert(false)}
+          title="New lineup posted"
+          footer={
+            <>
               <AppButton mode="contained" onPress={() => dismissLineupAlert(true)}>
                 View lineup
               </AppButton>
-            </Dialog.Actions>
-          </Dialog>
-        </Portal>
-        <Modal
-          visible={showAdminItemDialog}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowAdminItemDialog(false)}
+              <AppButton mode="outlined" onPress={() => dismissLineupAlert(false)}>
+                Dismiss
+              </AppButton>
+            </>
+          }
         >
-          <TouchableOpacity
-            style={styles.adminDialogOverlay}
-            activeOpacity={1}
-            onPress={() => setShowAdminItemDialog(false)}
-          >
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-            style={[
-              styles.adminDialogCard,
-              { backgroundColor: paperTheme.colors.surfaceContainerHighest },
-            ]}
-          >
-            <FadeIn fromY={8} duration={220}>
-              <Text style={[styles.adminDialogTitle, { color: paperTheme.colors.onSurface }]}>
-                {selectedItem?.name || selectedItem?.id || "Item"}
-              </Text>
-              <Text style={[styles.adminDialogMessage, { color: paperTheme.colors.onSurfaceVariant }]}>
-                View transaction history or edit item details?
-              </Text>
-              <View style={styles.adminDialogButtons}>
-                <AppButton
-                  mode="contained"
-                  onPress={() => {
-                    setShowAdminItemDialog(false);
-                    setCurrentScreen('itemHistory');
-                  }}
-                  style={styles.adminDialogButton}
-                >
-                  Transaction history
-                </AppButton>
-                <AppButton
-                  mode="contained"
-                  onPress={() => {
-                    setShowAdminItemDialog(false);
-                    setCurrentScreen('detail');
-                  }}
-                  style={styles.adminDialogButton}
-                >
-                  Edit item details
-                </AppButton>
-                <AppButton
-                  mode="outlined"
-                  onPress={() => setShowAdminItemDialog(false)}
-                  style={styles.adminDialogButton}
-                >
-                  Cancel
-                </AppButton>
-              </View>
-            </FadeIn>
-          </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+          <Text style={{ color: paperTheme.colors.onSurfaceVariant }}>
+            View lineup to see what is coming up on the line
+            {lineupAlert?.color_name
+              ? ` (${lineupAlert.color_name}${
+                  lineupAlert.job_name ? ` · ${lineupAlert.job_name}` : ""
+                })`
+              : ""}
+            .
+          </Text>
+        </AppSheet>
+        <AppSheet
+          visible={showAdminItemDialog}
+          onDismiss={() => setShowAdminItemDialog(false)}
+          title={selectedItem?.name || selectedItem?.id || "Item"}
+          footer={
+            <>
+              <AppButton
+                mode="contained"
+                onPress={() => {
+                  setShowAdminItemDialog(false);
+                  setCurrentScreen("itemHistory");
+                }}
+              >
+                Transaction history
+              </AppButton>
+              <AppButton
+                mode="contained"
+                onPress={() => {
+                  setShowAdminItemDialog(false);
+                  setCurrentScreen("detail");
+                }}
+              >
+                Edit item details
+              </AppButton>
+              <AppButton
+                mode="outlined"
+                onPress={() => setShowAdminItemDialog(false)}
+              >
+                Cancel
+              </AppButton>
+            </>
+          }
+        >
+          <Text style={{ color: paperTheme.colors.onSurfaceVariant }}>
+            View transaction history or edit item details?
+          </Text>
+        </AppSheet>
       </View>
+      </KeyboardScreen>
     </PaperProvider>
+    </KeyboardProvider>
   );
 }
 

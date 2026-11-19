@@ -1,14 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
   ScrollView,
   View,
 } from "react-native";
 import {
-  Portal,
-  Dialog,
   Text,
   TextInput,
   useTheme,
@@ -16,13 +12,13 @@ import {
   ActivityIndicator,
 } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
 import {
   subscribeFeedback,
   submitFeedback,
   listFeedback,
 } from "../utils/feedback";
-import { layout, radius, space } from "../theme/tokens";
-import { popupSurfaceColor } from "../utils/themeColors";
+import { radius, space } from "../theme/tokens";
 import showToast from "../utils/showToast";
 
 function formatWhen(ts) {
@@ -135,26 +131,33 @@ export default function FeedbackHost() {
     });
   };
 
-  if (!open) return null;
-
   return (
-    <Portal>
-      <Dialog
-        visible={open}
-        onDismiss={() => !busy && finish(false)}
-        style={[
-          styles.dialog,
-          {
-            backgroundColor: popupSurfaceColor(theme),
-            borderRadius: radius.lg,
-          },
-        ]}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Dialog.Title style={styles.title}>Help & feedback</Dialog.Title>
-          <Dialog.Content style={styles.content}>
+    <AppSheet
+      visible={open}
+      onDismiss={() => !busy && finish(false)}
+      title="Help & feedback"
+      keyboard
+      footer={
+        <View style={styles.actions}>
+          <AppButton
+            mode="outlined"
+            onPress={() => finish(false)}
+            disabled={busy}
+          >
+            Close
+          </AppButton>
+          <AppButton
+            mode="contained"
+            onPress={handleSend}
+            loading={busy}
+            disabled={busy || !message.trim()}
+            icon="send"
+          >
+            Send
+          </AppButton>
+        </View>
+      }
+    >
             <SegmentedButtons
               value={category}
               onValueChange={setCategory}
@@ -272,39 +275,11 @@ export default function FeedbackHost() {
                 </ScrollView>
               )}
             </View>
-          </Dialog.Content>
-
-          <Dialog.Actions style={styles.actions}>
-            <AppButton
-              mode="text"
-              onPress={() => finish(false)}
-              disabled={busy}
-            >
-              Close
-            </AppButton>
-            <AppButton
-              mode="contained"
-              onPress={handleSend}
-              loading={busy}
-              disabled={busy || !message.trim()}
-              icon="send"
-            >
-              Send
-            </AppButton>
-          </Dialog.Actions>
-        </KeyboardAvoidingView>
-      </Dialog>
-    </Portal>
+    </AppSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  dialog: {
-    alignSelf: "center",
-    width: layout.modalMaxWidthLg,
-    maxWidth: "92%",
-    marginHorizontal: 20,
-  },
   title: {
     marginBottom: 0,
     paddingBottom: space[2],

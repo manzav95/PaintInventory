@@ -4,3 +4,5 @@ export { default as AppButton } from "./AppButton";
 export { default as AppSurface } from "./AppSurface";
 export { default as AppEmptyState } from "./AppEmptyState";
 export { default as AppMetricCard } from "./AppMetricCard";
+export { default as AppSheet, SheetAction } from "./AppSheet";
+export { default as SwipeableRow } from "./SwipeableRow";

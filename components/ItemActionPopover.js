@@ -10,7 +10,10 @@ import {
 } from "react-native";
 import { Text, IconButton, Divider, useTheme, TextInput } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet, { SheetChoiceRow } from "./ui/AppSheet";
 import { colors } from "../theme/tokens";
+import { popupSurfaceColor } from "../utils/themeColors";
+import { useAppLayout } from "../utils/layout";
 
 const PANEL_WIDTH = 280;
 
@@ -48,9 +51,8 @@ function MenuRow({ title, detail, trailing, onPress, theme }) {
 }
 
 /**
- * Caret popup (same idea as NotificationsBell) for inventory item actions.
- * Custom: Related jobs + Transactions (+ Edit for admin).
- * Standard admin: Transactions + Edit.
+ * Inventory item actions.
+ * Caret popup on desktop / landscape; bottom sheet on phone portrait.
  */
 export default function ItemActionPopover({
   visible,
@@ -62,15 +64,18 @@ export default function ItemActionPopover({
   allowAddJobs = false,
   onClose,
   onViewTransactions,
+  onDataSheets,
   onEditDetails,
   onAddJob,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [view, setView] = useState("menu"); // 'menu' | 'jobs'
   const [jobDraft, setJobDraft] = useState("");
   const [addingJob, setAddingJob] = useState(false);
   const [addJobError, setAddJobError] = useState("");
+  const panelFill = popupSurfaceColor(theme);
 
   useEffect(() => {
     if (visible) {
@@ -91,9 +96,10 @@ export default function ItemActionPopover({
     const x = Number(anchor?.pageX) || windowWidth / 2;
     const y = Number(anchor?.pageY) || 80;
 
-    let estimate = 56 + 16; // header + padding
+    let estimate = 56 + 16;
     if (showRelatedJobs) estimate += 68;
-    estimate += 68; // transactions
+    estimate += 68;
+    if (typeof onDataSheets === "function") estimate += 68;
     if (showEditDetails) estimate += 68;
     if (allowAddJobs) estimate += 72;
     const preferredHeight = Math.min(360, estimate);
@@ -123,7 +129,6 @@ export default function ItemActionPopover({
     if (placement === "above") {
       return {
         placement,
-        top: undefined,
         bottom: Math.max(margin, windowHeight - y + gap),
         left,
         caretLeft,
@@ -133,7 +138,6 @@ export default function ItemActionPopover({
     return {
       placement,
       top: Math.max(margin + caretSize, y + gap),
-      bottom: undefined,
       left,
       caretLeft,
       maxHeight,
@@ -147,6 +151,7 @@ export default function ItemActionPopover({
     showRelatedJobs,
     showEditDetails,
     allowAddJobs,
+    onDataSheets,
   ]);
 
   const close = () => {
@@ -179,69 +184,182 @@ export default function ItemActionPopover({
     }
   };
 
-  if (!visible) return null;
-
-  const menuRows = [];
-  if (showRelatedJobs) {
-    menuRows.push(
-      <MenuRow
-        key="jobs"
-        theme={theme}
-        title="Related jobs"
-        detail={
-          jobCount === 0
-            ? "No job numbers yet"
-            : jobCount === 1
-              ? "1 job number"
-              : `${jobCount} job numbers`
-        }
-        onPress={() => setView("jobs")}
-        trailing={
-          <View
-            style={[
-              styles.countPill,
-              { backgroundColor: colors.brand.accent },
-            ]}
-          >
-            <Text
-              style={[
-                styles.countPillText,
-                { color: colors.brand.onPrimaryDark },
-              ]}
-            >
-              {jobCount}
-            </Text>
-          </View>
-        }
-      />,
-    );
-  }
-  menuRows.push(
-    <MenuRow
-      key="transactions"
-      theme={theme}
-      title="Transactions"
-      detail="View check-in / check-out history"
-      onPress={() => {
-        close();
-        onViewTransactions?.();
-      }}
-    />,
+  const jobsDetail =
+    jobCount === 0
+      ? "No job numbers yet"
+      : jobCount === 1
+        ? "1 job number"
+        : `${jobCount} job numbers`;
+  const jobsTrailing = (
+    <View
+      style={[styles.countPill, { backgroundColor: colors.brand.accent }]}
+    >
+      <Text
+        style={[styles.countPillText, { color: colors.brand.onPrimaryDark }]}
+      >
+        {jobCount}
+      </Text>
+    </View>
   );
+  const actionItems = [];
+  if (showRelatedJobs) {
+    actionItems.push({
+      key: "jobs",
+      title: "Related jobs",
+      detail: jobsDetail,
+      trailing: jobsTrailing,
+      onPress: () => setView("jobs"),
+    });
+  }
+  actionItems.push({
+    key: "transactions",
+    title: "Transactions",
+    detail: "View check-in / check-out history",
+    onPress: () => {
+      close();
+      onViewTransactions?.();
+    },
+  });
+  if (typeof onDataSheets === "function") {
+    actionItems.push({
+      key: "sheets",
+      title: "Data sheets",
+      detail: "SDS, PDS, and EDS",
+      onPress: () => {
+        close();
+        onDataSheets();
+      },
+    });
+  }
   if (showEditDetails) {
-    menuRows.push(
-      <MenuRow
-        key="edit"
-        theme={theme}
-        title="Edit item details"
-        detail="Open item settings"
-        onPress={() => {
-          close();
-          onEditDetails?.();
+    actionItems.push({
+      key: "edit",
+      title: "Edit item details",
+      detail: "Open item settings",
+      onPress: () => {
+        close();
+        onEditDetails?.();
+      },
+    });
+  }
+
+  const menuList = isMobilePortrait ? (
+    <SheetChoiceRow
+      theme={theme}
+      items={actionItems.map(({ key, title, trailing, onPress }) => ({
+        key,
+        title,
+        trailing,
+        onPress,
+      }))}
+    />
+  ) : (
+    <View style={styles.menuList}>
+      {actionItems.map((item, idx) => (
+        <React.Fragment key={item.key}>
+          {idx > 0 ? <Divider /> : null}
+          <MenuRow
+            theme={theme}
+            title={item.title}
+            detail={item.detail}
+            onPress={item.onPress}
+            trailing={item.trailing}
+          />
+        </React.Fragment>
+      ))}
+    </View>
+  );
+
+  const jobsList = (
+    <>
+      {jobCount === 0 ? (
+        <Text
+          style={[styles.emptyJobs, { color: theme.colors.onSurfaceVariant }]}
+        >
+          No related job numbers for this item.
+        </Text>
+      ) : (
+        jobs.map((job, idx) => (
+          <View key={`${job}-${idx}`}>
+            {idx > 0 ? <Divider /> : null}
+            <View style={styles.jobRow}>
+              <Text style={[styles.jobText, { color: theme.colors.onSurface }]}>
+                {job}
+              </Text>
+            </View>
+          </View>
+        ))
+      )}
+    </>
+  );
+
+  const addJobForm = allowAddJobs ? (
+    <View
+      style={[
+        styles.addJobBlock,
+        { borderTopColor: theme.colors.outlineVariant },
+      ]}
+    >
+      <TextInput
+        mode="outlined"
+        dense
+        label="Job number"
+        value={jobDraft}
+        onChangeText={(v) => {
+          setJobDraft(v);
+          if (addJobError) setAddJobError("");
         }}
-      />,
+        placeholder="e.g. 12345"
+        disabled={addingJob}
+        style={styles.addJobInput}
+        onSubmitEditing={submitJob}
+        returnKeyType="done"
+      />
+      {addJobError ? (
+        <Text style={[styles.addJobError, { color: theme.colors.error }]}>
+          {addJobError}
+        </Text>
+      ) : null}
+      <AppButton
+        mode="contained"
+        compact
+        icon="plus"
+        loading={addingJob}
+        disabled={addingJob || !String(jobDraft || "").trim()}
+        onPress={submitJob}
+        style={styles.addJobBtn}
+      >
+        Add job
+      </AppButton>
+    </View>
+  ) : null;
+
+  if (isMobilePortrait) {
+    return (
+      <AppSheet
+        visible={visible}
+        onDismiss={close}
+        title={view === "jobs" ? "Related jobs" : itemName || "Item"}
+        keyboard={view === "jobs" && allowAddJobs}
+      >
+        {view === "jobs" ? (
+          <AppButton mode="text" compact onPress={() => setView("menu")}>
+            Back
+          </AppButton>
+        ) : null}
+        {view === "menu" ? (
+          menuList
+        ) : (
+          <View>
+            {jobsList}
+            {addJobForm}
+          </View>
+        )}
+      </AppSheet>
     );
   }
+
+  if (!visible) return null;
 
   const above = panelPos.placement === "above";
 
@@ -265,9 +383,7 @@ export default function ItemActionPopover({
               left: panelPos.left,
               width: panelWidth,
               pointerEvents: "box-none",
-              ...(above
-                ? { bottom: panelPos.bottom }
-                : { top: panelPos.top }),
+              ...(above ? { bottom: panelPos.bottom } : { top: panelPos.top }),
             },
           ]}
         >
@@ -287,7 +403,7 @@ export default function ItemActionPopover({
                   styles.caretInner,
                   {
                     left: panelPos.caretLeft + 1,
-                    borderBottomColor: theme.colors.surfaceContainerHighest,
+                    borderBottomColor: panelFill,
                   },
                 ]}
               />
@@ -297,7 +413,7 @@ export default function ItemActionPopover({
             style={[
               styles.panel,
               {
-                backgroundColor: theme.colors.surfaceContainerHighest,
+                backgroundColor: panelFill,
                 borderColor: theme.colors.outlineVariant,
                 maxHeight: panelPos.maxHeight,
               },
@@ -331,14 +447,7 @@ export default function ItemActionPopover({
             </View>
 
             {view === "menu" ? (
-              <View style={styles.menuList}>
-                {menuRows.map((row, idx) => (
-                  <React.Fragment key={row.key || idx}>
-                    {idx > 0 ? <Divider /> : null}
-                    {row}
-                  </React.Fragment>
-                ))}
-              </View>
+              menuList
             ) : (
               <View style={styles.jobsPane}>
                 <ScrollView
@@ -346,78 +455,9 @@ export default function ItemActionPopover({
                   contentContainerStyle={styles.jobsContent}
                   keyboardShouldPersistTaps="handled"
                 >
-                  {jobCount === 0 ? (
-                    <Text
-                      style={[
-                        styles.emptyJobs,
-                        { color: theme.colors.onSurfaceVariant },
-                      ]}
-                    >
-                      No related job numbers for this item.
-                    </Text>
-                  ) : (
-                    jobs.map((job, idx) => (
-                      <View key={`${job}-${idx}`}>
-                        {idx > 0 ? <Divider /> : null}
-                        <View style={styles.jobRow}>
-                          <Text
-                            style={[
-                              styles.jobText,
-                              { color: theme.colors.onSurface },
-                            ]}
-                          >
-                            {job}
-                          </Text>
-                        </View>
-                      </View>
-                    ))
-                  )}
+                  {jobsList}
                 </ScrollView>
-                {allowAddJobs ? (
-                  <View
-                    style={[
-                      styles.addJobBlock,
-                      { borderTopColor: theme.colors.outlineVariant },
-                    ]}
-                  >
-                    <TextInput
-                      mode="outlined"
-                      dense
-                      label="Job number"
-                      value={jobDraft}
-                      onChangeText={(v) => {
-                        setJobDraft(v);
-                        if (addJobError) setAddJobError("");
-                      }}
-                      placeholder="e.g. 12345"
-                      disabled={addingJob}
-                      style={styles.addJobInput}
-                      onSubmitEditing={submitJob}
-                      returnKeyType="done"
-                    />
-                    {addJobError ? (
-                      <Text
-                        style={[
-                          styles.addJobError,
-                          { color: theme.colors.error },
-                        ]}
-                      >
-                        {addJobError}
-                      </Text>
-                    ) : null}
-                    <AppButton
-                      mode="contained"
-                      compact
-                      icon="plus"
-                      loading={addingJob}
-                      disabled={addingJob || !String(jobDraft || "").trim()}
-                      onPress={submitJob}
-                      style={styles.addJobBtn}
-                    >
-                      Add job
-                    </AppButton>
-                  </View>
-                ) : null}
+                {addJobForm}
               </View>
             )}
           </View>
@@ -428,7 +468,7 @@ export default function ItemActionPopover({
                   styles.caretDownInner,
                   {
                     left: panelPos.caretLeft + 1,
-                    borderTopColor: theme.colors.surfaceContainerHighest,
+                    borderTopColor: panelFill,
                   },
                 ]}
               />

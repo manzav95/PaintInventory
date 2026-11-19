@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import { StyleSheet, Platform } from "react-native";
-import { Portal, Dialog, Text, useTheme } from "react-native-paper";
+import { View } from "react-native";
+import { Text, useTheme } from "react-native-paper";
 import AppButton from "./ui/AppButton";
+import AppSheet from "./ui/AppSheet";
 import { subscribeConfirm } from "../utils/confirmAction";
-import { layout, radius } from "../theme/tokens";
-import { popupSurfaceColor } from "../utils/themeColors";
 
 /**
  * Renders promise-based confirm dialogs from confirmAction().
@@ -17,7 +16,6 @@ export default function ConfirmHost() {
 
   useEffect(() => {
     return subscribeConfirm((payload) => {
-      // Replace any in-flight confirm so we never leave a hung Promise.
       if (resolveRef.current) {
         try {
           resolveRef.current(false);
@@ -35,61 +33,40 @@ export default function ConfirmHost() {
     const resolve = resolveRef.current;
     resolveRef.current = null;
     setOpen(false);
-    setOpts(null);
     if (typeof resolve === "function") {
       resolve(value);
     }
   };
 
-  if (!opts) return null;
-
   return (
-    <Portal>
-      <Dialog
-        visible={open}
-        onDismiss={() => finish(false)}
-        style={[
-          styles.dialog,
-          {
-            backgroundColor: popupSurfaceColor(theme),
-          },
-        ]}
-      >
-        <Dialog.Title>{opts.title}</Dialog.Title>
-        {opts.message ? (
-          <Dialog.Content>
-            <Text style={{ color: theme.colors.onSurfaceVariant }}>
-              {opts.message}
-            </Text>
-          </Dialog.Content>
-        ) : null}
-        <Dialog.Actions>
-          <AppButton onPress={() => finish(false)}>{opts.cancelLabel}</AppButton>
-          <AppButton
-            onPress={() => finish(true)}
-            textColor={
-              opts.destructive ? theme.colors.error : theme.colors.primary
-            }
-          >
-            {opts.confirmLabel}
-          </AppButton>
-        </Dialog.Actions>
-      </Dialog>
-    </Portal>
+    <AppSheet
+      visible={open && !!opts}
+      onDismiss={() => finish(false)}
+      title={opts?.title || "Confirm"}
+      footer={
+        opts ? (
+          <View style={{ gap: 8 }}>
+            <AppButton
+              mode="contained"
+              onPress={() => finish(true)}
+              textColor={
+                opts.destructive ? theme.colors.error : undefined
+              }
+            >
+              {opts.confirmLabel}
+            </AppButton>
+            <AppButton mode="outlined" onPress={() => finish(false)}>
+              {opts.cancelLabel}
+            </AppButton>
+          </View>
+        ) : null
+      }
+    >
+      {opts?.message ? (
+        <Text style={{ color: theme.colors.onSurfaceVariant, paddingTop: 4 }}>
+          {opts.message}
+        </Text>
+      ) : null}
+    </AppSheet>
   );
 }
-
-const styles = StyleSheet.create({
-  dialog: {
-    alignSelf: "center",
-    width: layout.modalMaxWidthSm,
-    maxWidth: "90%",
-    marginHorizontal: 24,
-    borderRadius: radius.lg,
-    ...(Platform.OS === "web"
-      ? {
-          boxSizing: "border-box",
-        }
-      : null),
-  },
-});

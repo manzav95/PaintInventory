@@ -1432,6 +1432,7 @@ export default function ItemDetailScreen({
                       itemId={String(item.id)}
                       itemType={type}
                       isAdmin={isAdmin}
+                      readOnly
                     />
                   ) : null}
                   {lastScannedLine}
@@ -1580,6 +1581,7 @@ export default function ItemDetailScreen({
                       itemId={String(item.id)}
                       itemType={type}
                       isAdmin={isAdmin}
+                      readOnly
                     />
                   ) : null}
                   {lastScannedLine}

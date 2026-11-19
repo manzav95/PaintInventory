@@ -10,6 +10,8 @@ import {
 import { Text, TextInput, useTheme } from "react-native-paper";
 import PageHeader from "../components/PageHeader";
 import AppButton from "../components/ui/AppButton";
+import SwipeableRow from "../components/ui/SwipeableRow";
+import { useAppLayout } from "../utils/layout";
 import OutlinedSearchInput from "../components/OutlinedSearchInput";
 import SafetyDocsPanel from "../components/SafetyDocsPanel";
 import ItemDocService from "../services/itemDocService";
@@ -50,6 +52,7 @@ export default function DataSheetsScreen({
   onBack,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const [counts, setCounts] = useState({});
   const [extras, setExtras] = useState([]);
   const [linkedItems, setLinkedItems] = useState([]);
@@ -282,9 +285,28 @@ export default function DataSheetsScreen({
           )}
         </View>
 
-        <Text style={[styles.overviewTitle, { color: theme.colors.onSurface }]}>
-          {selectedTitle}
-        </Text>
+        <View style={styles.sectionHead}>
+          <Text
+            style={[styles.overviewTitle, { color: theme.colors.onSurface }]}
+          >
+            {selectedTitle}
+          </Text>
+          {selected.kind === "extra" && isAdmin ? (
+            <AppButton
+              mode="outlined"
+              compact
+              textColor={theme.colors.error}
+              onPress={() => {
+                const extra = extras.find(
+                  (row) => String(row.id) === String(selected.extraId),
+                );
+                if (extra) removeExtra(extra);
+              }}
+            >
+              Remove
+            </AppButton>
+          ) : null}
+        </View>
         {selected.kind === "type" ? (
           <SafetyDocsPanel
             key={`type-${selected.itemType}`}
@@ -318,8 +340,8 @@ export default function DataSheetsScreen({
           ) : null}
         </View>
         <View style={styles.chipWrap}>
-          {extras.map((extra) =>
-            renderCard(
+          {extras.map((extra) => {
+            const card = renderCard(
               `extra-${extra.id}`,
               extra.name,
               extra.counts,
@@ -332,8 +354,23 @@ export default function DataSheetsScreen({
                   title: extra.name,
                 }),
               () => removeExtra(extra),
-            ),
-          )}
+            );
+            if (!isAdmin || !isMobilePortrait) return card;
+            return (
+              <SwipeableRow
+                key={`extra-swipe-${extra.id}`}
+                style={{ width: boxW }}
+                leftAction={{
+                  key: "delete",
+                  label: "Delete",
+                  tone: "danger",
+                  onPress: () => removeExtra(extra),
+                }}
+              >
+                {card}
+              </SwipeableRow>
+            );
+          })}
           {linkedItems.map((item) =>
             renderCard(
               `item-${item.itemId}`,

@@ -8,7 +8,15 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { Text, IconButton, Divider, useTheme, ActivityIndicator } from "react-native-paper";
+import {
+  Text,
+  IconButton,
+  Divider,
+  useTheme,
+  ActivityIndicator,
+} from "react-native-paper";
+import AppButton from "./ui/AppButton";
+import AppSheet, { SheetChoiceRow } from "./ui/AppSheet";
 import downloadBlob, {
   blobForView,
   isPreviewable,
@@ -17,6 +25,8 @@ import ItemDocService from "../services/itemDocService";
 import { SAFETY_DOC_KINDS, kindLabel } from "../utils/safetyDocKinds";
 import { getMaterialTypeLabel } from "../utils/materialTypes";
 import showToast from "../utils/showToast";
+import { popupSurfaceColor } from "../utils/themeColors";
+import { useAppLayout } from "../utils/layout";
 
 const PANEL_WIDTH = 280;
 
@@ -63,6 +73,10 @@ function MenuRow({ title, detail, disabled, onPress, theme }) {
   );
 }
 
+/**
+ * Data sheets for an inventory item.
+ * Caret popup on desktop / landscape; bottom sheet on phone portrait.
+ */
 export default function ItemDataSheetsPopover({
   visible,
   anchor = { pageX: 0, pageY: 0 },
@@ -70,6 +84,7 @@ export default function ItemDataSheetsPopover({
   onClose,
 }) {
   const theme = useTheme();
+  const { isMobilePortrait } = useAppLayout();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [view, setView] = useState("menu");
   const [pickedKind, setPickedKind] = useState("");
@@ -77,6 +92,7 @@ export default function ItemDataSheetsPopover({
   const [typeFiles, setTypeFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
+  const panelFill = popupSurfaceColor(theme);
 
   const itemId = item?.id != null ? String(item.id) : "";
   const itemType = String(item?.type || "").toLowerCase();
@@ -205,7 +221,10 @@ export default function ItemDataSheetsPopover({
       margin,
       Math.min(x - panelWidth / 2, windowWidth - panelWidth - margin),
     );
-    const caretLeft = Math.max(12, Math.min(x - left - caretSize, panelWidth - 24));
+    const caretLeft = Math.max(
+      12,
+      Math.min(x - left - caretSize, panelWidth - 24),
+    );
     if (placement === "above") {
       return {
         placement,
@@ -224,217 +243,287 @@ export default function ItemDataSheetsPopover({
     };
   }, [anchor?.pageX, anchor?.pageY, panelWidth, windowWidth, windowHeight]);
 
-  if (!visible) return null;
-
-  const above = panelPos.placement === "above";
   const pickedList = filesForKind(pickedKind);
-  const panelFill = theme.colors.surfaceContainerHighest;
 
-  return (
-    <>
-      <Modal
-        visible={visible && !preview}
-        transparent
-        animationType="fade"
-        onRequestClose={onClose}
-      >
-        <View style={styles.modalRoot}>
-          <Pressable
-            style={styles.backdrop}
-            onPress={onClose}
-            accessibilityLabel="Dismiss"
+  const menuBody = loading ? (
+    <ActivityIndicator style={{ marginVertical: 16 }} />
+  ) : view === "files" ? (
+    <View>
+      {pickedList.map((file, idx) => (
+        <React.Fragment key={file.id}>
+          {idx > 0 ? <Divider /> : null}
+          <MenuRow
+            theme={theme}
+            title={file.filename}
+            detail={file.source === "type" ? `${typeLabel} sheet` : null}
+            onPress={() => viewFile(file)}
           />
-          <View
-            style={[
-              styles.panelAnchor,
-              {
-                left: panelPos.left,
-                width: panelWidth,
-                pointerEvents: "box-none",
-                ...(above ? { bottom: panelPos.bottom } : { top: panelPos.top }),
-              },
-            ]}
-          >
-            {!above ? (
-              <>
-                <View
-                  style={[
-                    styles.caret,
-                    {
-                      left: panelPos.caretLeft,
-                      borderBottomColor: theme.colors.outlineVariant,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.caretInner,
-                    {
-                      left: panelPos.caretLeft + 1,
-                      borderBottomColor: panelFill,
-                    },
-                  ]}
-                />
-              </>
-            ) : null}
+        </React.Fragment>
+      ))}
+    </View>
+  ) : availableKinds.length === 0 ? (
+    <Text style={[styles.empty, { color: theme.colors.onSurfaceVariant }]}>
+      No data sheets available
+    </Text>
+  ) : isMobilePortrait ? (
+    <SheetChoiceRow
+      theme={theme}
+      items={availableKinds.map((meta) => ({
+        key: meta.key,
+        title: meta.label,
+        onPress: () => openKind(meta.key),
+      }))}
+    />
+  ) : (
+    <View>
+      {availableKinds.map((meta, idx) => {
+        const list = filesForKind(meta.key);
+        const fromType = list.every((f) => f.source === "type");
+        return (
+          <React.Fragment key={meta.key}>
+            {idx > 0 ? <Divider /> : null}
+            <MenuRow
+              theme={theme}
+              title={meta.label}
+              detail={
+                fromType
+                  ? `${typeLabel} ${meta.label}`
+                  : list.length === 1
+                    ? list[0].filename
+                    : `${list.length} files`
+              }
+              onPress={() => openKind(meta.key)}
+            />
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+
+  const previewFrame = (
+    <View style={styles.previewFill}>
+      {preview?.mime?.startsWith("image/") ? (
+        <Image
+          source={{ uri: preview.url }}
+          style={styles.previewImage}
+          resizeMode="contain"
+        />
+      ) : Platform.OS === "web" && preview?.url ? (
+        <iframe
+          src={preview.url}
+          title={preview.filename}
+          style={{
+            flex: 1,
+            width: "100%",
+            height: "100%",
+            border: "none",
+            background: "#fff",
+          }}
+        />
+      ) : null}
+    </View>
+  );
+
+  const menuSheet = isMobilePortrait ? (
+    <AppSheet
+      visible={visible && !preview}
+      onDismiss={onClose}
+      title={view === "files" ? kindLabel(pickedKind) : "Data sheets"}
+    >
+      {view === "files" ? (
+        <AppButton
+          mode="text"
+          compact
+          onPress={() => {
+            setView("menu");
+            setPickedKind("");
+          }}
+        >
+          Back
+        </AppButton>
+      ) : null}
+      {menuBody}
+    </AppSheet>
+  ) : visible ? (
+    <Modal
+      visible={visible && !preview}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityLabel="Dismiss"
+        />
+        {(() => {
+          const above = panelPos.placement === "above";
+          return (
             <View
               style={[
-                styles.panel,
+                styles.panelAnchor,
                 {
-                  backgroundColor: panelFill,
-                  borderColor: theme.colors.outlineVariant,
-                  maxHeight: panelPos.maxHeight,
+                  left: panelPos.left,
+                  width: panelWidth,
+                  pointerEvents: "box-none",
+                  ...(above
+                    ? { bottom: panelPos.bottom }
+                    : { top: panelPos.top }),
                 },
               ]}
             >
-              <View style={styles.panelHeader}>
-                {view === "files" ? (
-                  <IconButton
-                    icon="arrow-left"
-                    size={18}
-                    onPress={() => {
-                      setView("menu");
-                      setPickedKind("");
-                    }}
-                    style={styles.headerBtn}
-                    accessibilityLabel="Back"
+              {!above ? (
+                <>
+                  <View
+                    style={[
+                      styles.caret,
+                      {
+                        left: panelPos.caretLeft,
+                        borderBottomColor: theme.colors.outlineVariant,
+                      },
+                    ]}
                   />
-                ) : (
-                  <View style={styles.headerBtnSpacer} />
-                )}
-                <Text
-                  style={[styles.title, { color: theme.colors.onSurface }]}
-                  numberOfLines={1}
-                >
-                  {view === "files" ? kindLabel(pickedKind) : "Data sheets"}
-                </Text>
-                <IconButton
-                  icon="close"
-                  size={18}
-                  onPress={onClose}
-                  style={styles.headerBtn}
-                  accessibilityLabel="Close"
-                />
+                  <View
+                    style={[
+                      styles.caretInner,
+                      {
+                        left: panelPos.caretLeft + 1,
+                        borderBottomColor: panelFill,
+                      },
+                    ]}
+                  />
+                </>
+              ) : null}
+              <View
+                style={[
+                  styles.panel,
+                  {
+                    backgroundColor: panelFill,
+                    borderColor: theme.colors.outlineVariant,
+                    maxHeight: panelPos.maxHeight,
+                  },
+                ]}
+              >
+                <View style={styles.panelHeader}>
+                  {view === "files" ? (
+                    <IconButton
+                      icon="arrow-left"
+                      size={18}
+                      onPress={() => {
+                        setView("menu");
+                        setPickedKind("");
+                      }}
+                      style={styles.headerBtn}
+                      accessibilityLabel="Back"
+                    />
+                  ) : (
+                    <View style={styles.headerBtnSpacer} />
+                  )}
+                  <Text
+                    style={[styles.title, { color: theme.colors.onSurface }]}
+                    numberOfLines={1}
+                  >
+                    {view === "files" ? kindLabel(pickedKind) : "Data sheets"}
+                  </Text>
+                  <IconButton
+                    icon="close"
+                    size={18}
+                    onPress={onClose}
+                    style={styles.headerBtn}
+                    accessibilityLabel="Close"
+                  />
+                </View>
+                {menuBody}
               </View>
-              {loading ? (
-                <ActivityIndicator style={{ marginVertical: 16 }} />
-              ) : view === "files" ? (
-                <View>
-                  {pickedList.map((file, idx) => (
-                    <React.Fragment key={file.id}>
-                      {idx > 0 ? <Divider /> : null}
-                      <MenuRow
-                        theme={theme}
-                        title={file.filename}
-                        detail={
-                          file.source === "type" ? `${typeLabel} sheet` : null
-                        }
-                        onPress={() => viewFile(file)}
-                      />
-                    </React.Fragment>
-                  ))}
-                </View>
-              ) : availableKinds.length === 0 ? (
-                <Text
-                  style={[
-                    styles.empty,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  No data sheets available
-                </Text>
-              ) : (
-                <View>
-                  {availableKinds.map((meta, idx) => {
-                    const list = filesForKind(meta.key);
-                    const fromType = list.every((f) => f.source === "type");
-                    return (
-                      <React.Fragment key={meta.key}>
-                        {idx > 0 ? <Divider /> : null}
-                        <MenuRow
-                          theme={theme}
-                          title={meta.label}
-                          detail={
-                            fromType
-                              ? `${typeLabel} ${meta.label}`
-                              : list.length === 1
-                                ? list[0].filename
-                                : `${list.length} files`
-                          }
-                          onPress={() => openKind(meta.key)}
-                        />
-                      </React.Fragment>
-                    );
-                  })}
-                </View>
-              )}
+              {above ? (
+                <>
+                  <View
+                    style={[
+                      styles.caretDownInner,
+                      {
+                        left: panelPos.caretLeft + 1,
+                        borderTopColor: panelFill,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.caretDown,
+                      {
+                        left: panelPos.caretLeft,
+                        borderTopColor: theme.colors.outlineVariant,
+                      },
+                    ]}
+                  />
+                </>
+              ) : null}
             </View>
-            {above ? (
-              <>
-                <View
-                  style={[
-                    styles.caretDownInner,
-                    {
-                      left: panelPos.caretLeft + 1,
-                      borderTopColor: panelFill,
-                    },
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.caretDown,
-                    {
-                      left: panelPos.caretLeft,
-                      borderTopColor: theme.colors.outlineVariant,
-                    },
-                  ]}
-                />
-              </>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
+          );
+        })()}
+      </View>
+    </Modal>
+  ) : null;
 
-      <Modal
-        visible={!!preview}
-        animationType="fade"
-        onRequestClose={closePreview}
+  const previewUi = isMobilePortrait ? (
+    <AppSheet
+      visible={!!preview}
+      onDismiss={closePreview}
+      title={preview?.filename || "Data sheet"}
+      snap
+      scroll={false}
+      footer={
+        preview?.blob ? (
+          <AppButton
+            mode="contained"
+            onPress={() => downloadBlob(preview.blob, preview.filename)}
+          >
+            Download
+          </AppButton>
+        ) : null
+      }
+    >
+      {previewFrame}
+    </AppSheet>
+  ) : (
+    <Modal
+      visible={!!preview}
+      animationType="fade"
+      onRequestClose={closePreview}
+    >
+      <View
+        style={[
+          styles.previewRoot,
+          { backgroundColor: theme.colors.background },
+        ]}
       >
-        <View
-          style={[
-            styles.previewRoot,
-            { backgroundColor: theme.colors.background },
-          ]}
-        >
-          <View style={[styles.previewBar, { backgroundColor: panelFill }]}>
-            <Text
-              style={[styles.previewTitle, { color: theme.colors.onSurface }]}
-              numberOfLines={1}
+        <View style={[styles.previewBar, { backgroundColor: panelFill }]}>
+          <Text
+            style={[styles.previewTitle, { color: theme.colors.onSurface }]}
+            numberOfLines={1}
+          >
+            {preview?.filename || "Data sheet"}
+          </Text>
+          {preview?.blob ? (
+            <AppButton
+              mode="outlined"
+              compact
+              onPress={() => downloadBlob(preview.blob, preview.filename)}
             >
-              {preview?.filename || "Data sheet"}
-            </Text>
-            <IconButton icon="close" onPress={closePreview} />
-          </View>
-          {preview?.mime?.startsWith("image/") ? (
-            <Image
-              source={{ uri: preview.url }}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
-          ) : Platform.OS === "web" && preview?.url ? (
-            <iframe
-              src={preview.url}
-              title={preview.filename}
-              style={{
-                flex: 1,
-                width: "100%",
-                border: "none",
-                background: "#fff",
-              }}
-            />
+              Download
+            </AppButton>
           ) : null}
+          <IconButton icon="close" onPress={closePreview} />
         </View>
-      </Modal>
+        {previewFrame}
+      </View>
+    </Modal>
+  );
+
+  return (
+    <>
+      {menuSheet}
+      {previewUi}
     </>
   );
 }
@@ -553,5 +642,6 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
   },
   previewTitle: { flex: 1, fontSize: 14, fontWeight: "700" },
+  previewFill: { flex: 1, minHeight: 0, width: "100%" },
   previewImage: { flex: 1, width: "100%" },
 });

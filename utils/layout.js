@@ -68,6 +68,9 @@ export function useAppLayout() {
   const { width, height } = useWindowDimensions();
   const isWeb = Platform.OS === "web";
   const isLandscape = width > height;
+  /** Phone-sized portrait only — bottom sheets, not iPad/desktop/landscape. */
+  const isMobilePortrait =
+    width < DESKTOP_BREAKPOINT && height >= width;
   const isPrimaryTouch = useIsPrimaryTouchDevice();
   const showPersistentSidebar =
     (isWeb && width >= DESKTOP_BREAKPOINT) ||
@@ -91,6 +94,7 @@ export function useAppLayout() {
     height,
     isWeb,
     isLandscape,
+    isMobilePortrait,
     isPrimaryTouch,
     showPersistentSidebar,
     isPortraitStack,
