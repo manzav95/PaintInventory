@@ -842,12 +842,20 @@ export default function StainFormulasScreen({
               <FormulaThumb
                 formulaId={row.id}
                 imageId={row.primaryImageId}
-                onPress={(uri) =>
-                  setListZoom({
-                    uri,
-                    title: row.formulaNumber || row.colorName || "Formula",
-                  })
-                }
+                onPress={async () => {
+                  try {
+                    const uri = await StainFormulaService.fetchImageUrl(
+                      row.id,
+                      row.primaryImageId,
+                    );
+                    setListZoom({
+                      uri,
+                      title: row.formulaNumber || row.colorName || "Formula",
+                    });
+                  } catch {
+                    /* keep list usable if the full photo fails */
+                  }
+                }}
               />
             </View>
           ))}
@@ -909,7 +917,7 @@ function FormulaThumb({ formulaId, imageId, onPress }) {
   useEffect(() => {
     let cancelled = false;
     if (!imageId) return undefined;
-    StainFormulaService.fetchImageUrl(formulaId, imageId)
+    StainFormulaService.fetchThumbUrl(formulaId, imageId)
       .then((url) => {
         if (!cancelled) setUri(url);
       })
@@ -930,7 +938,7 @@ function FormulaThumb({ formulaId, imageId, onPress }) {
   if (!onPress) return img;
   return (
     <Pressable
-      onPress={() => onPress(uri)}
+      onPress={() => onPress()}
       accessibilityRole="imagebutton"
       accessibilityLabel="View formula photo"
     >

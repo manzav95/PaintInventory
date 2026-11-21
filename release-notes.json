@@ -1,10 +1,7 @@
 {
   "changes": [
-    "Tap an inventory item for Transactions, Data sheets, and Edit. Holding is no longer needed.",
-    "On a phone held upright, swipe an item left for Sheets or right for Edit. The label grows, then pops when it will take.",
-    "Tap a color chip to see it large. The screen blurs; tap outside to close.",
-    "Stain chips show a wood-grain hint. That color is only approximate.",
-    "Receive PO slides up from the bottom on a phone. Open a PO to see gallons still needed.",
-    "On Data sheets, swipe left to view or right to delete (admin)."
+    "Formula list cards show a small photo thumb, not the full picture.",
+    "Tap a formula photo to open the full-size image.",
+    "New formula photos store a thumb when you upload, so the list stays light."
   ]
 }

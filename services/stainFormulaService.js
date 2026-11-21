@@ -36,6 +36,24 @@ function filenameFromDisposition(response) {
   return "";
 }
 
+const thumbUrlCache = new Map();
+const imageUrlCache = new Map();
+
+async function blobUrl(url, cache) {
+  if (cache.has(url)) return cache.get(url);
+  const pending = (async () => {
+    const response = await fetch(url, { headers: authHeaders() });
+    if (!response.ok) throw new Error("Image failed");
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  })().catch((error) => {
+    cache.delete(url);
+    throw error;
+  });
+  cache.set(url, pending);
+  return pending;
+}
+
 function toQuery(params) {
   const search = new URLSearchParams();
   Object.entries(params || {}).forEach(([key, value]) => {
@@ -112,13 +130,16 @@ const StainFormulaService = {
     return _fetch(`/api/stain-formulas/${id}/images/${imageId}`, { method: "DELETE" });
   },
   async fetchImageUrl(formulaId, imageId) {
-    const response = await fetch(
+    return blobUrl(
       `${API_URL}/api/stain-formulas/${formulaId}/images/${imageId}`,
-      { headers: authHeaders() },
+      imageUrlCache,
     );
-    if (!response.ok) throw new Error("Image failed");
-    const blob = await response.blob();
-    return URL.createObjectURL(blob);
+  },
+  async fetchThumbUrl(formulaId, imageId) {
+    return blobUrl(
+      `${API_URL}/api/stain-formulas/${formulaId}/images/${imageId}/thumb`,
+      thumbUrlCache,
+    );
   },
   async fetchPdf(formulaId) {
     const response = await fetch(`${API_URL}/api/stain-formulas/${formulaId}/pdf`, {

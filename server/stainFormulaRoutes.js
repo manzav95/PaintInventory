@@ -311,12 +311,15 @@ function registerStainFormulaRoutes(app, db) {
           );
           if (isImage(decoded.filename)) {
             const mime = /\.png$/i.test(decoded.filename) ? "image/png" : "image/jpeg";
-            await pool.query(
-              `INSERT INTO stain_formula_images
-               (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
-               VALUES ($1, $2, $3, $4, TRUE, $5, 0)`,
-              [saved.formula.id, "", mime, decoded.buffer, session.userName],
-            );
+            await store.insertFormulaImage(pool, {
+              formulaId: saved.formula.id,
+              caption: "",
+              mime,
+              bytes: decoded.buffer,
+              isPrimary: true,
+              uploadedBy: session.userName,
+              sortIndex: 0,
+            });
             await pool.query(
               `INSERT INTO stain_formula_notes (formula_id, body, category, pinned, critical, author_user)
                VALUES ($1, $2, 'general', FALSE, FALSE, $3)`,
@@ -328,12 +331,15 @@ function registerStainFormulaRoutes(app, db) {
             const images = await workbookImages(decoded.buffer);
             for (let index = 0; index < images.length; index += 1) {
               const image = images[index];
-              await pool.query(
-                `INSERT INTO stain_formula_images
-                 (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [saved.formula.id, "From Excel", image.mime, image.bytes, index === 0, session.userName, index],
-              );
+              await store.insertFormulaImage(pool, {
+                formulaId: saved.formula.id,
+                caption: "From Excel",
+                mime: image.mime,
+                bytes: image.bytes,
+                isPrimary: index === 0,
+                uploadedBy: session.userName,
+                sortIndex: index,
+              });
             }
             if (images.length) {
               saved.formula = await store.getFormula(pool, saved.formula.id);
@@ -545,6 +551,46 @@ function registerStainFormulaRoutes(app, db) {
     }
   });
 
+  app.get("/api/stain-formulas/:id/images/:imageId/thumb", async (req, res) => {
+    try {
+      if (!(await requireUser(req, res))) return;
+      const formulaId = Number(req.params.id);
+      const imageId = Number(req.params.imageId);
+      const result = await pool.query(
+        `SELECT thumb_mime, thumb_bytes FROM stain_formula_images WHERE id = $1 AND formula_id = $2`,
+        [imageId, formulaId],
+      );
+      const row = result.rows[0];
+      if (!row) return res.status(404).end();
+      let mime = row.thumb_mime;
+      let bytes = row.thumb_bytes;
+      if (!bytes) {
+        const full = await pool.query(
+          `SELECT bytes FROM stain_formula_images WHERE id = $1 AND formula_id = $2`,
+          [imageId, formulaId],
+        );
+        if (!full.rows[0]?.bytes) return res.status(404).end();
+        try {
+          const { makeFormulaThumb } = require("./formulaImageThumb");
+          const thumb = await makeFormulaThumb(full.rows[0].bytes);
+          mime = thumb.mime;
+          bytes = thumb.bytes;
+          await pool.query(
+            `UPDATE stain_formula_images SET thumb_bytes = $2, thumb_mime = $3 WHERE id = $1 AND formula_id = $4`,
+            [imageId, bytes, mime, formulaId],
+          );
+        } catch {
+          return res.status(404).end();
+        }
+      }
+      res.set("Content-Type", mime || "image/jpeg");
+      res.set("Cache-Control", "private, max-age=86400");
+      res.send(bytes);
+    } catch (error) {
+      res.status(500).end();
+    }
+  });
+
   app.get("/api/stain-formulas/:id/images/:imageId", async (req, res) => {
     try {
       if (!(await requireUser(req, res))) return;
@@ -577,12 +623,15 @@ function registerStainFormulaRoutes(app, db) {
       if (makePrimary) {
         await pool.query(`UPDATE stain_formula_images SET is_primary = FALSE WHERE formula_id = $1`, [Number(req.params.id)]);
       }
-      const inserted = await pool.query(
-        `INSERT INTO stain_formula_images (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
-         VALUES ($1, $2, $3, $4, $5, $6, 1000) RETURNING id, caption, mime, is_primary, uploaded_by, created_at`,
-        [Number(req.params.id), caption, mime, decoded.buffer, false, session.userName],
-      );
-      const row = inserted.rows[0];
+      const row = await store.insertFormulaImage(pool, {
+        formulaId: Number(req.params.id),
+        caption,
+        mime,
+        bytes: decoded.buffer,
+        isPrimary: false,
+        uploadedBy: session.userName,
+        sortIndex: 1000,
+      });
       if (makePrimary) {
         await store.setPrimaryImage(pool, Number(req.params.id), row.id);
         row.is_primary = true;
@@ -650,12 +699,15 @@ function registerStainFormulaRoutes(app, db) {
             `SELECT id FROM stain_formula_images WHERE formula_id = $1 LIMIT 1`,
             [formulaId],
           );
-          await pool.query(
-            `INSERT INTO stain_formula_images
-             (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index)
-             VALUES ($1, $2, $3, $4, $5, $6, 50)`,
-            [formulaId, "Toner or glaze photo", mime, decoded.buffer, existing.rowCount === 0, session.userName],
-          );
+          await store.insertFormulaImage(pool, {
+            formulaId,
+            caption: "Toner or glaze photo",
+            mime,
+            bytes: decoded.buffer,
+            isPrimary: existing.rowCount === 0,
+            uploadedBy: session.userName,
+            sortIndex: 50,
+          });
         }
       }
       res.json(await store.getFormula(pool, formulaId));

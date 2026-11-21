@@ -5,6 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { parseStainExcelBuffer, classificationFromNumber } = require("./stainFormulaParse");
 const { productLabel } = require("./colorantCatalog");
+const { makeFormulaThumb } = require("./formulaImageThumb");
 
 const SPECIES = [
   "White Oak",
@@ -142,6 +143,9 @@ async function ensureStainTables(pool) {
   await pool.query(`ALTER TABLE stain_formula_revisions ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE stain_formulas ADD COLUMN IF NOT EXISTS important_fields JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await pool.query(`ALTER TABLE stain_formula_images ADD COLUMN IF NOT EXISTS sort_index INTEGER NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE stain_formula_images ADD COLUMN IF NOT EXISTS thumb_bytes BYTEA`);
+  await pool.query(`ALTER TABLE stain_formula_images ADD COLUMN IF NOT EXISTS thumb_mime TEXT`);
+  await backfillFormulaThumbs(pool);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS stain_color_links (
       id SERIAL PRIMARY KEY,
@@ -659,6 +663,71 @@ async function linkColors(pool, left, right, userName) {
   return { success: true, linkedNumbers: await linkedNumbers(pool, left) };
 }
 
+async function insertFormulaImage(pool, {
+  formulaId,
+  caption = "",
+  mime = "image/jpeg",
+  bytes,
+  isPrimary = false,
+  uploadedBy = "",
+  sortIndex = 1000,
+}) {
+  let thumbBytes = null;
+  let thumbMime = null;
+  try {
+    const thumb = await makeFormulaThumb(bytes);
+    thumbBytes = thumb.bytes;
+    thumbMime = thumb.mime;
+  } catch (error) {
+    console.error("formula thumb:", error.message);
+  }
+  const inserted = await pool.query(
+    `INSERT INTO stain_formula_images
+     (formula_id, caption, mime, bytes, is_primary, uploaded_by, sort_index, thumb_bytes, thumb_mime)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, caption, mime, is_primary, uploaded_by, created_at`,
+    [
+      formulaId,
+      String(caption || "").slice(0, 240),
+      mime || "image/jpeg",
+      bytes,
+      !!isPrimary,
+      uploadedBy || "",
+      sortIndex,
+      thumbBytes,
+      thumbMime,
+    ],
+  );
+  return inserted.rows[0];
+}
+
+async function backfillFormulaThumbs(pool) {
+  const missing = await pool.query(
+    `SELECT id FROM stain_formula_images WHERE thumb_bytes IS NULL`,
+  );
+  if (!missing.rowCount) return;
+  let done = 0;
+  for (const row of missing.rows) {
+    try {
+      const full = await pool.query(
+        `SELECT bytes FROM stain_formula_images WHERE id = $1`,
+        [row.id],
+      );
+      const bytes = full.rows[0]?.bytes;
+      if (!bytes) continue;
+      const thumb = await makeFormulaThumb(bytes);
+      await pool.query(
+        `UPDATE stain_formula_images SET thumb_bytes = $2, thumb_mime = $3 WHERE id = $1`,
+        [row.id, thumb.bytes, thumb.mime],
+      );
+      done += 1;
+    } catch (error) {
+      console.error("formula thumb backfill", row.id, error.message);
+    }
+  }
+  console.log(`Backfilled ${done} formula photo thumbs`);
+}
+
 async function setPrimaryImage(pool, formulaId, imageId) {
   const images = await pool.query(
     `SELECT id FROM stain_formula_images
@@ -1107,6 +1176,8 @@ module.exports = {
   linkColors,
   unlinkColors,
   appendFormulaSteps,
+  insertFormulaImage,
+  backfillFormulaThumbs,
   setPrimaryImage,
   comparableStepType,
   stepSignature,
