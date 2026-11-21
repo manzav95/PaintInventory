@@ -27,7 +27,7 @@ import * as MailComposer from "expo-mail-composer";
 import * as FileSystem from "expo-file-system/legacy";
 import showToast from "../utils/showToast";
 import confirmAction from "../utils/confirmAction";
-import { space, radius } from "../theme/tokens";
+import { space, radius, colors, type, mutedTextColor } from "../theme/tokens";
 import { nestedSurfaceColor, popupSurfaceColor } from "../utils/themeColors";
 import { displayUserName } from "../utils/displayUserName";
 import {
@@ -67,6 +67,15 @@ function qtyLabel(ing) {
   const qty = ing.quantityText || "";
   const unit = ing.unit || "";
   return [qty, unit].filter(Boolean).join(" ");
+}
+
+function stepCardLayout(count, wide) {
+  if (!wide) return null;
+  const gap = space[3] || 10;
+  if (count <= 1) return { width: "100%", minWidth: 0 };
+  return Platform.OS === "web"
+    ? { width: `calc((100% - ${gap}px) / 2)`, minWidth: 0 }
+    : { flexGrow: 1, flexBasis: 0, minWidth: 0 };
 }
 
 function processTone(name) {
@@ -973,7 +982,6 @@ const HEADER_COLLAPSE = 140;
 function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embeddedInShell, onBack, onReject, onOpen, onCreated, onDuplicate }) {
   const creating = id == null;
   const seedRef = useRef(seed);
-  const { width: windowWidth } = useWindowDimensions();
   const [formula, setFormula] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(creating);
@@ -992,49 +1000,31 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   const [dupOpen, setDupOpen] = useState(false);
   const [dupNumber, setDupNumber] = useState("");
   const [headerCompact, setHeaderCompact] = useState(false);
+  const [titleColW, setTitleColW] = useState(0);
+  const [titleW, setTitleW] = useState(0);
+  const [descW, setDescW] = useState(0);
   const scrollY = useRef(new Animated.Value(0)).current;
-  const headerInward = Math.min(64, Math.max(28, windowWidth * 0.1));
-  const headerTitleShift = useMemo(
-    () =>
-      scrollY.interpolate({
-        inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [0, headerInward],
-        extrapolate: "clamp",
-      }),
-    [scrollY, headerInward],
-  );
-  const headerPhotoShift = useMemo(
-    () =>
-      scrollY.interpolate({
-        inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [0, -headerInward],
-        extrapolate: "clamp",
-      }),
-    [scrollY, headerInward],
-  );
-  const headerTitleSize = useMemo(
-    () =>
-      scrollY.interpolate({
-        inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [40, 22],
-        extrapolate: "clamp",
-      }),
-    [scrollY],
-  );
-  const headerTitleLine = useMemo(
-    () =>
-      scrollY.interpolate({
-        inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [46, 26],
-        extrapolate: "clamp",
-      }),
-    [scrollY],
-  );
+  const titleCenterShift = useMemo(() => {
+    const dest = Math.max(0, (titleColW - titleW) / 2);
+    return scrollY.interpolate({
+      inputRange: [0, HEADER_COLLAPSE * 0.35, HEADER_COLLAPSE],
+      outputRange: [0, dest * 0.55, dest],
+      extrapolate: "clamp",
+    });
+  }, [scrollY, titleColW, titleW]);
+  const descCenterShift = useMemo(() => {
+    const dest = Math.max(0, (titleColW - descW) / 2);
+    return scrollY.interpolate({
+      inputRange: [0, HEADER_COLLAPSE * 0.35, HEADER_COLLAPSE],
+      outputRange: [0, dest * 0.55, dest],
+      extrapolate: "clamp",
+    });
+  }, [scrollY, titleColW, descW]);
   const headerDescSize = useMemo(
     () =>
       scrollY.interpolate({
         inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [16, 13],
+        outputRange: [16, 11],
         extrapolate: "clamp",
       }),
     [scrollY],
@@ -1043,7 +1033,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
     () =>
       scrollY.interpolate({
         inputRange: [0, HEADER_COLLAPSE],
-        outputRange: [22, 18],
+        outputRange: [22, 14],
         extrapolate: "clamp",
       }),
     [scrollY],
@@ -1117,6 +1107,9 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   useEffect(() => {
     scrollY.setValue(0);
     setHeaderCompact(false);
+    setTitleColW(0);
+    setTitleW(0);
+    setDescW(0);
   }, [id, scrollY]);
 
   const runBusy = async (work) => {
@@ -1225,7 +1218,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
   );
   const viewFields = useMemo(
     () => [
-      ["Custom Number", "formulaNumber"],
       ["Wood Type", "woodType"],
       ["Species", "woodSpecies"],
       ["Sheen", "sheen"],
@@ -1238,7 +1230,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
     ],
     [],
   );
-  const largeFields = useMemo(() => new Set(["formulaNumber", "woodType", "woodSpecies", "sheen"]), []);
 
   const save = async (reviewStatus) => {
     if (busy) return;
@@ -1604,56 +1595,62 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                 { transform: [{ scale: headerNavScale }] },
               ]}
             >
-              <AppButton
-                compact
-                mode={editing ? "contained" : "outlined"}
+              <IconButton
+                icon={editing ? "content-save" : "pencil-outline"}
+                size={22}
+                mode={editing ? "contained" : undefined}
+                containerColor={editing ? colors.brand.buttonFill : undefined}
+                iconColor={editing ? colors.brand.onButton : theme.colors.onSurface}
                 onPress={() => (editing ? save() : setEditing(true))}
-              >
-                {editing ? "Save" : "Edit"}
-              </AppButton>
+                accessibilityLabel={editing ? "Save formula" : "Edit formula"}
+                style={styles.headerEditIcon}
+              />
             </Animated.View>
           ) : null}
         </View>
         <View style={styles.stickyTitleRow}>
-          <Animated.View
-            style={[
-              styles.headerCenter,
-              { transform: [{ translateX: headerTitleShift }] },
-            ]}
+          <View
+            style={styles.headerCenter}
+            onLayout={(event) => {
+              const next = Math.round(event.nativeEvent.layout.width);
+              setTitleColW((prev) => (prev === next ? prev : next));
+            }}
           >
-            <Animated.Text
-              style={[
-                styles.title,
-                {
-                  color: theme.colors.onSurface,
-                  fontSize: headerTitleSize,
-                  lineHeight: headerTitleLine,
-                },
-              ]}
+            <Animated.View
+              style={[styles.headerTitleSlide, { transform: [{ translateX: titleCenterShift }] }]}
+              onLayout={(event) => {
+                const next = Math.round(event.nativeEvent.layout.width);
+                setTitleW((prev) => (prev === next ? prev : next));
+              }}
             >
-              {colorTitle}
-            </Animated.Text>
+              <Text style={[styles.title, { color: theme.colors.onSurface }]}>
+                {colorTitle}
+              </Text>
+            </Animated.View>
             {colorSubtitle ? (
-              <Animated.Text
-                style={[
-                  styles.headerDescription,
-                  {
-                    color: theme.dark ? "#9aa4b2" : "#8b939e",
-                    fontSize: headerDescSize,
-                    lineHeight: headerDescLine,
-                  },
-                ]}
+              <Animated.View
+                style={[styles.headerTitleSlide, { transform: [{ translateX: descCenterShift }] }]}
+                onLayout={(event) => {
+                  const next = Math.round(event.nativeEvent.layout.width);
+                  setDescW((prev) => (prev === next ? prev : next));
+                }}
               >
-                {colorSubtitle}
-              </Animated.Text>
+                <Animated.Text
+                  style={[
+                    styles.headerDescription,
+                    {
+                      color: theme.dark ? "#9aa4b2" : "#8b939e",
+                      fontSize: headerDescSize,
+                      lineHeight: headerDescLine,
+                    },
+                  ]}
+                >
+                  {colorSubtitle}
+                </Animated.Text>
+              </Animated.View>
             ) : null}
-          </Animated.View>
-          <Animated.View
-            style={[
-              styles.headerPhotoSlot,
-              { width: headerPhotoW, transform: [{ translateX: headerPhotoShift }] },
-            ]}
-          >
+          </View>
+          <View style={styles.headerPhotoSlot}>
             <Animated.View
               style={[
                 styles.headerPhotoBox,
@@ -1717,7 +1714,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                 ) : null}
               </Animated.View>
             ) : null}
-          </Animated.View>
+          </View>
         </View>
         <Animated.View
           style={[styles.headerActionsFade, { opacity: headerActionsOp, maxHeight: headerActionsH }]}
@@ -1733,6 +1730,11 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             {isAdmin && id && onDuplicate ? (
               <AppButton compact mode="outlined" icon="content-copy" onPress={() => { setDupNumber(""); setDupOpen(true); }}>
                 Duplicate
+              </AppButton>
+            ) : null}
+            {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
+              <AppButton compact mode="contained" onPress={() => save("approved")}>
+                Approve
               </AppButton>
             ) : null}
           </View>
@@ -1801,9 +1803,6 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
           </View>
         ) : null}
         {creating && onReject ? <AppButton mode="outlined" onPress={onReject}>Reject</AppButton> : null}
-        {isAdmin && formula.reviewStatus !== "approved" && !(creating && seedRef.current?.duplicate) ? (
-          <AppButton mode="contained" onPress={() => save("approved")}>Approve</AppButton>
-        ) : null}
         <Text style={{ color: model.reviewStatus === "pending" ? "#e07a00" : model.reviewStatus === "needs_review" ? theme.colors.error : theme.colors.onSurfaceVariant, fontWeight: model.reviewStatus === "pending" ? "800" : "400" }}>
           {model.reviewStatus === "pending" ? "Pending · " : model.reviewStatus === "needs_review" ? "Needs Review · " : ""}
           {classificationLabel(model.classification)}
@@ -1849,14 +1848,14 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
             <Text key={warning} style={{ color: seedRef.current?.duplicate ? theme.colors.error : theme.colors.onSurfaceVariant, marginTop: 6 }}>{warning}</Text>
           ))
         )}
-        <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
+        <Text style={[styles.metaStamp, { color: mutedTextColor(theme) }]}>
           Original Date {formatDate(formula.formulaDate) || "—"} · Updated {formatWhen(formula.updatedAt)}
           {formula.updatedBy ? ` by ${displayUserName(formula.updatedBy)}` : ""}
         </Text>
         {editing ? (
           <View style={styles.metaGrid}>
             {editFields.slice(0, 3).map(([label, key]) => (
-              <TextInput key={key} mode="outlined" label={label} value={key === "formulaDate" ? formatDate(draft[key]) : String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
+              <TextInput key={key} mode="outlined" dense label={label} value={key === "formulaDate" ? formatDate(draft[key]) : String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
             ))}
             <View style={styles.field}>
               <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>Wood Type</Text>
@@ -1870,25 +1869,25 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
               />
             </View>
             {editFields.slice(3).map(([label, key]) => (
-              <TextInput key={key} mode="outlined" label={label} value={String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
+              <TextInput key={key} mode="outlined" dense label={label} value={String(draft[key] || "")} onChangeText={(v) => setDraft({ ...draft, [key]: v })} style={styles.field} />
             ))}
-            <TextInput mode="outlined" label="Special Notes" value={String(draft.specialNotes || "")} onChangeText={(v) => setDraft({ ...draft, specialNotes: v })} style={styles.field} multiline />
+            <TextInput mode="outlined" dense label="Special Notes" value={String(draft.specialNotes || "")} onChangeText={(v) => setDraft({ ...draft, specialNotes: v })} style={styles.field} multiline />
           </View>
         ) : (
-          <View>
-            {[viewFields.slice(0, 6), viewFields.slice(6)].map((group, groupIndex) => (
-              <View key={groupIndex === 0 ? "main" : "extra"}>
-                {groupIndex === 1 ? <View style={[styles.detailDivider, { backgroundColor: theme.colors.outlineVariant }]} /> : null}
-                <View style={styles.metaGrid}>
-                  {group.map(([label, key]) => (
-                    <View key={key} style={[styles.metaCard, { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface }]}>
-                      <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, fontWeight: "700" }}>{label}</Text>
-                      <Text style={{ color: theme.colors.onSurface, fontSize: largeFields.has(key) ? 22 : 16, fontWeight: "800", marginTop: 2 }}>
-                        {(key === "woodType" ? woodLabel(formula[key]) : formula[key]) || "—"}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
+          <View style={styles.metaGrid}>
+            {viewFields.map(([label, key]) => (
+              <View
+                key={key}
+                style={[
+                  styles.metaCard,
+                  wide ? styles.metaCardWide : null,
+                  { borderColor: theme.colors.outlineVariant, backgroundColor: theme.colors.surface },
+                ]}
+              >
+                <Text style={[type.label, { color: mutedTextColor(theme) }]}>{label}</Text>
+                <Text style={[styles.metaValue, { color: theme.colors.onSurface }]} numberOfLines={2}>
+                  {(key === "woodType" ? woodLabel(formula[key]) : formula[key]) || "—"}
+                </Text>
               </View>
             ))}
           </View>
@@ -1903,19 +1902,21 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
         ) : null}
         <Text style={[styles.section, { color: theme.colors.onSurface }]}>Formula Steps</Text>
         <View style={wide ? styles.stepGrid : null}>
-          {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex) => {
+          {(editing ? model.steps || [] : stepsForView(model.steps)).map((step, stepIndex, stepList) => {
             const tone = processTone(step.processName);
             const noteText = [step.importantNotes, step.notes].filter(Boolean).join("\n");
             const showNote = !!noteText.trim() || !!openNotes[stepIndex];
             const matches = step.matchedBy || [];
             const matchColors = matchPalette(theme);
-            const stepCount = (editing ? model.steps || [] : stepsForView(model.steps)).length;
+            const stepCount = stepList.length;
+            const stepTypeName = String(step.processName || "").trim() || tone.label;
             return (
               <View
                 key={`${step.stepNumber}-${stepIndex}`}
                 style={[
                   styles.card,
                   wide && styles.stepCard,
+                  stepCardLayout(stepCount, wide),
                   { borderColor: tone.color, backgroundColor: tone.soft, borderLeftWidth: 6 },
                 ]}
               >
@@ -1967,7 +1968,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                 ) : null}
                 <View style={styles.stepHead}>
                   <Text style={{ color: tone.color, fontWeight: "800", letterSpacing: 0.4, flex: 1 }}>
-                    {tone.label} · Step {step.stepNumber}
+                    Step {step.stepNumber}
                   </Text>
                   {editing ? (
                     <>
@@ -2014,7 +2015,7 @@ function FormulaDetail({ id, seed = null, isAdmin, userName, wide, theme, embedd
                 {editing ? (
                   <TextInput mode="outlined" label="Process" value={step.processName || ""} onChangeText={(v) => patchStep(stepIndex, { processName: v })} style={{ marginTop: 6, backgroundColor: theme.colors.surface }} />
                 ) : (
-                  <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 18, marginBottom: 8 }}>{step.processName || "—"}</Text>
+                  <Text style={{ color: theme.colors.onSurface, fontWeight: "800", fontSize: 22, lineHeight: 26, marginBottom: 8 }}>{stepTypeName}</Text>
                 )}
                 {(step.ingredients || []).map((ing, index) => {
                   if (editing) {
@@ -2301,10 +2302,16 @@ const styles = StyleSheet.create({
   headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   headerNavBack: { alignSelf: "flex-start", transformOrigin: "left center" },
   headerNavEdit: { alignSelf: "flex-end", transformOrigin: "right center" },
+  headerEditIcon: { margin: 0 },
   stickyTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  headerCenter: { flex: 1, alignItems: "flex-start", minWidth: 0 },
-  headerDescription: { fontSize: 16, lineHeight: 22, fontStyle: "italic", textAlign: "left", marginTop: 2 },
-  headerPhotoSlot: { alignItems: "center", flexShrink: 0 },
+  headerCenter: { flex: 1, alignItems: "flex-start", minWidth: 0, overflow: "visible" },
+  headerTitleSlide: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    ...(Platform.OS === "web" ? { width: "fit-content" } : null),
+  },
+  headerDescription: { fontSize: 16, lineHeight: 22, fontStyle: "italic", textAlign: "left", marginTop: 2, alignSelf: "flex-start" },
+  headerPhotoSlot: { alignItems: "center", flexShrink: 0, minWidth: 96 },
   headerPhotoBox: { borderRadius: 8, overflow: "hidden" },
   headerPhotoFill: { flex: 1 },
   headerPhotoEmpty: { borderWidth: 1, borderStyle: "dashed" },
@@ -2346,15 +2353,25 @@ const styles = StyleSheet.create({
   cardThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: "#1c2638" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   gridCard: { width: "48%" },
-  title: { fontSize: 40, fontWeight: "800", lineHeight: 46, textAlign: "left" },
+  title: { fontSize: 40, fontWeight: "800", lineHeight: 46, textAlign: "left", alignSelf: "flex-start" },
   section: { fontSize: 18, fontWeight: "800", marginTop: 16 },
-  metaGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  metaGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   detailDivider: { height: 1, width: "100%", marginTop: 16, marginBottom: 4 },
   meta: { width: "48%", marginTop: 8, fontSize: 14 },
-  metaCard: { width: "48%", marginTop: 8, borderWidth: 1, borderRadius: 10, padding: 10 },
+  metaStamp: { fontSize: 11, lineHeight: 14, marginTop: 2 },
+  metaCard: {
+    width: "48%",
+    flexGrow: 0,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  metaCardWide: { width: "31.5%", flexGrow: 0 },
+  metaValue: { fontSize: 13, lineHeight: 16, fontWeight: "700", marginTop: 1 },
   field: { width: "48%", marginTop: 8 },
   stepGrid: { flexDirection: "row", flexWrap: "wrap", gap: space[3] || 10 },
-  stepCard: { width: "31%", minWidth: 260 },
+  stepCard: { minWidth: 0 },
   ingLine: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 6 },
   ingRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6 },
   qty: { minWidth: 72, fontWeight: "800" },

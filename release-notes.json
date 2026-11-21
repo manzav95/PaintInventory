@@ -1,7 +1,9 @@
 {
   "changes": [
-    "Formula list cards show a small photo thumb, not the full picture.",
-    "Tap a formula photo to open the full-size image.",
-    "New formula photos store a thumb when you upload, so the list stays light."
+    "Formula list cards show a small photo, not the full picture.",
+    "The formula number stays large as you scroll and slides toward the center.",
+    "Edit is a pencil. Approve sits with Share and Download, and those buttons hide when you scroll.",
+    "Formula details are smaller. Custom number is only at the top.",
+    "Steps sit two across. Each card says Step 1, then Dye or Stain in large type."
   ]
 }
